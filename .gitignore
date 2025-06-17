@@ -27,3 +27,5 @@ eas-build-pre-upload.tar.gz
 /android/app/build
 /android/build
 /ios/build
+/android
+/ios
