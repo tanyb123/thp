@@ -1,9 +1,9 @@
 // Cấu hình xác thực cho các dịch vụ bên ngoài
 export const googleAuthConfig = {
-  // Client IDs from google-services.json
+  // Client IDs từ Google Cloud Console
   iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
-  androidClientId: '370615243912-u3amg1jcun5sj91p827ubcl1d9fo6fod.apps.googleusercontent.com',
-  webClientId: '370615243912-dba7q8srqj951u8864lf0cv0pku7n54n.apps.googleusercontent.com',
+  androidClientId: '370615243912-v7btvdq1e1b4min5snq7av9jpoe7lr10.apps.googleusercontent.com',
+  webClientId: '370615243912-fesvpqtf06r7ugj31ma1urmrii85m7at.apps.googleusercontent.com',
   
   // Các scopes mặc định cho Google Drive
   driveScopes: [
