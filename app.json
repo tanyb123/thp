@@ -34,7 +34,7 @@
       "expo-web-browser",
       "@react-native-google-signin/google-signin"
     ],
-    "scheme": "com.googleusercontent.apps.370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is",
+    "scheme": "com.tanhoaphat.thpapp",
     "extra": {
       "router": {},
       "eas": {

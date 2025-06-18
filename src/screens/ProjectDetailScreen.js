@@ -75,8 +75,8 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [debugInfo, setDebugInfo] = useState({});
   
-  // Sử dụng scheme cố định từ cấu hình và reversed client ID cho iOS
-  const REDIRECT_SCHEME = 'com.googleusercontent.apps.370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is';
+  // Sử dụng scheme cố định từ cấu hình cho Android
+  const REDIRECT_SCHEME = googleAuthConfig.redirectScheme;
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     // Sử dụng client IDs từ cấu hình
@@ -104,8 +104,8 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         request: {
           redirectUri: request.redirectUri,
           scopes: request.scopes,
-          iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
-          androidClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com'
+          iosClientId: googleAuthConfig.iosClientId,
+          androidClientId: googleAuthConfig.androidClientId
         }
       }));
       setIsAuthLoading(false); // Auth service is ready

@@ -17,7 +17,7 @@ export const googleAuthConfig = {
     'https://www.googleapis.com/auth/spreadsheets.readonly'
   ],
 
-  // Scheme cố định cho redirect URI
+  // Scheme cố định cho redirect URI - sử dụng package name cho Android
   redirectScheme: 'com.tanhoaphat.thpapp'
 };
 
