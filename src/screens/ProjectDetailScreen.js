@@ -75,28 +75,25 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [debugInfo, setDebugInfo] = useState({});
   
-  // This is the iOS URL Scheme copied from the Google Cloud Console for the Expo Go iOS Client ID.
-  // It's the REVERSED client ID.
-  const IOS_URL_SCHEME = 'com.googleusercontent.apps.370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is';
+  // Sử dụng scheme cố định từ cấu hình
+  const REDIRECT_SCHEME = googleAuthConfig.redirectScheme;
 
   const [request, response, promptAsync] = Google.useAuthRequest({
-    // Use the NATIVE iOS Client ID for Expo Go
-    iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
-
-    // Use the NATIVE Android Client ID (the one with the SHA-1)
-    androidClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
+    // Sử dụng client IDs từ cấu hình
+    iosClientId: googleAuthConfig.iosClientId,
+    androidClientId: googleAuthConfig.androidClientId,
+    webClientId: googleAuthConfig.webClientId,
     
-    scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+    scopes: googleAuthConfig.driveScopes,
     
-    // --- THE CRITICAL TRICK ---
-    // We manually construct the redirect URI that a real build would use.
-    redirectUri: `${IOS_URL_SCHEME}:/oauth2redirect/google`,
+    // Sử dụng scheme cố định từ cấu hình
+    redirectUri: `${REDIRECT_SCHEME}:/oauth2redirect/google`,
   });
   
   // Log để debug redirectUri và request object
   useEffect(() => {
     // Log manually constructed redirectUri
-    const manualRedirectUri = `${IOS_URL_SCHEME}:/oauth2redirect/google`;
+    const manualRedirectUri = `${REDIRECT_SCHEME}:/oauth2redirect/google`;
     console.log('Manual redirectUri:', manualRedirectUri);
     
     if (request) {
@@ -1183,7 +1180,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             <ScrollView style={styles.debugScrollView}>
               <Text style={styles.debugSectionTitle}>Auth Configuration:</Text>
               <Text style={styles.debugText}>
-                iOS URL Scheme: {IOS_URL_SCHEME}
+                iOS URL Scheme: {REDIRECT_SCHEME}
               </Text>
               
               {debugInfo.redirectUri && (
