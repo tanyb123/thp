@@ -1,0 +1,41 @@
+import React, { useEffect } from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { UIManager, Platform } from 'react-native';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { AuthProvider } from './src/contexts/AuthContext';
+import { ThemeProvider } from './src/contexts/ThemeContext';
+import AppNavigator from './src/navigation/AppNavigator';
+// Import để đảm bảo Firebase được khởi tạo trước
+import './src/config/firebaseConfig';
+
+// Kích hoạt LayoutAnimation trên Android
+if (Platform.OS === 'android') {
+  if (UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+}
+
+export default function App() {
+  useEffect(() => {
+    // Log để xác nhận App component đã mount
+    console.log('App component mounted');
+    
+    // Cấu hình GoogleSignin
+    GoogleSignin.configure({
+      // Web application client ID từ Google Cloud Console
+      webClientId: '370615243912-fesvpqtf06r7ugj31ma1urmrii85m7at.apps.googleusercontent.com',
+      // Yêu cầu quyền truy cập offline để có thể lấy refresh token
+      offlineAccess: true,
+    });
+  }, []);
+
+  return (
+    <SafeAreaProvider>
+      <AuthProvider>
+        <ThemeProvider>
+          <AppNavigator />
+        </ThemeProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
+  );
+} 

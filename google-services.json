@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "370615243912",
+    "project_id": "tanyb-fe4bf",
+    "storage_bucket": "tanyb-fe4bf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:370615243912:android:d67d2de459fb3df9af7b3d",
+        "android_client_info": {
+          "package_name": "com.tanhoaphat.thpapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "370615243912-u3amg1jcun5sj91p827ubcl1d9fo6fod.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.tanhoaphat.thpapp",
+            "certificate_hash": "f1d10a62fcc5b5bc99ae8963a9ee04d1c72a2fdb"
+          }
+        },
+        {
+          "client_id": "370615243912-dba7q8srqj951u8864lf0cv0pku7n54n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAM-kVP1SaJE8IzPBoTI-wee4YvCk5-570"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "370615243912-dba7q8srqj951u8864lf0cv0pku7n54n.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tanhoaphat.thpapp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

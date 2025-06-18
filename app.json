@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "thpapp",
+    "slug": "thpapp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.tanhoaphat.thpapp"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.tanhoaphat.thpapp",
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-splash-screen",
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "84e03b9f-1038-41e0-8152-5d13086ce063"
+      }
+    }
+    
+  }
+}
