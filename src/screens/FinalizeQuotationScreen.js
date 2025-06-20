@@ -9,15 +9,20 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import RNHTMLtoPDF from 'react-native-html-to-pdf';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getAuth } from 'firebase/auth';
-import { getQuotationHTML } from '../config/quotationHtmlTemplate';
 import { saveQuotation } from '../api/quotationService';
+// import * as Print from 'expo-print';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+
+// HTML2PDF API key
+// const HTML2PDF_API_KEY = 'Uvwhf4HC3SED5GIYlCx1F8A6jq2r3iJEt3FH8C16u1LprY5J5hBNXGIVfsLtqRxH';
+// const HTML2PDF_API_URL = 'https://api.html2pdf.app/v1/generate';
 
 // Hàm chuyển đổi số thành chữ tiếng Việt
 const convertNumberToWords = (number) => {
@@ -111,10 +116,16 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   const [quoteValidity, setQuoteValidity] = useState('7 ngày');
   const [deliveryTime, setDeliveryTime] = useState('15 ngày');
   const [notes, setNotes] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState('Thanh toán 50% giá trị đơn hàng khi ký hợp đồng, 50% còn lại khi nghiệm thu bàn giao.');
-  const [warrantyTerms, setWarrantyTerms] = useState('Bảo hành 12 tháng kể từ ngày nghiệm thu bàn giao cho các lỗi kỹ thuật.');
-  const [otherTerms, setOtherTerms] = useState('Báo giá có hiệu lực trong vòng 30 ngày kể từ ngày phát hành. Giá trên chưa bao gồm chi phí vận chuyển và lắp đặt nếu có.');
-  const [bankDetails, setBankDetails] = useState('Tên tài khoản: CÔNG TY TNHH THƯƠNG MẠI DỊCH VỤ XÂY DỰNG HOÀNG KHANG\nSố tài khoản: 123456789\nNgân hàng: Vietcombank - Chi nhánh TP. Hồ Chí Minh');
+  const [paymentTerms, setPaymentTerms] = useState(
+    'Đợt 1: Thanh toán 50% ngay sau khi ký hợp đồng.\nĐợt 2: Thanh toán 50% còn lại sau khi nghiệm thu và bàn giao.'
+  );
+  const [warrantyTerms, setWarrantyTerms] = useState(
+    'Bảo hành 12 tháng cho toàn bộ công trình.'
+  );
+  const [otherTerms, setOtherTerms] = useState('');
+  const [bankDetails, setBankDetails] = useState(
+    'Tên tài khoản: CÔNG TY TNHH ABC\nSố tài khoản: 123456789\nNgân hàng: Vietcombank - Chi nhánh XYZ'
+  );
   
   // State cho các giá trị tính toán
   const [discountAmount, setDiscountAmount] = useState(0);
@@ -124,8 +135,8 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   const [amountInWords, setAmountInWords] = useState('');
   
   // State cho quá trình tạo PDF
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [pdfLocalUri, setPdfLocalUri] = useState(null);
   
   // Tính toán lại các giá trị khi người dùng thay đổi đầu vào
   useEffect(() => {
@@ -153,39 +164,33 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
     setAmountInWords(convertNumberToWords(calculatedGrandTotal));
   }, [subTotal, discountPercentage, vatPercentage]);
   
-  // Hàm xử lý khi người dùng nhấn nút tạo PDF
-  const handleGeneratePDF = async () => {
+  const handleGenerateAndSave = async () => {
+    setIsLoading(true);
+    setPdfLocalUri(null); // Reset previous URI
+
     try {
-      setIsGenerating(true);
-      
-      // Check if RNHTMLtoPDF is available (will be null in Expo Go)
-      if (!RNHTMLtoPDF) {
-        Alert.alert(
-          "Lỗi",
-          "Không thể tạo PDF. Thư viện chưa được liên kết đúng cách. Vui lòng chạy trên Development Build.",
-          [
-            {
-              text: "OK",
-              onPress: () => setIsGenerating(false)
-            }
-          ]
-        );
-        return;
-      }
-      
-      // Get current user
       const auth = getAuth();
       const userId = auth.currentUser?.uid;
-      
+
       if (!userId) {
         Alert.alert('Lỗi', 'Bạn cần đăng nhập để tạo báo giá.');
-        setIsGenerating(false);
         return;
       }
+
+      // Kiểm tra projectId có tồn tại không
+      const effectiveProjectId = projectId || route?.params?.projectId;
+
+      if (!effectiveProjectId) {
+        Alert.alert('Lỗi', 'Không tìm thấy thông tin dự án. Vui lòng thử lại.');
+        setIsLoading(false);
+        return;
+      }
+
+      // 1. Chuẩn bị dữ liệu báo giá
+      const quotationNumber = `HK-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
       
-      // Chuẩn bị dữ liệu cho PDF
       const quotationData = {
-        projectId,
+        projectId: effectiveProjectId,
         projectName,
         customerName: customerData?.name || 'Khách hàng',
         customerAddress: customerData?.address || '',
@@ -207,86 +212,86 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
         warrantyTerms,
         otherTerms,
         bankDetails,
-        quotationNumber: `HK-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`
+        quotationNumber: quotationNumber
       };
-      
-      // Generate HTML from template
-      const html = getQuotationHTML(quotationData);
-      
-      // Generate PDF
-      const options = {
-        html,
-        fileName: `Quotation_${quotationData.quotationNumber}`,
-        directory: 'Documents',
-        base64: false,
-      };
-      
-      console.log('Attempting to generate PDF with options:', options);
-      
-      const file = await RNHTMLtoPDF.convert(options);
-      console.log('PDF generated at:', file.filePath);
-      
-      // Save to Firebase
-      const savedQuotation = await saveQuotation(
-        projectId,
+
+      // In ra thông tin để debug
+      console.log('ProjectId:', effectiveProjectId);
+      console.log('Quotation Data:', JSON.stringify({...quotationData, materials: 'Array of materials'}));
+
+      // 2. Gọi Cloud Function để lấy URL của PDF
+      console.log('Calling Cloud Function to generate PDF...');
+      const functions = getFunctions();
+      const generateInvoicePDF = httpsCallable(functions, 'generateInvoicePDF');
+      const result = await generateInvoicePDF({ 
+        userId, 
         quotationData,
-        file.filePath,
-        userId
-      );
-      
-      // Store PDF URL for sharing
-      setPdfUrl(savedQuotation.pdfUrl);
-      
-      // Show success message
+        projectId: effectiveProjectId
+      });
+
+      const { pdfUrl } = result.data;
+      if (!pdfUrl) {
+        throw new Error("Không nhận được URL của PDF từ server.");
+      }
+      console.log('Received PDF URL:', pdfUrl);
+
+      // 3. Tải file PDF về máy để lấy local URI
+      console.log('Downloading PDF to local device...');
+      const fileUri = FileSystem.documentDirectory + `${quotationNumber}.pdf`;
+      const { uri } = await FileSystem.downloadAsync(pdfUrl, fileUri);
+      console.log('File downloaded to:', uri);
+
+      // Lưu local URI vào state để có thể chia sẻ sau
+      setPdfLocalUri(uri);
+
+      // 4. Lưu thông tin báo giá vào Firestore
+      await saveQuotation(effectiveProjectId, quotationData, pdfUrl, userId);
+
+      // 5. Thông báo thành công
       Alert.alert(
         'Thành công',
-        'Đã tạo báo giá thành công!',
+        'Đã tạo và lưu báo giá thành công. Bạn có muốn xem hoặc chia sẻ file PDF không?',
         [
-          {
-            text: 'Chia sẻ PDF',
-            onPress: () => sharePdf(file.filePath),
-          },
-          {
-            text: 'OK',
-          },
+          { text: 'Để sau', style: 'cancel' },
+          { text: 'Chia sẻ', onPress: () => handleSharePdf(uri) },
+          { text: 'Xem PDF', onPress: () => Linking.openURL(uri) },
         ]
       );
-      
+
     } catch (error) {
       console.error('Error generating PDF:', error);
-      
-      // Provide more detailed error message
-      let errorMessage = 'Không thể tạo báo giá.';
-      
-      if (error.message && error.message.includes("null")) {
-        errorMessage += ' Thư viện PDF không khả dụng trong Expo Go. Vui lòng sử dụng Development Build.';
-      } else if (error.message) {
-        errorMessage += ' ' + error.message;
-      }
-      
-      Alert.alert('Lỗi', errorMessage);
+      const errorMessage = error.message || "Một lỗi không xác định đã xảy ra.";
+      Alert.alert('Lỗi', `Không thể tạo báo giá: ${errorMessage}`);
     } finally {
-      setIsGenerating(false);
+      setIsLoading(false);
     }
   };
-  
-  // Hàm chia sẻ PDF
-  const sharePdf = async (filePath) => {
+
+  // Hàm chia sẻ file PDF đã được tải về
+  const handleSharePdf = async (localUri) => {
+    if (!localUri) {
+        Alert.alert("Lỗi", "Không tìm thấy file PDF để chia sẻ. Vui lòng tạo lại.");
+        return;
+    }
+    const isSharingAvailable = await Sharing.isAvailableAsync();
+    if (!isSharingAvailable) {
+        Alert.alert('Lỗi', 'Chia sẻ không khả dụng trên thiết bị của bạn.');
+        return;
+    }
     try {
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(filePath);
-      } else {
-        Alert.alert('Lỗi', 'Chia sẻ không khả dụng trên thiết bị này');
-      }
+        await Sharing.shareAsync(localUri, {
+            mimeType: 'application/pdf',
+            dialogTitle: 'Chia sẻ báo giá',
+        });
     } catch (error) {
-      console.error('Error sharing PDF:', error);
-      Alert.alert('Lỗi', 'Không thể chia sẻ tài liệu.');
+        console.error('Error sharing PDF:', error);
+        Alert.alert('Lỗi', 'Không thể chia sẻ file PDF.');
     }
   };
-  
+
   // Format số tiền VND
   const formatCurrency = (amount) => {
-    return amount.toLocaleString('vi-VN') + ' đ';
+    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
   };
   
   return (
@@ -471,27 +476,24 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
       {/* Nút tạo PDF */}
       <View style={styles.footer}>
         <TouchableOpacity 
-          style={styles.generateButton}
-          onPress={handleGeneratePDF}
-          disabled={isGenerating}
+          style={[styles.button, { backgroundColor: '#4CAF50' }]}
+          onPress={handleGenerateAndSave} 
+          disabled={isLoading}
         >
-          {isGenerating ? (
+          {isLoading ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <>
-              <Ionicons name="document-text-outline" size={24} color="#fff" style={styles.buttonIcon} />
-              <Text style={styles.generateButtonText}>Tạo và Lưu Báo giá PDF</Text>
-            </>
+            <Text style={styles.buttonText}>Tạo & Lưu Báo Giá</Text>
           )}
         </TouchableOpacity>
         
-        {pdfUrl && (
+        {pdfLocalUri && (
           <TouchableOpacity 
-            style={[styles.generateButton, { marginTop: 10, backgroundColor: '#0066cc' }]}
-            onPress={() => sharePdf(pdfUrl)}
+            style={[styles.button, { backgroundColor: '#2196F3', marginTop: 10 }]}
+            onPress={() => handleSharePdf(pdfLocalUri)}
           >
-            <Ionicons name="share-outline" size={24} color="#fff" style={styles.buttonIcon} />
-            <Text style={styles.generateButtonText}>Chia sẻ PDF</Text>
+            <Ionicons name="share-social" size={20} color="white" style={{ marginRight: 10 }} />
+            <Text style={styles.buttonText}>Chia Sẻ PDF</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -502,7 +504,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#F5F5F5',
   },
   header: {
     flexDirection: 'row',
@@ -640,18 +642,17 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#eee',
   },
-  generateButton: {
-    backgroundColor: '#4CAF50',
+  button: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
+    backgroundColor: '#007BFF',
+    padding: 15,
     borderRadius: 8,
+    marginVertical: 10,
+    marginHorizontal: 20,
   },
-  buttonIcon: {
-    marginRight: 8,
-  },
-  generateButtonText: {
+  buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',

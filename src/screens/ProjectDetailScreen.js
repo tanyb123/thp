@@ -15,7 +15,7 @@ import {
   Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getProjectById, updateTaskStatus, updateCustomTask } from '../api/projectService';
+import { getProjectById, updateTaskStatus, updateCustomTask, deleteProject } from '../api/projectService';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import StatusIndicator from '../components/StatusIndicator';
@@ -75,37 +75,39 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [debugInfo, setDebugInfo] = useState({});
   
-  // Sử dụng scheme cố định từ cấu hình cho Android
-  const REDIRECT_SCHEME = googleAuthConfig.redirectScheme;
+  // This is the iOS URL Scheme copied from the Google Cloud Console for the Expo Go iOS Client ID.
+  // It's the REVERSED client ID.
+  const IOS_URL_SCHEME = 'com.googleusercontent.apps.370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is';
 
   const [request, response, promptAsync] = Google.useAuthRequest({
-    // Sử dụng client IDs từ cấu hình
-    iosClientId: googleAuthConfig.iosClientId,
-    androidClientId: googleAuthConfig.androidClientId,
-    webClientId: googleAuthConfig.webClientId,
-    
-    scopes: googleAuthConfig.driveScopes,
-    
-    // Sử dụng scheme cố định từ cấu hình
-    redirectUri: `${REDIRECT_SCHEME}:/oauth2redirect/google`,
+    iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
+    androidClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
+    scopes: ['https://www.googleapis.com/auth/drive.readonly']
   });
   
   // Log để debug redirectUri và request object
   useEffect(() => {
     // Log manually constructed redirectUri
-    const manualRedirectUri = `${REDIRECT_SCHEME}:/oauth2redirect/google`;
+    const manualRedirectUri = `${IOS_URL_SCHEME}:/oauth2redirect/google`;
     console.log('Manual redirectUri:', manualRedirectUri);
     
     if (request) {
       console.log('Generated Auth Request:', JSON.stringify(request, null, 2));
+      
+      // Kiểm tra configuration URL
+      if (request.authorizationEndpoint) {
+        console.log('Authorization Endpoint:', request.authorizationEndpoint);
+      }
+      
       setDebugInfo(prevInfo => ({
         ...prevInfo,
         redirectUri: manualRedirectUri,
         request: {
           redirectUri: request.redirectUri,
           scopes: request.scopes,
-          iosClientId: googleAuthConfig.iosClientId,
-          androidClientId: googleAuthConfig.androidClientId
+          iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
+          androidClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
+          authUrl: request.authorizationEndpoint
         }
       }));
       setIsAuthLoading(false); // Auth service is ready
@@ -117,6 +119,12 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     const handleAuthResponse = async () => {
       if (response) {
         console.log('Google Auth Response:', JSON.stringify(response, null, 2));
+        console.log('Response type:', response.type);
+        
+        // Thêm log chi tiết để debug
+        if (response.params) {
+          console.log('Response params:', JSON.stringify(response.params, null, 2));
+        }
         
         // Log thông tin chi tiết về redirectUri được sử dụng
         if (response.type === 'success' || response.type === 'error') {
@@ -315,6 +323,36 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   // Hàm hiển thị thông tin debug
   const toggleDebugInfo = () => {
     setShowDebugInfo(!showDebugInfo);
+  };
+  
+  // Hàm xoá dự án
+  const handleDeleteProject = async () => {
+    Alert.alert(
+      'Xác nhận',
+      'Bạn có chắc chắn muốn xoá dự án này? Thao tác này không thể hoàn tác.',
+      [
+        {
+          text: 'Huỷ',
+          style: 'cancel',
+        },
+        {
+          text: 'Xoá',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteProject(projectId);
+              Alert.alert('Thành công', 'Đã xoá dự án.');
+              // Quay lại danh sách dự án trong tab Projects
+              navigation.navigate('Projects', { screen: 'ProjectManagement' });
+            } catch (error) {
+              console.error('Error deleting project:', error);
+              Alert.alert('Lỗi', 'Không thể xoá dự án. Vui lòng thử lại.');
+            }
+          },
+        },
+      ],
+      { cancelable: true }
+    );
   };
   
   // Hiển thị khi đang tải dữ liệu
@@ -779,7 +817,25 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             style={styles.continueButton}
             onPress={() => {
               const subTotal = materials.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-              navigation.navigate('FinalizeQuotation', { materials, subTotal });
+              
+              // Tạo đối tượng customerData từ thông tin dự án
+              const customerData = {
+                id: project.customerId || '',
+                name: project.customerName || 'Khách hàng',
+                address: project.customerAddress || '',
+                phone: project.customerPhone || '',
+                email: project.customerEmail || '',
+                contact: project.customerContact || ''
+              };
+              
+              // Truyền thêm projectId và customerData khi chuyển màn hình
+              navigation.navigate('FinalizeQuotation', { 
+                materials, 
+                subTotal, 
+                projectId, 
+                projectName: project.name || 'Dự án mới',
+                customerData 
+              });
             }}
           >
             <Text style={styles.continueButtonText}>Tiếp tục hoàn thiện báo giá</Text>
@@ -969,7 +1025,12 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết dự án</Text>
-        <View style={styles.placeholder} />
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={handleDeleteProject}
+        >
+          <Ionicons name="trash-outline" size={24} color="#d11a2a" />
+        </TouchableOpacity>
       </View>
       
       {/* Sử dụng FlatList làm component chính cho cuộn trang */}
@@ -1180,7 +1241,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             <ScrollView style={styles.debugScrollView}>
               <Text style={styles.debugSectionTitle}>Auth Configuration:</Text>
               <Text style={styles.debugText}>
-                iOS URL Scheme: {REDIRECT_SCHEME}
+                iOS URL Scheme: {IOS_URL_SCHEME}
               </Text>
               
               {debugInfo.redirectUri && (
@@ -1299,8 +1360,8 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
-  placeholder: {
-    width: 24,
+  deleteButton: {
+    padding: 4,
   },
   contentContainer: {
     flex: 1,
@@ -1830,6 +1891,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginRight: 8,
+  },
+  placeholder: {
+    width: 24,
   },
 });
 

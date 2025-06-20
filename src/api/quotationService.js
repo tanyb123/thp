@@ -10,47 +10,49 @@ import {
     orderBy,
     serverTimestamp 
 } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+// import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { db } from '../config/firebaseConfig';
+// import * as FileSystem from 'expo-file-system';
 
 /**
- * Save quotation data to Firestore and upload PDF to Firebase Storage
+ * Save quotation metadata to Firestore.
+ * The PDF is assumed to be already created and stored by a cloud function.
  * @param {string} projectId - Project ID
  * @param {Object} quotationData - All quotation data
- * @param {string} pdfLocalPath - Local path to the generated PDF file
+ * @param {string} pdfUrl - Public URL to the generated PDF file in Firebase Storage
  * @param {string} userId - ID of the user creating the quotation
- * @returns {Promise<Object>} - Saved quotation data with ID and download URL
+ * @returns {Promise<Object>} - Saved quotation data with Firestore document ID
  */
-export const saveQuotation = async (projectId, quotationData, pdfLocalPath, userId) => {
+export const saveQuotation = async (projectId, quotationData, pdfUrl, userId) => {
     try {
-        // 1. Upload PDF to Firebase Storage
-        const storage = getStorage();
-        const quotationId = `quotation_${Date.now()}`;
-        const storagePath = `quotations/${projectId}/${quotationId}.pdf`;
-        const storageRef = ref(storage, storagePath);
+        console.log('Saving quotation metadata to Firestore for project:', projectId);
         
-        // Read the file as a blob
-        const response = await fetch(`file://${pdfLocalPath}`);
-        const blob = await response.blob();
+        // Kiểm tra các tham số bắt buộc
+        if (!projectId) {
+            throw new Error('ProjectId không được để trống');
+        }
         
-        // Upload the blob
-        await uploadBytes(storageRef, blob);
+        if (!pdfUrl) {
+            throw new Error('PDF URL không được để trống');
+        }
         
-        // Get the download URL
-        const downloadURL = await getDownloadURL(storageRef);
+        if (!userId) {
+            throw new Error('UserId không được để trống');
+        }
         
-        // 2. Save quotation data to Firestore
+        // 1. Save quotation data to Firestore
         const quotationRef = collection(db, `projects/${projectId}/quotations`);
         const docRef = await addDoc(quotationRef, {
             ...quotationData,
-            quotationId,
-            pdfUrl: downloadURL,
+            pdfUrl, // Use the provided URL directly
             createdAt: serverTimestamp(),
             createdBy: userId,
             updatedAt: serverTimestamp()
         });
         
-        // 3. Update project task status
+        console.log('Quotation metadata saved with ID:', docRef.id);
+        
+        // 2. Update project task status
         const projectRef = doc(db, 'projects', projectId);
         await updateDoc(projectRef, {
             'tasks.quotation.status': 'completed',
@@ -60,14 +62,15 @@ export const saveQuotation = async (projectId, quotationData, pdfLocalPath, user
             updatedBy: userId
         });
         
+        console.log('Project status updated.');
+        
         return {
             id: docRef.id,
-            quotationId,
-            pdfUrl: downloadURL,
+            pdfUrl: pdfUrl,
             ...quotationData
         };
     } catch (error) {
-        console.error('Error saving quotation:', error);
+        console.error('Error saving quotation metadata:', error);
         throw error;
     }
 };

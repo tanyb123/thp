@@ -16,7 +16,12 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tanhoaphat.thpapp"
+      "bundleIdentifier": "com.tanhoaphat.thpapp",
+      "config": {
+        "googleSignIn": {
+          "reservedClientId": "com.googleusercontent.apps.370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is"
+        }
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -24,10 +29,21 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.tanhoaphat.thpapp",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "newArchEnabled": true,
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.DOWNLOAD_WITHOUT_NOTIFICATION"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "config": {
+        "googleSignIn": {
+          "clientId": "370615243912-fesvpqtf06r7ugj31ma1urmrii85m7at.apps.googleusercontent.com"
+        }
+      }
     },
     "plugins": [
       "expo-splash-screen",
@@ -41,6 +57,5 @@
         "projectId": "84e03b9f-1038-41e0-8152-5d13086ce063"
       }
     }
-    
   }
 }
