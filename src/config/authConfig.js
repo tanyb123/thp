@@ -1,9 +1,10 @@
 // Cấu hình xác thực cho các dịch vụ bên ngoài
 export const googleAuthConfig = {
-  // Client IDs từ Google Cloud Console
+  // Thay thế các giá trị này bằng Client ID thực tế của bạn
   iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
   androidClientId: '370615243912-v7btvdq1e1b4min5snq7av9jpoe7lr10.apps.googleusercontent.com',
   webClientId: '370615243912-fesvpqtf06r7ugj31ma1urmrii85m7at.apps.googleusercontent.com',
+  offlineAccess: true,
   
   // Các scopes mặc định cho Google Drive
   driveScopes: [
@@ -16,9 +17,6 @@ export const googleAuthConfig = {
     'https://www.googleapis.com/auth/drive.readonly',
     'https://www.googleapis.com/auth/spreadsheets.readonly'
   ],
-
-  // Scheme cố định cho redirect URI - sử dụng package name cho Android
-  redirectScheme: 'com.tanhoaphat.thpapp'
 };
 
 // Hàm helper để log chi tiết lỗi Google API
