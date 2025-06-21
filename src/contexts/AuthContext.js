@@ -11,6 +11,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebaseConfig';
 import { Alert } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 // Tạo context cho xác thực
 const AuthContext = createContext();
@@ -221,10 +222,20 @@ export const AuthProvider = ({ children }) => {
   // Hàm đăng xuất
   const logout = async () => {
     try {
+      // Đăng xuất khỏi Google Sign-In trước
+      if (await GoogleSignin.isSignedIn()) {
+        await GoogleSignin.signOut();
+        console.log('Google user signed out');
+      }
+      
+      // Sau đó đăng xuất khỏi Firebase
       await signOut(auth);
+      
+      // Cập nhật state
       setCurrentUser(null);
       setUserRole(null);
-      console.log('User logged out successfully');
+      
+      console.log('User logged out successfully from all services');
       return true;
     } catch (error) {
       console.error('Logout failed:', error);

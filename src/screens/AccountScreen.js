@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 const SettingItem = ({ icon, title, value, onPress, type = 'chevron', color }) => {
   const { theme } = useTheme();
@@ -75,6 +76,22 @@ const AccountScreen = () => {
     );
   };
 
+  const switchGoogleAccount = async () => {
+    try {
+      // Ngắt kết nối tài khoản Google hiện tại
+      await GoogleSignin.revokeAccess();
+      await GoogleSignin.signOut();
+      
+      Alert.alert(
+        "Đã ngắt kết nối",
+        "Tài khoản Google đã được ngắt kết nối. Bạn có thể kết nối lại khi cần thiết trong màn hình chi tiết dự án."
+      );
+    } catch (error) {
+      console.error("Lỗi khi chuyển tài khoản Google:", error);
+      Alert.alert("Lỗi", "Không thể ngắt kết nối tài khoản Google. Vui lòng thử lại.");
+    }
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView style={styles.scrollView}>
@@ -120,6 +137,12 @@ const AccountScreen = () => {
             icon="key-outline" 
             title="Đổi mật khẩu" 
             onPress={() => {}}
+          />
+           <SettingItem 
+            icon="swap-horizontal-outline" 
+            title="Chuyển tài khoản Google" 
+            onPress={switchGoogleAccount}
+            color="#4285F4"
           />
         </View>
         

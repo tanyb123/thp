@@ -19,14 +19,8 @@ import { getProjectById, updateTaskStatus, updateCustomTask, deleteProject } fro
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import StatusIndicator from '../components/StatusIndicator';
-import * as AuthSession from 'expo-auth-session';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
-import { googleAuthConfig } from '../config/authConfig';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import * as XLSX from 'xlsx';
-
-// Đảm bảo quá trình xác thực hoạt động đúng trên web và mobile
-WebBrowser.maybeCompleteAuthSession();
 
 // Định nghĩa danh sách công việc cố định
 const TASK_DEFINITIONS = [
@@ -57,15 +51,11 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   const [customTaskModalVisible, setCustomTaskModalVisible] = useState(false);
   const [customTaskName, setCustomTaskName] = useState('');
   
-  // State cho Google Authentication
-  const [accessToken, setAccessToken] = useState(null);
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
-  
   // State cho Google Drive files
   const [driveFiles, setDriveFiles] = useState([]);
   const [isPickerVisible, setIsPickerVisible] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [isGoogleDriveLoading, setIsGoogleDriveLoading] = useState(false);
   
   // State cho dữ liệu vật tư và bảng tính
   const [materials, setMaterials] = useState([]);
@@ -74,138 +64,6 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   // Thêm state để hiển thị debug info
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [debugInfo, setDebugInfo] = useState({});
-  
-  // This is the iOS URL Scheme copied from the Google Cloud Console for the Expo Go iOS Client ID.
-  // It's the REVERSED client ID.
-  const IOS_URL_SCHEME = 'com.googleusercontent.apps.370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is';
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
-    androidClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
-    scopes: ['https://www.googleapis.com/auth/drive.readonly']
-  });
-  
-  // Log để debug redirectUri và request object
-  useEffect(() => {
-    // Log manually constructed redirectUri
-    const manualRedirectUri = `${IOS_URL_SCHEME}:/oauth2redirect/google`;
-    console.log('Manual redirectUri:', manualRedirectUri);
-    
-    if (request) {
-      console.log('Generated Auth Request:', JSON.stringify(request, null, 2));
-      
-      // Kiểm tra configuration URL
-      if (request.authorizationEndpoint) {
-        console.log('Authorization Endpoint:', request.authorizationEndpoint);
-      }
-      
-      setDebugInfo(prevInfo => ({
-        ...prevInfo,
-        redirectUri: manualRedirectUri,
-        request: {
-          redirectUri: request.redirectUri,
-          scopes: request.scopes,
-          iosClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
-          androidClientId: '370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com',
-          authUrl: request.authorizationEndpoint
-        }
-      }));
-      setIsAuthLoading(false); // Auth service is ready
-    }
-  }, [request]);
-  
-  // Xử lý phản hồi từ Google Auth
-  useEffect(() => {
-    const handleAuthResponse = async () => {
-      if (response) {
-        console.log('Google Auth Response:', JSON.stringify(response, null, 2));
-        console.log('Response type:', response.type);
-        
-        // Thêm log chi tiết để debug
-        if (response.params) {
-          console.log('Response params:', JSON.stringify(response.params, null, 2));
-        }
-        
-        // Log thông tin chi tiết về redirectUri được sử dụng
-        if (response.type === 'success' || response.type === 'error') {
-          console.log('Auth completed with redirectUri:', response.url);
-          setDebugInfo(prevInfo => ({
-            ...prevInfo,
-            response: {
-              type: response.type,
-              url: response.url,
-              error: response.error,
-            }
-          }));
-        }
-      }
-      
-      if (response?.type === 'success') {
-        setIsAuthenticating(false);
-        const { authentication } = response;
-        setAccessToken(authentication.accessToken);
-        console.log('Google authentication successful, access token obtained');
-        
-        try {
-          // Lấy danh sách file Excel từ Google Drive
-          const files = await fetchGoogleDriveFiles(authentication.accessToken);
-          
-          if (files && files.length > 0) {
-            // Cập nhật state và hiển thị modal picker
-            setDriveFiles(files);
-            setIsPickerVisible(true);
-          } else {
-            Alert.alert(
-              'Không tìm thấy file',
-              'Không tìm thấy file Excel nào trong Google Drive của bạn. Vui lòng tải lên file Excel trước khi sử dụng tính năng này.',
-              [{ text: 'OK' }]
-            );
-          }
-        } catch (error) {
-          console.error('Error fetching files after authentication:', error);
-          
-          // Hiển thị thông báo thành công xác thực nhưng không thể lấy file
-          Alert.alert(
-            'Đăng nhập thành công',
-            'Bạn đã kết nối thành công với Google Drive, nhưng không thể lấy danh sách file. Vui lòng thử lại sau.',
-            [{ text: 'OK' }]
-          );
-        }
-      } else if (response?.type === 'error') {
-        setIsAuthenticating(false);
-        console.error('Google authentication error:', response.error);
-        
-        // Log chi tiết hơn về lỗi
-        if (response.error?.code) {
-          console.error('Error code:', response.error.code);
-        }
-        if (response.error?.message) {
-          console.error('Error message:', response.error.message);
-        }
-        if (response.error?.details) {
-          console.error('Error details:', response.error.details);
-        }
-        
-        // Kiểm tra lỗi cụ thể liên quan đến redirect_uri
-        const errorMessage = response.error?.message || 'Không xác định';
-        if (errorMessage.includes('redirect_uri') || errorMessage.includes('redirect URI')) {
-          console.error('REDIRECT URI ERROR DETECTED. This likely means the redirect URI in your Google Console does not match the one being used by Expo.');
-          console.error('Please ensure your Google Console has the correct redirect URI configured for the Expo Go client.');
-        }
-        
-        Alert.alert(
-          'Lỗi đăng nhập',
-          `Không thể kết nối với Google Drive. Lỗi: ${errorMessage}`,
-          [{ text: 'OK' }]
-        );
-      }
-    };
-    
-    // Gọi hàm xử lý khi response thay đổi
-    if (response) {
-      handleAuthResponse();
-    }
-  }, [response]);
   
   // Hàm lấy dữ liệu dự án
   const fetchProjectData = async () => {
@@ -545,12 +403,21 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       console.log(`Downloading file: ${fileName} (${fileId})`);
       Alert.alert('Đang tải xuống', `Đang tải file "${fileName}" từ Google Drive...`);
       
+      // Lấy lại token để đảm bảo nó còn hiệu lực
+      const tokens = await GoogleSignin.getTokens();
+      const freshAccessToken = tokens.accessToken;
+      
+      if (!freshAccessToken) {
+        Alert.alert('Lỗi', 'Phiên đăng nhập đã hết hạn. Vui lòng thử lại.');
+        return;
+      }
+      
       // Gọi API để tải xuống nội dung file
       const response = await fetch(
         `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
         {
           headers: {
-            'Authorization': `Bearer ${accessToken}`
+            'Authorization': `Bearer ${freshAccessToken}`
           }
         }
       );
@@ -672,54 +539,49 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     setMaterials(newMaterials);
   };
 
-  // Hàm xử lý nhập dữ liệu từ Google Drive
   const handleImportFromGoogleDrive = async () => {
+    setIsGoogleDriveLoading(true);
     try {
-      console.log('Starting Google Drive import process...');
-      
-      if (accessToken) {
-        // Đã có accessToken, hiển thị danh sách file
-        console.log('Already authenticated with access token');
-        
-        // Lấy danh sách file từ Google Drive
-        const files = await fetchGoogleDriveFiles(accessToken);
-        
-        if (files && files.length > 0) {
-          // Cập nhật state và hiển thị modal picker
-          setDriveFiles(files);
-          setIsPickerVisible(true);
-        } else {
-          Alert.alert(
-            'Không tìm thấy file',
-            'Không tìm thấy file Excel nào trong Google Drive của bạn. Vui lòng tải lên file Excel trước khi sử dụng tính năng này.',
-            [{ text: 'OK' }]
-          );
-        }
-        
-        return;
-      }
-      
-      console.log('Auth request status:', request ? 'Available' : 'Not available');
-      
-      if (!request) {
-        console.error('Auth request is not available');
-        Alert.alert('Lỗi', 'Không thể khởi tạo quá trình xác thực. Vui lòng thử lại sau.');
-        return;
+      const isSignedIn = await GoogleSignin.isSignedIn();
+      if (!isSignedIn) {
+        await GoogleSignin.signIn();
       }
 
-      // Hiển thị trạng thái đang xác thực
-      setIsAuthenticating(true);
+      const tokens = await GoogleSignin.getTokens();
+      const accessToken = tokens.accessToken;
       
-      console.log('Prompting Google authentication...');
-      await promptAsync();
+      if (!accessToken) {
+        throw new Error("Không thể lấy được access token.");
+      }
+
+      const files = await fetchGoogleDriveFiles(accessToken);
       
-      // promptAsync sẽ chuyển hướng người dùng đến trang xác thực Google
-      // Kết quả sẽ được xử lý trong useEffect với response
-      
+      if (files && files.length > 0) {
+        setDriveFiles(files);
+        setIsPickerVisible(true);
+      } else {
+        Alert.alert(
+          'Không tìm thấy file',
+          'Không tìm thấy file Excel nào trong Google Drive của bạn. Vui lòng tải lên file Excel trước khi sử dụng tính năng này.'
+        );
+      }
     } catch (error) {
-      console.error('Error in handleImportFromGoogleDrive:', error);
-      setIsAuthenticating(false);
-      Alert.alert('Lỗi', 'Không thể kết nối với Google Drive. Vui lòng thử lại sau.');
+      console.error('Lỗi khi thao tác với Google Drive:', error);
+
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User cancelled the login flow
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        Alert.alert('Đang xử lý', 'Quá trình đăng nhập đang diễn ra.');
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert('Dịch vụ không có sẵn', 'Google Play Services không có sẵn hoặc đã lỗi thời.');
+      } else {
+        Alert.alert(
+          'Lỗi',
+          'Đã xảy ra lỗi khi kết nối với Google Drive. Vui lòng thử lại.'
+        );
+      }
+    } finally {
+      setIsGoogleDriveLoading(false);
     }
   };
 
@@ -752,40 +614,26 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       
       {/* Nút nhập vật tư từ Google Drive */}
       <View style={styles.infoSection}>
-        {isAuthLoading ? (
-          <View style={styles.importButton}>
-            <ActivityIndicator size="large" color="#fff" />
-          </View>
-        ) : (
-          <TouchableOpacity 
-            style={[
-              styles.importButton,
-              isAuthenticating && styles.importButtonDisabled
-            ]}
-            onPress={handleImportFromGoogleDrive}
-            disabled={isAuthenticating}
-          >
-            {isAuthenticating ? (
-              <ActivityIndicator size="small" color="#fff" style={styles.importIcon} />
-            ) : (
-              <Ionicons name="cloud-download-outline" size={24} color="#fff" style={styles.importIcon} />
-            )}
-            <Text style={styles.importButtonText}>
-              {accessToken ? 'Nhập Vật Tư từ Google Drive' : 'Kết nối Google Drive'}
-            </Text>
-          </TouchableOpacity>
-        )}
-        {accessToken && (
-          <Text style={styles.connectedText}>
-            <Ionicons name="checkmark-circle" size={16} color="#4CAF50" /> Đã kết nối với Google Drive
+        <TouchableOpacity 
+          style={[
+            styles.importButton,
+            isGoogleDriveLoading && styles.importButtonDisabled
+          ]}
+          onPress={handleImportFromGoogleDrive}
+          disabled={isGoogleDriveLoading}
+        >
+          {isGoogleDriveLoading ? (
+            <ActivityIndicator size="small" color="#fff" style={styles.importIcon} />
+          ) : (
+            <Ionicons name="cloud-download-outline" size={24} color="#fff" style={styles.importIcon} />
+          )}
+          <Text style={styles.importButtonText}>
+            Nhập Vật Tư từ Google Drive
           </Text>
-        )}
+        </TouchableOpacity>
         
-        {/* Tiêu đề bảng vật tư */}
-        {showMaterialsTable && materials.length > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Bảng vật tư</Text>
-            
+        {materials.length > 0 && showMaterialsTable && (
+          <View style={styles.materialsHeader}>
             {/* Header của bảng */}
             <View style={styles.tableHeader}>
               <Text style={[styles.headerCell, { flex: 3 }]}>Tên vật tư</Text>
@@ -794,7 +642,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
               <Text style={[styles.headerCell, { flex: 2 }]}>Đơn giá</Text>
               <Text style={[styles.headerCell, { flex: 2 }]}>Thành tiền</Text>
             </View>
-          </>
+          </View>
         )}
       </View>
     </>
@@ -1241,7 +1089,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             <ScrollView style={styles.debugScrollView}>
               <Text style={styles.debugSectionTitle}>Auth Configuration:</Text>
               <Text style={styles.debugText}>
-                iOS URL Scheme: {IOS_URL_SCHEME}
+                Web Client ID: 370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com
               </Text>
               
               {debugInfo.redirectUri && (
@@ -1285,14 +1133,9 @@ const ProjectDetailScreen = ({ route, navigation }) => {
               
               <Text style={styles.debugSectionTitle}>Access Token:</Text>
               <Text style={styles.debugText}>
-                {accessToken ? '✓ Token Available' : '✗ No Token'}
+                {/* Sửa lỗi: Không còn state accessToken, tạm thời bỏ hiển thị */}
+                Token status is no longer tracked in component state.
               </Text>
-              
-              {accessToken && (
-                <Text style={styles.debugText}>
-                  Token: {accessToken.substring(0, 10)}...
-                </Text>
-              )}
             </ScrollView>
             
             <TouchableOpacity

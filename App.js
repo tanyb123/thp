@@ -40,8 +40,11 @@ export default function App() {
       webClientId: '370615243912-fesvpqtf06r7ugj31ma1urmrii85m7at.apps.googleusercontent.com',
       // Yêu cầu quyền truy cập offline để có thể lấy refresh token
       offlineAccess: true,
-      // Đơn giản hóa cấu hình để tránh xung đột
-      scopes: [] // Để trống để tránh xung đột với expo-auth-session
+      scopes: [
+        'https://www.googleapis.com/auth/userinfo.profile',
+        'https://www.googleapis.com/auth/userinfo.email',
+        'https://www.googleapis.com/auth/drive.readonly'
+      ]
     });
   }, []);
 
