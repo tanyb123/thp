@@ -89,6 +89,7 @@ const getTaskLabel = (taskKey: string, taskData: any): string => {
  * Denormalizes a single task into the top-level "tasks" collection.
  * @param {string} projectId The project ID.
  * @param {string} projectName The project name.
+ * @param {string} projectStatus The project status.
  * @param {string} taskKey The key of the task.
  * @param {any} taskData The data of the task.
  * @returns {Promise<any>} A promise that resolves when the write is complete.
@@ -96,6 +97,7 @@ const getTaskLabel = (taskKey: string, taskData: any): string => {
 const denormalizeTask = async (
   projectId: string,
   projectName: string,
+  projectStatus: string,
   taskKey: string,
   taskData: any
 ) => {
@@ -104,6 +106,7 @@ const denormalizeTask = async (
   const denormalizedTask = {
     projectId,
     projectName,
+    projectStatus,
     taskKey,
     taskLabel: getTaskLabel(taskKey, taskData),
     status: taskData.status || 'pending',
@@ -268,7 +271,13 @@ export const projectWorkflowManager = onDocumentWritten(
           JSON.stringify(afterTasks[taskKey])
       ) {
         denormalizationPromises.push(
-          denormalizeTask(projectId, projectName, taskKey, afterTasks[taskKey])
+          denormalizeTask(
+            projectId,
+            projectName,
+            afterData.status,
+            taskKey,
+            afterTasks[taskKey]
+          )
         );
       }
     }

@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   SafeAreaView,
+  ScrollView,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
@@ -50,7 +51,10 @@ const TaskCard = ({ item, onPress, theme }) => {
       onPress={onPress}
     >
       <View style={styles.cardHeader}>
-        <Text style={[styles.taskLabel, { color: theme.text }]}>
+        <Text
+          style={[styles.taskLabel, { color: theme.text }]}
+          numberOfLines={1}
+        >
           {item.taskLabel}
         </Text>
         <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
@@ -74,34 +78,87 @@ const TaskCard = ({ item, onPress, theme }) => {
 const TaskReportScreen = ({ navigation }) => {
   const { currentUser } = useAuth();
   const { theme } = useTheme();
-  const [tasks, setTasks] = useState([]);
-  const [filteredTasks, setFilteredTasks] = useState([]);
+
+  // Common states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // States for Manager View
+  const [myTasks, setMyTasks] = useState([]);
+  const [staffPendingTasks, setStaffPendingTasks] = useState([]);
+  const [staffCompletedTasks, setStaffCompletedTasks] = useState([]);
+
+  // State for manager tabs
+  const [activeManagerView, setActiveManagerView] = useState('my_tasks'); // 'my_tasks', 'staff_pending', 'staff_completed'
+
+  // States for Staff View
+  const [tasks, setTasks] = useState([]);
+  const [filteredTasks, setFilteredTasks] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
 
   const isManager = ['giam_doc', 'pho_giam_doc', 'admin'].includes(
     currentUser?.role
   );
 
-  const fetchTasks = async () => {
+  const fetchManagerTasks = async () => {
     setLoading(true);
     setError(null);
     try {
-      let tasksQuery;
       const tasksCollection = collection(db, 'tasks');
 
-      if (isManager) {
-        // Managers see all tasks
-        tasksQuery = query(tasksCollection, orderBy('updatedAt', 'desc'));
-      } else {
-        // Regular users see only their assigned tasks
-        tasksQuery = query(
-          tasksCollection,
-          where('assignedToId', '==', currentUser.uid),
-          orderBy('updatedAt', 'desc')
-        );
-      }
+      // 1. My tasks (pending or in-progress)
+      const myTasksQuery = query(
+        tasksCollection,
+        where('assignedToId', '==', currentUser.uid),
+        where('status', 'in', ['pending', 'in_progress'])
+      );
+      const myTasksSnapshot = await getDocs(myTasksQuery);
+      setMyTasks(
+        myTasksSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      );
+
+      // 2. Staff pending tasks
+      const staffPendingQuery = query(
+        tasksCollection,
+        where('assignedToId', '!=', currentUser.uid),
+        where('status', 'in', ['pending', 'in_progress'])
+      );
+      const staffPendingSnapshot = await getDocs(staffPendingQuery);
+      setStaffPendingTasks(
+        staffPendingSnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      );
+
+      // 3. Staff completed tasks
+      const staffCompletedQuery = query(
+        tasksCollection,
+        where('assignedToId', '!=', currentUser.uid),
+        where('status', '==', 'completed')
+      );
+      const staffCompletedSnapshot = await getDocs(staffCompletedQuery);
+      setStaffCompletedTasks(
+        staffCompletedSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+      );
+    } catch (err) {
+      console.error('Error fetching manager tasks:', err);
+      setError('Không thể tải báo cáo công việc.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchStaffTasks = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const tasksCollection = collection(db, 'tasks');
+      const tasksQuery = query(
+        tasksCollection,
+        where('assignedToId', '==', currentUser.uid),
+        orderBy('updatedAt', 'desc')
+      );
 
       const querySnapshot = await getDocs(tasksQuery);
       const fetchedTasks = querySnapshot.docs.map((doc) => ({
@@ -120,23 +177,174 @@ const TaskReportScreen = ({ navigation }) => {
 
   useFocusEffect(
     useCallback(() => {
-      fetchTasks();
-    }, [currentUser])
+      if (isManager) {
+        fetchManagerTasks();
+      } else {
+        fetchStaffTasks();
+      }
+    }, [currentUser, isManager])
   );
 
   useEffect(() => {
-    if (activeFilter === 'all') {
-      setFilteredTasks(tasks);
-    } else {
-      const filtered = tasks.filter((task) => task.status === activeFilter);
-      setFilteredTasks(filtered);
+    if (!isManager) {
+      if (activeFilter === 'all') {
+        setFilteredTasks(tasks);
+      } else {
+        const filtered = tasks.filter((task) => task.status === activeFilter);
+        setFilteredTasks(filtered);
+      }
     }
-  }, [activeFilter, tasks]);
+  }, [activeFilter, tasks, isManager]);
 
   const handleTaskPress = (item) => {
-    navigation.navigate('ProjectDetail', { projectId: item.projectId });
+    if (isManager) {
+      // Managers go to the full project detail screen
+      navigation.navigate('ProjectDetail', { projectId: item.projectId });
+    } else {
+      // Staff go to the dedicated, simplified task detail screen
+      navigation.navigate('TaskDetail', {
+        projectId: item.projectId,
+        taskKey: item.taskKey,
+      });
+    }
   };
 
+  // -- RENDER METHODS --
+
+  if (loading) {
+    return (
+      <View
+        style={[styles.centerContainer, { backgroundColor: theme.background }]}
+      >
+        <ActivityIndicator size="large" color={theme.primary} />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View
+        style={[styles.centerContainer, { backgroundColor: theme.background }]}
+      >
+        <Text style={{ color: theme.text }}>{error}</Text>
+      </View>
+    );
+  }
+
+  const renderTaskList = (data) => {
+    if (data.length === 0) {
+      return (
+        <View style={styles.emptySection}>
+          <Text style={{ color: theme.textSecondary }}>
+            Không có công việc nào.
+          </Text>
+        </View>
+      );
+    }
+    return data.map((item) => (
+      <TaskCard
+        key={item.id}
+        item={item}
+        onPress={() => handleTaskPress(item)}
+        theme={theme}
+      />
+    ));
+  };
+
+  // Manager View
+  if (isManager) {
+    const renderManagerContent = () => {
+      switch (activeManagerView) {
+        case 'staff_pending':
+          return renderTaskList(staffPendingTasks);
+        case 'staff_completed':
+          return renderTaskList(staffCompletedTasks);
+        case 'my_tasks':
+        default:
+          return renderTaskList(myTasks);
+      }
+    };
+
+    return (
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
+        <Text style={[styles.headerTitle, { color: theme.text }]}>
+          Báo cáo Công việc
+        </Text>
+
+        {/* Manager Tabs */}
+        <View style={styles.managerTabContainer}>
+          <TouchableOpacity
+            style={[
+              styles.managerTab,
+              { backgroundColor: theme.card },
+              activeManagerView === 'my_tasks' && {
+                backgroundColor: theme.primary,
+              },
+            ]}
+            onPress={() => setActiveManagerView('my_tasks')}
+          >
+            <Text
+              style={[
+                styles.managerTabText,
+                { color: theme.text },
+                activeManagerView === 'my_tasks' && { color: '#FFFFFF' },
+              ]}
+            >
+              Việc của tôi
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.managerTab,
+              { backgroundColor: theme.card },
+              activeManagerView === 'staff_pending' && {
+                backgroundColor: theme.primary,
+              },
+            ]}
+            onPress={() => setActiveManagerView('staff_pending')}
+          >
+            <Text
+              style={[
+                styles.managerTabText,
+                { color: theme.text },
+                activeManagerView === 'staff_pending' && { color: '#FFFFFF' },
+              ]}
+            >
+              NV Đang Làm
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.managerTab,
+              { backgroundColor: theme.card },
+              activeManagerView === 'staff_completed' && {
+                backgroundColor: theme.primary,
+              },
+            ]}
+            onPress={() => setActiveManagerView('staff_completed')}
+          >
+            <Text
+              style={[
+                styles.managerTabText,
+                { color: theme.text },
+                activeManagerView === 'staff_completed' && { color: '#FFFFFF' },
+              ]}
+            >
+              Đã Hoàn Thành
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.listContainer}>
+          {renderManagerContent()}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // Staff View
   const renderFilterButtons = () => {
     const filters = [
       { key: 'all', label: 'Tất cả' },
@@ -173,34 +381,14 @@ const TaskReportScreen = ({ navigation }) => {
     );
   };
 
-  if (loading) {
-    return (
-      <View
-        style={[styles.centerContainer, { backgroundColor: theme.background }]}
-      >
-        <ActivityIndicator size="large" color={theme.primary} />
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View
-        style={[styles.centerContainer, { backgroundColor: theme.background }]}
-      >
-        <Text style={{ color: theme.text }}>{error}</Text>
-      </View>
-    );
-  }
-
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.background }]}
     >
       <Text style={[styles.headerTitle, { color: theme.text }]}>
-        {isManager ? 'Báo cáo Công việc' : 'Công việc của bạn'}
+        Công việc của bạn
       </Text>
-      {isManager && renderFilterButtons()}
+      {renderFilterButtons()}
       <FlatList
         data={filteredTasks}
         keyExtractor={(item) => item.id}
@@ -227,7 +415,12 @@ const TaskReportScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  headerTitle: { fontSize: 24, fontWeight: 'bold', padding: 16 },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    padding: 16,
+    paddingBottom: 8,
+  },
   listContainer: { paddingHorizontal: 16, paddingBottom: 16 },
   card: {
     padding: 16,
@@ -247,8 +440,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  taskLabel: { fontSize: 18, fontWeight: 'bold' },
-  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  taskLabel: { fontSize: 18, fontWeight: 'bold', flexShrink: 1 },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    marginLeft: 8,
+  },
   statusText: { fontSize: 12, fontWeight: '600' },
   cardBody: {},
   projectName: { fontSize: 14, marginBottom: 4 },
@@ -266,6 +464,39 @@ const styles = StyleSheet.create({
   },
   filterText: {
     fontWeight: '500',
+  },
+  // Styles for Manager View
+  managerTabContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  managerTab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 20,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  managerTabText: {
+    fontWeight: 'bold',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  emptySection: {
+    padding: 16,
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#eee',
   },
 });
 

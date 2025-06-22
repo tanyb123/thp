@@ -191,7 +191,8 @@ export const deleteProject = async (projectId) => {
     const projectRef = doc(db, 'projects', projectId);
     await deleteDoc(projectRef);
   } catch (error) {
-    throw error;
+    console.error('Error deleting project:', error);
+    throw new Error('Không thể xóa dự án. Vui lòng thử lại.');
   }
 };
 
@@ -271,30 +272,31 @@ export const searchProjects = async (searchTerm) => {
 };
 
 /**
- * Cập nhật trạng thái công việc của dự án
- * @param {string} projectId - ID dự án
- * @param {string} taskKey - Khóa của công việc (quotation, material_separation, v.v.)
- * @param {string} newStatus - Trạng thái mới (pending, in_progress, completed)
- * @param {string} userId - ID của người dùng cập nhật
- * @returns {Promise<void>}
+ * Updates the status of a specific task within a project.
+ * This is a targeted update to ensure it passes security rules for non-admin users.
+ * @param {string} projectId The ID of the project to update.
+ * @param {string} taskKey The key of the task to update (e.g., 'material_separation').
+ * @param {string} newStatus The new status for the task.
  */
-export const updateTaskStatus = async (
-  projectId,
-  taskKey,
-  newStatus,
-  userId
-) => {
+export const updateTaskStatus = async (projectId, taskKey, newStatus) => {
+  if (!projectId || !taskKey || !newStatus) {
+    throw new Error('Cần có ID dự án, khóa công việc và trạng thái mới.');
+  }
   try {
     const projectRef = doc(db, 'projects', projectId);
-    const updatePath = `tasks.${taskKey}.status`;
-
+    // Construct the field path dynamically
+    const fieldPath = `tasks.${taskKey}.status`;
     await updateDoc(projectRef, {
-      [updatePath]: newStatus,
-      updatedAt: serverTimestamp(),
-      updatedBy: userId,
+      [fieldPath]: newStatus,
     });
   } catch (error) {
-    throw error;
+    console.error('Error updating task status:', error);
+    if (error.code === 'permission-denied') {
+      throw new Error('Bạn không có quyền cập nhật trạng thái công việc này.');
+    }
+    throw new Error(
+      'Không thể cập nhật trạng thái công việc. Vui lòng thử lại.'
+    );
   }
 };
 

@@ -491,7 +491,8 @@ export const generateInvoicePDF = functions
   );
 
 // Export functions from separate files
-export * from './taskTriggers';
+export { projectWorkflowManager } from './taskTriggers';
+export { onProjectDeleted } from './projectTriggers';
 
 // You can add more exports here as you create more function files
 // export * from "./userTriggers";

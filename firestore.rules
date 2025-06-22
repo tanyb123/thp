@@ -3,96 +3,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
   
-    // =================================
-    // Helper Functions (Hàm hỗ trợ)
-    // =================================
-    
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    
-    function getRequestingUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-    }
-    
-    function isOneOfRoles(allowedRoles) {
-      return isSignedIn() && getRequestingUserData().role in allowedRoles;
-    }
-    
-    // Hàm mới để kiểm tra xem một user có được gán cho một task cụ thể không
-    function isAssignedToTask(taskKey) {
-        return request.auth.uid == request.resource.data.tasks[taskKey].assignedTo;
-    }
-
-    // =================================
-    // Collection: users
-    // =================================
-    match /users/{userId} {
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow read: if isSignedIn();
-      allow update: if isSignedIn() && request.auth.uid == userId;
-      allow delete: if false;
-    }
-    
-    // =================================
-    // Collection: customers
-    // =================================
-    match /customers/{customerId} {
-      allow read: if isSignedIn();
-      allow create, update: if isOneOfRoles(['pho_giam_doc', 'giam_doc', 'admin', 'ky_su']);
-      allow delete: if isOneOfRoles(['pho_giam_doc', 'giam_doc', 'admin']);
-    }
-    
-    // =================================
-    // Collection: projects
-    // =================================
-    match /projects/{projectId} {
-      allow read: if isSignedIn();
-      allow create: if isOneOfRoles(['pho_giam_doc', 'giam_doc', 'admin', 'ky_su']);
-      
-      // >> THAY ĐỔI LỚN NHẤT NẰM Ở ĐÂY <<
-      // Logic cập nhật dự án
-      allow update: if isSignedIn() && (
-        // 1. Các vai trò quản lý có toàn quyền sửa
-        isOneOfRoles(['admin', 'giam_doc', 'pho_giam_doc']) ||
-        
-        // 2. Kỹ sư ('ky_su') chỉ được phép cập nhật task 'material_separation' (Bóc tách)
-        (getRequestingUserData().role == 'ky_su' && request.resource.data.tasks.material_separation.status != resource.data.tasks.material_separation.status) ||
-
-        // 3. Kỹ sư cắt phôi ('ky_su_cat_phoi') chỉ được cập nhật task 'material_cutting'
-        (getRequestingUserData().role == 'ky_su_cat_phoi' && request.resource.data.tasks.material_cutting.status != resource.data.tasks.material_cutting.status) ||
-
-        // 4. Kế toán ('ke_toan') chỉ được cập nhật task 'material_purchasing' và 'shipping'
-        (getRequestingUserData().role == 'ke_toan' && 
-            (request.resource.data.tasks.material_purchasing.status != resource.data.tasks.material_purchasing.status || 
-             request.resource.data.tasks.shipping.status != resource.data.tasks.shipping.status)
-        ) ||
-        
-        // 5. Thương mại ('thuong_mai') chỉ được cập nhật task 'quotation' và 'material_purchasing'
-        (getRequestingUserData().role == 'thuong_mai' && 
-            (request.resource.data.tasks.quotation.status != resource.data.tasks.quotation.status || 
-             request.resource.data.tasks.material_purchasing.status != resource.data.tasks.material_purchasing.status)
-        )
-      );
-      
-      allow delete: if isOneOfRoles(['pho_giam_doc', 'giam_doc', 'admin']);
-      
-      match /quotations/{quotationId} {
-        allow read: if isSignedIn();
-        allow create: if isOneOfRoles(['pho_giam_doc', 'giam_doc', 'admin', 'ky_su', 'thuong_mai']);
-        allow update, delete: if false; 
-      }
-    }
-
-    // =================================
-    // Collection: tasks (được denormalize)
-    // =================================
-    match /tasks/{taskId} {
-      // Chỉ cho phép đọc. Việc ghi và xóa được quản lý độc quyền bởi Cloud Function.
-      allow read: if isSignedIn();
-      
-      // Chặn mọi hành động ghi/xóa từ phía client
-      allow write, delete: if false;
+    // Mở toàn bộ quyền cho bất kỳ người dùng nào đã đăng nhập
+    // Cảnh báo: Chỉ sử dụng cho môi trường phát triển (development).
+    match /{document=**} {
+      allow read, write: if request.auth != null;
     }
   }
 }

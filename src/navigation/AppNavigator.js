@@ -31,6 +31,7 @@ import AccountScreen from '../screens/AccountScreen';
 
 // Import màn hình báo cáo công việc
 import TaskReportScreen from '../screens/TaskReportScreen';
+import TaskDetailScreen from '../screens/TaskDetailScreen';
 
 // Tạo Stack Navigator cho quản lý dự án
 const ProjectStack = createNativeStackNavigator();
@@ -246,6 +247,11 @@ const AppNavigator = () => {
             <Stack.Screen
               name="ProjectDetail"
               component={ProjectDetailScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="TaskDetail"
+              component={TaskDetailScreen}
               options={{ headerShown: false }}
             />
             <Stack.Screen
