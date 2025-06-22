@@ -1,3 +1,4 @@
+//functions/src/index.ts
 /* eslint-disable max-len */
 /**
  * Import function triggers from their respective submodules:
@@ -8,12 +9,12 @@
  * See a full list of supported triggers at https://firebase.google.com/docs/functions
  */
 
-import * as functions from "firebase-functions/v1";
-import * as admin from "firebase-admin";
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
-import {CallableContext} from "firebase-functions/v1/https";
+import * as functions from 'firebase-functions/v1';
+import * as admin from 'firebase-admin';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { CallableContext } from 'firebase-functions/v1/https';
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -22,101 +23,134 @@ admin.initializeApp();
 const storage = admin.storage();
 const bucket = storage.bucket();
 
-// Interface for the Material item in the quotation
-interface Material {
-  name: string;
-  unit: string;
-  quantity: number;
-  unitPrice: number;
-}
-
-// Define TypeScript interface for QuotationData
-interface QuotationData {
-  projectId: string;
-  projectName: string;
+// Define TypeScript interface for the data received from the client
+interface ClientQuotationData {
   quotationNumber: string;
   quotationDate: string;
-  validUntil: string;
-  customerName: string;
-  customerAddress: string;
-  customerPhone: string;
-  customerEmail: string;
-  materials: Material[];
-  subtotal: number;
-  discount: number;
+  projectName: string;
+  customerData: {
+    name?: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+  };
+  materials: {
+    name?: string;
+    unit?: string;
+    quantity?: number;
+    weight?: number; // Thêm trường KL
+    unitPrice?: number;
+    totalPrice?: number;
+  }[];
+  subTotal: number;
+  discountPercentage: number;
   discountAmount: number;
-  vatRate: number;
+  vatPercentage: number;
   vatAmount: number;
-  totalWithVat: number;
-  totalInWords: string;
+  grandTotal: number;
+  amountInWords: string;
   notes: string;
   paymentTerms: string;
-  deliveryTerms: string;
+  deliveryTime: string;
   warrantyTerms: string;
   otherTerms: string;
   bankDetails: string;
+  quoteValidity: string;
+  projectId?: string;
 }
 
 /**
  * Generates HTML content for a quotation.
- * @param {QuotationData} quotationData The data to include in the quotation.
+ * @param {ClientQuotationData} quotationData The data to include in the quotation.
  * @return {string} HTML string for the quotation.
  */
-function getQuotationHTML(quotationData: QuotationData): string {
+function getQuotationHTML(quotationData: ClientQuotationData): string {
+  // Destructure with correct paths, especially for nested customerData
   const {
     quotationNumber,
     quotationDate,
-    validUntil,
     projectName,
-    customerName,
-    customerAddress,
-    customerPhone,
-    customerEmail,
-    materials,
-    subtotal,
-    discount,
-    discountAmount,
-    vatRate,
-    vatAmount,
-    totalWithVat,
-    totalInWords,
+    customerData = {}, // Default to empty object to prevent errors
+    materials = [], // Default to empty array
+    discountPercentage,
+    vatPercentage,
+    amountInWords,
     notes,
     paymentTerms,
-    deliveryTerms,
+    deliveryTime,
     warrantyTerms,
     otherTerms,
     bankDetails,
+    quoteValidity,
   } = quotationData;
 
   // Format currency function
   const formatCurrency = (amount: number): string => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
+    // Defensively handle non-numeric types
+    if (typeof amount !== 'number' || isNaN(amount)) {
+      return '0 VNĐ';
+    }
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
-    }).format(amount).replace("₫", "VNĐ");
+    })
+      .format(amount)
+      .replace('₫', 'VNĐ');
   };
 
+  // SERVER-SIDE CALCULATION
+  // 1. Calculate SubTotal on the server
+  const serverCalculatedSubTotal = materials.reduce((sum, item) => {
+    const itemTotal =
+      (item.quantity || 0) * (item.weight || 0) * (item.unitPrice || 0);
+    return sum + itemTotal;
+  }, 0);
+
+  // 2. Recalculate all other financial figures
+  const discountAmount =
+    (serverCalculatedSubTotal * (discountPercentage || 0)) / 100;
+  const totalAfterDiscount = serverCalculatedSubTotal - discountAmount;
+  const vatAmount = (totalAfterDiscount * (vatPercentage || 0)) / 100;
+  const grandTotal = totalAfterDiscount + vatAmount;
+
   // Generate table rows for materials
-  const materialRows = materials.map((item, index) => {
-    return `
+  const materialRows = materials
+    .map((item, index: number) => {
+      // Calculate the new display unit price (Price per complete item)
+      const displayUnitPrice = (item.weight || 0) * (item.unitPrice || 0);
+
+      // The total price is now simply quantity * the new display unit price
+      const calculatedTotalPrice = (item.quantity || 0) * displayUnitPrice;
+
+      return `
       <tr style="border: 1px solid #000;">
-        <td style="border: 1px solid #000; padding: 8px; text-align: center;">${index + 1}</td>
-        <td style="border: 1px solid #000; padding: 8px;">${item.name}</td>
-        <td style="border: 1px solid #000; padding: 8px; text-align: center;">${item.unit}</td>
-        <td style="border: 1px solid #000; padding: 8px; text-align: center;">${item.quantity}</td>
-        <td style="border: 1px solid #000; padding: 8px; text-align: right;">${formatCurrency(item.unitPrice)}</td>
-        <td style="border: 1px solid #000; padding: 8px; text-align: right;">${formatCurrency(item.quantity * item.unitPrice)}</td>
+        <td style="border: 1px solid #000; padding: 8px; text-align: center;">${
+          index + 1
+        }</td>
+        <td style="border: 1px solid #000; padding: 8px;">${
+          item.name || ''
+        }</td>
+        <td style="border: 1px solid #000; padding: 8px; text-align: center;">${
+          item.unit || ''
+        }</td>
+        <td style="border: 1px solid #000; padding: 8px; text-align: center;">${
+          item.quantity || 0
+        }</td>
+        <td style="border: 1px solid #000; padding: 8px; text-align: right;">${formatCurrency(
+          displayUnitPrice
+        )}</td>
+        <td style="border: 1px solid #000; padding: 8px; text-align: right;">${formatCurrency(
+          calculatedTotalPrice
+        )}</td>
       </tr>
     `;
-  }).join("");
+    })
+    .join('');
 
   // Format bank details with line breaks
-  const formattedBankDetails = (bankDetails || "").replace(/\n/g, "<br>");
-
-  // Use percent symbol
-  const percentSymbol = "%";
+  const formattedBankDetails = (bankDetails || '').replace(/\n/g, '<br>');
 
   // Create the complete HTML template
   return `
@@ -238,111 +272,110 @@ function getQuotationHTML(quotationData: QuotationData): string {
         </div>
         <!-- Quotation title and number -->
         <div class="quotation-title">BÁO GIÁ</div>
-        <div class="quotation-number">Số: ${quotationNumber} - Ngày: ${quotationDate}</div>
+        <div class="quotation-number">Số: ${
+          quotationNumber || 'N/A'
+        } - Ngày: ${new Date(quotationDate).toLocaleDateString('vi-VN')}</div>
         <!-- Customer information -->
         <div class="customer-info">
           <table style="border: none;">
             <tr>
               <td style="width: 150px;"><strong>Kính gửi:</strong></td>
-              <td><strong>${customerName}</strong></td>
+              <td><strong>${customerData.name || 'N/A'}</strong></td>
             </tr>
             <tr>
               <td>Địa chỉ:</td>
-              <td>${customerAddress || ""}</td>
+              <td>${customerData.address || 'N/A'}</td>
             </tr>
             <tr>
               <td>Điện thoại:</td>
-              <td>${customerPhone || ""}</td>
+              <td>${customerData.phone || 'N/A'}</td>
             </tr>
             <tr>
               <td>Email:</td>
-              <td>${customerEmail || ""}</td>
+              <td>${customerData.email || 'N/A'}</td>
             </tr>
-            <tr>
+             <tr>
               <td>Dự án:</td>
-              <td>${projectName}</td>
+              <td>${projectName || 'N/A'}</td>
             </tr>
             <tr>
               <td>Hiệu lực báo giá:</td>
-              <td>${validUntil}</td>
+              <td>${quoteValidity || 'N/A'}</td>
             </tr>
           </table>
         </div>
         <!-- Materials table -->
-        <table style="border: 1px solid #000; width: 100%;">
+        <table style="border: 1px solid #000;">
           <thead>
-            <tr style="background-color: #f2f2f2;">
-              <th style="border: 1px solid #000; padding: 8px; width: 5%;">STT</th>
-              <th style="border: 1px solid #000; padding: 8px; width: 40%;">Tên sản phẩm</th>
-              <th style="border: 1px solid #000; padding: 8px; width: 10%;">Đơn vị</th>
-              <th style="border: 1px solid #000; padding: 8px; width: 10%;">Số lượng</th>
-              <th style="border: 1px solid #000; padding: 8px; width: 15%;">Đơn giá</th>
-              <th style="border: 1px solid #000; padding: 8px; width: 20%;">Thành tiền</th>
+            <tr>
+              <th style="width: 5%;">STT</th>
+              <th style="width: 40%;">Tên sản phẩm</th>
+              <th style="width: 10%;">Đơn vị</th>
+              <th style="width: 10%;">Số lượng</th>
+              <th style="width: 15%;">Đơn giá</th>
+              <th style="width: 20%;">Thành tiền</th>
             </tr>
           </thead>
           <tbody>
             ${materialRows}
           </tbody>
         </table>
+
+        <!-- Summary section - Use server-calculated values -->
+        <table class="summary-table">
+          <tr>
+            <td>Tổng cộng:</td>
+            <td style="text-align: right;">${formatCurrency(
+              serverCalculatedSubTotal
+            )}</td>
+          </tr>
+          <tr>
+            <td>Chiết khấu (${discountPercentage || 0}%):</td>
+            <td style="text-align: right;">- ${formatCurrency(
+              discountAmount
+            )}</td>
+          </tr>
+          <tr>
+            <td>Thuế VAT (${vatPercentage || 0}%):</td>
+            <td style="text-align: right;">${formatCurrency(vatAmount)}</td>
+          </tr>
+          <tr style="font-weight: bold;">
+            <td>TỔNG CỘNG:</td>
+            <td style="text-align: right;">${formatCurrency(grandTotal)}</td>
+          </tr>
+        </table>
+        <div class="amount-in-words">
+          <strong>Bằng chữ:</strong> ${amountInWords || 'Không đồng'}
+        </div>
+
         <!-- Notes section -->
         <div class="notes">
-          <div style="font-weight: bold; margin-bottom: 5px;">GHI CHÚ:</div>
-          <div>${notes || "Không có ghi chú."}</div>
+          <strong>GHI CHÚ:</strong><br>
+          ${(notes || 'Không có ghi chú.').replace(/\n/g, '<br>')}
         </div>
-        <!-- Summary table -->
-        <div style="display: flex; justify-content: flex-end;">
-          <table class="summary-table" style="border: none; width: 50%;">
-            <tr>
-              <td style="text-align: right; padding: 5px;"><strong>Tổng cộng:</strong></td>
-              <td style="text-align: right; padding: 5px;">${formatCurrency(subtotal)}</td>
-            </tr>
-            <tr>
-              <td style="text-align: right; padding: 5px;"><strong>Chiết khấu (${discount}${percentSymbol}):</strong></td>
-              <td style="text-align: right; padding: 5px;">- ${formatCurrency(discountAmount)}</td>
-            </tr>
-            <tr>
-              <td style="text-align: right; padding: 5px;"><strong>VAT (${vatRate}${percentSymbol}):</strong></td>
-              <td style="text-align: right; padding: 5px;">${formatCurrency(vatAmount)}</td>
-            </tr>
-            <tr>
-              <td style="text-align: right; padding: 5px; font-weight: bold;">
-                <strong>TỔNG CỘNG:</strong>
-              </td>
-              <td style="text-align: right; padding: 5px; font-weight: bold;">
-                ${formatCurrency(totalWithVat)}
-              </td>
-            </tr>
-          </table>
-        </div>
-        <!-- Amount in words -->
-        <div class="amount-in-words">
-          <strong>Bằng chữ:</strong> ${totalInWords}
-        </div>
-        <!-- Payment terms -->
+
+        <!-- Terms and conditions -->
         <div class="terms">
           <div class="term-title">ĐIỀU KHOẢN THANH TOÁN:</div>
-          <div>${paymentTerms || "Thanh toán 100% giá trị đơn hàng trước khi giao hàng."}</div>
+          <div>${(paymentTerms || '').replace(/\n/g, '<br>')}</div>
         </div>
-        <!-- Delivery terms -->
         <div class="terms">
           <div class="term-title">THỜI GIAN GIAO HÀNG:</div>
-          <div>${deliveryTerms || "Trong vòng 7-10 ngày làm việc kể từ ngày xác nhận đơn hàng."}</div>
+          <div>${deliveryTime || ''}</div>
         </div>
-        <!-- Warranty terms -->
-        <div class="terms">
-          <div class="term-title">BẢO HÀNH:</div>
-          <div>${warrantyTerms || "Theo tiêu chuẩn nhà sản xuất."}</div>
+         <div class="terms">
+          <div class="term-title">ĐIỀU KHOẢN BẢO HÀNH:</div>
+          <div>${(warrantyTerms || '').replace(/\n/g, '<br>')}</div>
         </div>
-        <!-- Other terms -->
-        <div class="terms">
-          <div class="term-title">ĐIỀU KHOẢN KHÁC:</div>
-          <div>${otherTerms || "Không có điều khoản khác."}</div>
-        </div>
-        <!-- Bank details -->
         <div class="terms">
           <div class="term-title">THÔNG TIN NGÂN HÀNG:</div>
-          <div>${formattedBankDetails || "Thông tin ngân hàng sẽ được cung cấp sau khi xác nhận đơn hàng."}</div>
+          <div>${formattedBankDetails}</div>
         </div>
+        <div class="terms">
+          <div class="term-title">ĐIỀU KHOẢN KHÁC:</div>
+          <div>${(otherTerms || 'Không có').replace(/\n/g, '<br>')}</div>
+        </div>
+
         <!-- Signatures -->
         <div class="signatures">
           <div class="signature-box">
@@ -363,92 +396,103 @@ function getQuotationHTML(quotationData: QuotationData): string {
 /**
  * Firebase Callable Function that generates a PDF invoice from quotation data.
  * Uploads the PDF to Firebase Storage and returns a public URL.
- * @param {{userId: string, quotationData: QuotationData, projectId: string}} data The data passed.
+ * @param {{quotationData: ClientQuotationData, projectId: string}} data The data passed.
  * @param {CallableContext} context The context of the function call.
  * @return {Promise<{pdfUrl: string}>} A URL of the generated PDF.
  */
 export const generateInvoicePDF = functions
   .runWith({
     timeoutSeconds: 300,
-    memory: "1GB",
+    memory: '1GB',
   })
-  .https.onCall(async (data: {
-    userId: string,
-    quotationData: QuotationData,
-    projectId: string
-  }, context: CallableContext) => {
-    // DYNAMIC IMPORT: Only load modules when the function is called
-    const puppeteer = (await import("puppeteer-core")).default;
-    const chromium = (await import("@sparticuz/chromium")).default;
-
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "Bạn cần đăng nhập để sử dụng tính năng này."
-      );
-    }
-
-    const {userId, quotationData, projectId} = data;
-
-    if (!quotationData) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Không tìm thấy dữ liệu báo giá."
-      );
-    }
-
-    if (!projectId) {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "Không tìm thấy ID dự án."
-      );
-    }
-
-    // Đảm bảo projectId được đặt đúng
-    quotationData.projectId = projectId;
-
-    const htmlContent = getQuotationHTML(quotationData);
-    const tempHtmlPath = path.join(os.tmpdir(), "invoice.html");
-    fs.writeFileSync(tempHtmlPath, htmlContent);
-
-    const browser = await puppeteer.launch({
-      executablePath: await chromium.executablePath(),
-      args: chromium.args,
-      headless: true,
-    });
-
-    const page = await browser.newPage();
-    await page.setViewport({width: 1200, height: 1600});
-    await page.goto(`file://${tempHtmlPath}`, {
-      waitUntil: "networkidle0",
-    });
-
-    const pdfBuffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: {
-        top: "20px",
-        right: "20px",
-        bottom: "20px",
-        left: "20px",
+  .https.onCall(
+    async (
+      data: {
+        quotationData: ClientQuotationData;
+        projectId: string;
       },
-    });
+      context: CallableContext
+    ) => {
+      // DYNAMIC IMPORT: Only load modules when the function is called
+      const puppeteer = (await import('puppeteer-core')).default;
+      const chromium = (await import('@sparticuz/chromium')).default;
 
-    await browser.close();
-    fs.unlinkSync(tempHtmlPath);
+      if (!context.auth) {
+        throw new functions.https.HttpsError(
+          'unauthenticated',
+          'Bạn cần đăng nhập để sử dụng tính năng này.'
+        );
+      }
 
-    const fileName = `invoices/${projectId}/${quotationData.quotationNumber}.pdf`;
-    const file = bucket.file(fileName);
+      const { quotationData, projectId } = data;
 
-    await file.save(pdfBuffer, {
-      metadata: {
-        contentType: "application/pdf",
-      },
-    });
+      if (!quotationData) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Không tìm thấy dữ liệu báo giá.'
+        );
+      }
 
-    await file.makePublic();
+      if (!projectId) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Không tìm thấy ID dự án.'
+        );
+      }
 
-    const pdfUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+      // Đảm bảo projectId được đặt đúng
+      quotationData.projectId = projectId;
 
-    return {pdfUrl};
-  });
+      const htmlContent = getQuotationHTML(quotationData);
+      const tempHtmlPath = path.join(os.tmpdir(), 'invoice.html');
+      fs.writeFileSync(tempHtmlPath, htmlContent);
+
+      const browser = await puppeteer.launch({
+        executablePath: await chromium.executablePath(),
+        args: chromium.args,
+        headless: true,
+      });
+
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1200, height: 1600 });
+      await page.goto(`file://${tempHtmlPath}`, {
+        waitUntil: 'networkidle0',
+      });
+
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: {
+          top: '20px',
+          right: '20px',
+          bottom: '20px',
+          left: '20px',
+        },
+      });
+
+      await browser.close();
+      fs.unlinkSync(tempHtmlPath);
+
+      const fileName = `invoices/${projectId}/${quotationData.quotationNumber}.pdf`;
+      const file = bucket.file(fileName);
+
+      await file.save(pdfBuffer, {
+        metadata: {
+          contentType: 'application/pdf',
+        },
+      });
+
+      await file.makePublic();
+
+      const pdfUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+      return { pdfUrl };
+    }
+  );
+
+// Export functions from separate files
+export * from './taskTriggers';
+
+// You can add more exports here as you create more function files
+// export * from "./userTriggers";
+// export * from "./anotherTriggerFile";

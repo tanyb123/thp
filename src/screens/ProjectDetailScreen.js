@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+//src/screens/ProjectDetailScreen.js
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -12,94 +13,148 @@ import {
   ActionSheetIOS,
   Platform,
   FlatList,
-  Image
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getProjectById, updateTaskStatus, updateCustomTask, deleteProject } from '../api/projectService';
+import {
+  getProjectById,
+  updateTaskStatus,
+  updateCustomTask,
+  deleteProject,
+} from '../api/projectService';
+import { getQuotationsByProject } from '../api/quotationService';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import StatusIndicator from '../components/StatusIndicator';
-import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 import * as XLSX from 'xlsx';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import { useProjectDetails } from '../hooks/useProjectDetails';
+import { useMaterialsProcessor } from '../hooks/useMaterialsProcessor';
 
 // Định nghĩa danh sách công việc cố định
 const TASK_DEFINITIONS = [
+  { key: 'material_separation', label: 'Bóc tách vật tư' },
   { key: 'quotation', label: 'Báo giá' },
-  { key: 'material_separation', label: 'Tách vật liệu' },
   { key: 'material_cutting', label: 'Cắt phôi' },
   { key: 'assembly', label: 'Lắp ráp' },
   { key: 'painting', label: 'Sơn' },
   { key: 'shipping', label: 'Vận chuyển' },
-  { key: 'other', label: 'Công việc khác' }
+  { key: 'other', label: 'Công việc khác' },
 ];
 
 // Định nghĩa các trạng thái công việc
 const TASK_STATUSES = [
   { value: 'pending', label: 'Chưa thực hiện' },
   { value: 'in_progress', label: 'Đang thực hiện' },
-  { value: 'completed', label: 'Hoàn thành' }
+  { value: 'completed', label: 'Hoàn thành' },
 ];
+
+// Memoized row component for the materials list
+const MaterialRow = memo(({ item, index, onPriceChange, formatNumber }) => {
+  return (
+    <View style={styles.tableRow}>
+      <View style={[styles.tableCell, { flex: 3 }]}>
+        <Text style={styles.materialName}>{item.name}</Text>
+        {item.material ? (
+          <Text style={styles.materialType}>{item.material}</Text>
+        ) : null}
+        {item.quyCach ? (
+          <Text style={styles.materialType}>Quy cách: {item.quyCach}</Text>
+        ) : null}
+      </View>
+      <Text style={[styles.tableCell, { flex: 1, textAlign: 'center' }]}>
+        {formatNumber(item.quantity)}
+      </Text>
+      <Text style={[styles.tableCell, { flex: 1, textAlign: 'center' }]}>
+        {formatNumber(item.weight)}
+      </Text>
+      <Text style={[styles.tableCell, { flex: 1, textAlign: 'center' }]}>
+        {item.unit}
+      </Text>
+      <View style={[styles.tableCell, { flex: 2 }]}>
+        <TextInput
+          style={styles.priceInput}
+          value={item.unitPrice > 0 ? item.unitPrice.toString() : ''}
+          onChangeText={(text) => onPriceChange(text, index)}
+          placeholder="Nhập..."
+          keyboardType="numeric"
+          selectTextOnFocus
+        />
+      </View>
+      <Text style={[styles.tableCell, styles.totalPrice, { flex: 2 }]}>
+        {item.totalPrice > 0 ? item.totalPrice.toLocaleString('vi-VN') : ''}
+      </Text>
+    </View>
+  );
+});
 
 const ProjectDetailScreen = ({ route, navigation }) => {
   const { projectId } = route.params;
   const { currentUser } = useAuth();
-  const [project, setProject] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  
+  const { project, loading, error, fetchProjectData } =
+    useProjectDetails(projectId);
+  const {
+    materials,
+    showMaterialsTable,
+    driveFiles,
+    isPickerVisible,
+    isLoadingFiles,
+    isGoogleDriveLoading,
+    handleImportFromGoogleDrive,
+    handleFileSelect,
+    handlePriceChange,
+    handleRequote,
+    setIsPickerVisible,
+  } = useMaterialsProcessor();
+
   // State cho quản lý công việc
   const [customTaskModalVisible, setCustomTaskModalVisible] = useState(false);
   const [customTaskName, setCustomTaskName] = useState('');
-  
-  // State cho Google Drive files
-  const [driveFiles, setDriveFiles] = useState([]);
-  const [isPickerVisible, setIsPickerVisible] = useState(false);
-  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
-  const [isGoogleDriveLoading, setIsGoogleDriveLoading] = useState(false);
-  
-  // State cho dữ liệu vật tư và bảng tính
-  const [materials, setMaterials] = useState([]);
-  const [showMaterialsTable, setShowMaterialsTable] = useState(false);
-  
+
+  // State for quotation history
+  const [quotations, setQuotations] = useState([]);
+  const [isLoadingQuotations, setIsLoadingQuotations] = useState(true);
+
+  // State cho dữ liệu vật tư và bảng tính - MOVED TO HOOK
+  // const [materials, setMaterials] = useState([]);
+  // const [showMaterialsTable, setShowMaterialsTable] = useState(false);
+
   // Thêm state để hiển thị debug info
   const [showDebugInfo, setShowDebugInfo] = useState(false);
   const [debugInfo, setDebugInfo] = useState({});
-  
-  // Hàm lấy dữ liệu dự án
-  const fetchProjectData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await getProjectById(projectId);
-      
-      if (data) {
-        setProject(data);
-        // Cập nhật tên công việc khác nếu có
-        if (data.tasks && data.tasks.other && data.tasks.other.name) {
-          setCustomTaskName(data.tasks.other.name);
-        }
-      } else {
-        setError('Không tìm thấy thông tin dự án');
-      }
-    } catch (err) {
-      console.error('Lỗi khi tải thông tin dự án:', err);
-      setError('Không thể tải thông tin dự án. Vui lòng thử lại sau.');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Lấy dữ liệu dự án khi màn hình được tải
-  useEffect(() => {
-    fetchProjectData();
-  }, [projectId]);
-  
-  // Làm mới dữ liệu khi màn hình được focus (quay lại sau khi chỉnh sửa)
+
+  // Lấy dữ liệu báo giá khi màn hình được focus
   useFocusEffect(
     useCallback(() => {
-      fetchProjectData();
+      const loadQuotations = async () => {
+        setIsLoadingQuotations(true);
+        try {
+          const pastQuotations = await getQuotationsByProject(projectId);
+          setQuotations(pastQuotations);
+        } catch (error) {
+          console.error('Lỗi khi tải lịch sử báo giá:', error);
+          Alert.alert('Lỗi', 'Không thể tải lịch sử báo giá.');
+        } finally {
+          setIsLoadingQuotations(false);
+        }
+      };
+
+      if (projectId) {
+        loadQuotations();
+      }
     }, [projectId])
   );
+
+  useEffect(() => {
+    if (project?.tasks?.other?.name) {
+      setCustomTaskName(project.tasks.other.name);
+    }
+  }, [project]);
 
   // Hàm cập nhật trạng thái công việc
   const handleUpdateTaskStatus = async (taskKey, currentStatus) => {
@@ -107,16 +162,23 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       // Sử dụng ActionSheetIOS cho iOS
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: [...TASK_STATUSES.map(status => status.label), 'Hủy'],
+          options: [...TASK_STATUSES.map((status) => status.label), 'Hủy'],
           cancelButtonIndex: TASK_STATUSES.length,
           title: 'Chọn trạng thái công việc',
-          message: `Cập nhật trạng thái cho "${TASK_DEFINITIONS.find(task => task.key === taskKey)?.label}"`,
+          message: `Cập nhật trạng thái cho "${
+            TASK_DEFINITIONS.find((task) => task.key === taskKey)?.label
+          }"`,
         },
         async (buttonIndex) => {
           if (buttonIndex < TASK_STATUSES.length) {
             const newStatus = TASK_STATUSES[buttonIndex].value;
             try {
-              await updateTaskStatus(projectId, taskKey, newStatus, currentUser?.uid);
+              await updateTaskStatus(
+                projectId,
+                taskKey,
+                newStatus,
+                currentUser?.uid
+              );
               fetchProjectData(); // Làm mới dữ liệu dự án
             } catch (error) {
               console.error('Lỗi khi cập nhật trạng thái công việc:', error);
@@ -129,35 +191,46 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       // Sử dụng Alert cho Android
       Alert.alert(
         'Chọn trạng thái công việc',
-        `Cập nhật trạng thái cho "${TASK_DEFINITIONS.find(task => task.key === taskKey)?.label}"`,
+        `Cập nhật trạng thái cho "${
+          TASK_DEFINITIONS.find((task) => task.key === taskKey)?.label
+        }"`,
         [
-          ...TASK_STATUSES.map(status => ({
+          ...TASK_STATUSES.map((status) => ({
             text: status.label,
             onPress: async () => {
               try {
-                await updateTaskStatus(projectId, taskKey, status.value, currentUser?.uid);
+                await updateTaskStatus(
+                  projectId,
+                  taskKey,
+                  status.value,
+                  currentUser?.uid
+                );
                 fetchProjectData(); // Làm mới dữ liệu dự án
               } catch (error) {
                 console.error('Lỗi khi cập nhật trạng thái công việc:', error);
                 Alert.alert('Lỗi', 'Không thể cập nhật trạng thái công việc');
               }
-            }
+            },
           })),
-          { text: 'Hủy', style: 'cancel' }
+          { text: 'Hủy', style: 'cancel' },
         ]
       );
     }
   };
-  
+
   // Hàm cập nhật tên công việc khác
   const handleUpdateCustomTask = async () => {
     if (!customTaskName.trim() && project?.tasks?.other?.name) {
       Alert.alert('Lỗi', 'Vui lòng nhập tên công việc');
       return;
     }
-    
+
     try {
-      await updateCustomTask(projectId, customTaskName.trim(), currentUser?.uid);
+      await updateCustomTask(
+        projectId,
+        customTaskName.trim(),
+        currentUser?.uid
+      );
       setCustomTaskModalVisible(false);
       fetchProjectData(); // Làm mới dữ liệu dự án
     } catch (error) {
@@ -171,18 +244,15 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     if (project && project.customerId) {
       navigation.navigate('CustomerDetail', { customerId: project.customerId });
     } else {
-      Alert.alert(
-        'Thông báo',
-        'Dự án này chưa được gán cho khách hàng nào.'
-      );
+      Alert.alert('Thông báo', 'Dự án này chưa được gán cho khách hàng nào.');
     }
   };
-  
+
   // Hàm hiển thị thông tin debug
   const toggleDebugInfo = () => {
     setShowDebugInfo(!showDebugInfo);
   };
-  
+
   // Hàm xoá dự án
   const handleDeleteProject = async () => {
     Alert.alert(
@@ -200,11 +270,18 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             try {
               await deleteProject(projectId);
               Alert.alert('Thành công', 'Đã xoá dự án.');
-              // Quay lại danh sách dự án trong tab Projects
-              navigation.navigate('Projects', { screen: 'ProjectManagement' });
+              // Go back to the previous screen (ProjectManagementScreen)
+              navigation.goBack();
             } catch (error) {
-              console.error('Error deleting project:', error);
-              Alert.alert('Lỗi', 'Không thể xoá dự án. Vui lòng thử lại.');
+              console.error('Lỗi khi xoá dự án:', error);
+              if (error.code === 'permission-denied') {
+                Alert.alert(
+                  'Lỗi quyền',
+                  'Bạn không có đủ quyền để thực hiện hành động này.'
+                );
+              } else {
+                Alert.alert('Lỗi', 'Không thể xoá dự án.');
+              }
             }
           },
         },
@@ -212,7 +289,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       { cancelable: true }
     );
   };
-  
+
   // Hiển thị khi đang tải dữ liệu
   if (loading) {
     return (
@@ -222,56 +299,74 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       </View>
     );
   }
-  
+
   // Hiển thị khi có lỗi
   if (error) {
     return (
       <View style={styles.centerContainer}>
         <Ionicons name="alert-circle-outline" size={50} color="#FF3B30" />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => navigation.goBack()}
+        >
           <Text style={styles.retryButtonText}>Quay lại</Text>
         </TouchableOpacity>
       </View>
     );
   }
-  
+
   // Hiển thị khi không tìm thấy dự án
   if (!project) {
     return (
       <View style={styles.centerContainer}>
         <Ionicons name="briefcase-outline" size={50} color="#999" />
         <Text style={styles.errorText}>Không tìm thấy thông tin dự án</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => navigation.goBack()}
+        >
           <Text style={styles.retryButtonText}>Quay lại</Text>
         </TouchableOpacity>
       </View>
     );
   }
-  
+
   // Định dạng ngày tháng
   const formatDate = (timestamp) => {
     if (!timestamp) return 'Không có';
-    
+
     const date = new Date(timestamp.seconds * 1000);
     return date.toLocaleDateString('vi-VN', {
       day: '2-digit',
       month: '2-digit',
-      year: 'numeric'
+      year: 'numeric',
     });
   };
-  
+
   // Định dạng số tiền
   const formatCurrency = (amount) => {
     if (!amount) return '0 VNĐ';
-    
+
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
       currency: 'VND',
-      minimumFractionDigits: 0
+      minimumFractionDigits: 0,
     }).format(amount);
   };
-  
+
+  const formatAppNumber = (num) => {
+    if (typeof num !== 'number' || isNaN(num)) {
+      return '0';
+    }
+
+    // Làm tròn đến 1 chữ số thập phân
+    const roundedNum = Math.round(num * 10) / 10;
+
+    // Chuyển thành chuỗi và thay thế dấu chấm thập phân bằng dấu phẩy
+    return roundedNum.toString().replace('.', ',');
+  };
+
   // Lấy màu sắc theo trạng thái dự án
   const getStatusColor = (status) => {
     switch (status) {
@@ -287,7 +382,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         return '#9E9E9E'; // xám
     }
   };
-  
+
   // Lấy nhãn hiển thị cho trạng thái dự án
   const getStatusLabel = (status) => {
     switch (status) {
@@ -303,7 +398,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         return status || 'Không xác định';
     }
   };
-  
+
   // Lấy màu sắc theo trạng thái công việc
   const getTaskStatusColor = (status) => {
     switch (status) {
@@ -317,7 +412,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         return '#9E9E9E'; // xám
     }
   };
-  
+
   // Lấy nhãn hiển thị cho trạng thái công việc
   const getTaskStatusLabel = (status) => {
     switch (status) {
@@ -331,14 +426,14 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         return status || 'Không xác định';
     }
   };
-  
+
   // Lấy tên hiển thị cho công việc
   const getTaskDisplayName = (taskKey) => {
     switch (taskKey) {
+      case 'material_separation':
+        return 'Bóc tách vật tư';
       case 'quotation':
         return 'Báo giá';
-      case 'material_separation':
-        return 'Tách vật liệu';
       case 'material_cutting':
         return 'Cắt phôi';
       case 'assembly':
@@ -353,8 +448,10 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         return taskKey;
     }
   };
-  
+
   // Hàm lấy danh sách file Excel từ Google Drive
+  // MOVED TO useMaterialsProcessor HOOK
+  /*
   const fetchGoogleDriveFiles = async (token) => {
     console.log("Using Access Token to fetch files:", token);
     setIsLoadingFiles(true);
@@ -396,8 +493,11 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       setIsLoadingFiles(false);
     }
   };
-  
+  */
+
   // Hàm xử lý khi người dùng chọn một file
+  // MOVED TO useMaterialsProcessor HOOK
+  /*
   const handleFileSelect = async (fileId, fileName) => {
     try {
       console.log(`Downloading file: ${fileName} (${fileId})`);
@@ -460,8 +560,11 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       Alert.alert('Lỗi', 'Không thể tải xuống file từ Google Drive. Vui lòng thử lại sau.');
     }
   };
-  
+  */
+
   // Hàm xử lý và hiển thị dữ liệu từ file Excel
+  // MOVED TO useMaterialsProcessor HOOK
+  /*
   const parseAndDisplayData = (base64Data, fileName) => {
     try {
       // Đọc workbook từ base64
@@ -492,7 +595,8 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           material: row[2] || '', // Cột C - Vật liệu
           quyCach: row[3] && row[4] ? `${row[3]}x${row[4]}` : '', // Kết hợp cột D, E
           unit: row[6] || '', // Cột G - ĐVT
-          quantity: parseFloat(row[8]) || 0, // Cột I - SL
+          quantity: parseFloat(row[7]) || 0, // Cột H (index 7) - Số lượng
+          weight: parseFloat(row[8]) || 0, // Cột I (index 8) - Khối lượng
           unitPrice: 0, // Đơn giá - Sẽ được người dùng nhập
           totalPrice: 0, // Thành tiền - Sẽ được tính toán
         };
@@ -517,8 +621,11 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       Alert.alert('Lỗi', 'Không thể xử lý dữ liệu Excel. Định dạng không đúng cấu trúc yêu cầu.');
     }
   };
-  
+  */
+
   // Hàm xử lý khi người dùng nhập đơn giá
+  // MOVED TO useMaterialsProcessor HOOK
+  /*
   const handlePriceChange = (text, index) => {
     // Tạo bản sao sâu của mảng materials để tránh thay đổi trực tiếp
     const newMaterials = JSON.parse(JSON.stringify(materials));
@@ -532,13 +639,16 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     // Cập nhật đơn giá của item
     item.unitPrice = price;
     
-    // Tính toán thành tiền cho dòng đó
-    item.totalPrice = (item.quantity || 0) * price;
+    // Tính toán thành tiền cho dòng đó theo công thức mới
+    item.totalPrice = (item.quantity || 0) * (item.weight || 0) * price;
     
     // Cập nhật state với mảng đã được sửa đổi
     setMaterials(newMaterials);
   };
+  */
 
+  // MOVED TO useMaterialsProcessor HOOK
+  /*
   const handleImportFromGoogleDrive = async () => {
     setIsGoogleDriveLoading(true);
     try {
@@ -584,70 +694,131 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       setIsGoogleDriveLoading(false);
     }
   };
+  */
+
+  const handleViewPdf = async (pdfUrl, quotationNumber) => {
+    if (!pdfUrl) {
+      Alert.alert('Lỗi', 'Không tìm thấy đường dẫn PDF cho báo giá này.');
+      return;
+    }
+
+    Alert.alert('Đang xử lý', 'Đang tải file PDF để xem...');
+    try {
+      const fileUri =
+        FileSystem.documentDirectory + `${quotationNumber || 'quotation'}.pdf`;
+      console.log('Downloading PDF from URL:', pdfUrl);
+      const { uri } = await FileSystem.downloadAsync(pdfUrl, fileUri);
+      console.log('File downloaded to:', uri);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { dialogTitle: 'Mở hoặc chia sẻ PDF' });
+      } else {
+        Alert.alert(
+          'Không thể chia sẻ',
+          'Thiết bị của bạn không hỗ trợ chức năng này.'
+        );
+      }
+    } catch (error) {
+      console.error('Error handling PDF view:', error);
+      Alert.alert('Lỗi', 'Không thể mở file PDF. Vui lòng thử lại.');
+    }
+  };
 
   // Tạo các components cho header và footer của FlatList
   const renderListHeader = () => (
     <>
       <View style={styles.projectHeader}>
         <Text style={styles.projectName}>{project.name || 'Chưa có tên'}</Text>
-        
+
         <View style={styles.statusContainer}>
-          <View 
+          <View
             style={[
-              styles.statusTag, 
-              { borderColor: getStatusColor(project.status) }
+              styles.statusTag,
+              { borderColor: getStatusColor(project.status) },
             ]}
           >
-            <Text 
+            <Text
               style={[
-                styles.statusText, 
-                { color: getStatusColor(project.status) }
+                styles.statusText,
+                { color: getStatusColor(project.status) },
               ]}
             >
               {getStatusLabel(project.status)}
             </Text>
           </View>
         </View>
-        
-        <Text style={styles.projectDescription}>{project.description || 'Không có mô tả'}</Text>
+
+        <Text style={styles.projectDescription}>
+          {project.description || 'Không có mô tả'}
+        </Text>
       </View>
-      
+
       {/* Nút nhập vật tư từ Google Drive */}
       <View style={styles.infoSection}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[
             styles.importButton,
-            isGoogleDriveLoading && styles.importButtonDisabled
+            isGoogleDriveLoading && styles.importButtonDisabled,
           ]}
           onPress={handleImportFromGoogleDrive}
           disabled={isGoogleDriveLoading}
         >
           {isGoogleDriveLoading ? (
-            <ActivityIndicator size="small" color="#fff" style={styles.importIcon} />
+            <ActivityIndicator
+              size="small"
+              color="#fff"
+              style={styles.importIcon}
+            />
           ) : (
-            <Ionicons name="cloud-download-outline" size={24} color="#fff" style={styles.importIcon} />
+            <Ionicons
+              name="cloud-download-outline"
+              size={24}
+              color="#fff"
+              style={styles.importIcon}
+            />
           )}
           <Text style={styles.importButtonText}>
             Nhập Vật Tư từ Google Drive
           </Text>
         </TouchableOpacity>
-        
+
         {materials.length > 0 && showMaterialsTable && (
           <View style={styles.materialsHeader}>
             {/* Header của bảng */}
             <View style={styles.tableHeader}>
               <Text style={[styles.headerCell, { flex: 3 }]}>Tên vật tư</Text>
-              <Text style={[styles.headerCell, { flex: 1 }]}>SL</Text>
-              <Text style={[styles.headerCell, { flex: 1 }]}>ĐVT</Text>
-              <Text style={[styles.headerCell, { flex: 2 }]}>Đơn giá</Text>
-              <Text style={[styles.headerCell, { flex: 2 }]}>Thành tiền</Text>
+              <Text
+                style={[styles.headerCell, { flex: 1, textAlign: 'center' }]}
+              >
+                SL
+              </Text>
+              <Text
+                style={[styles.headerCell, { flex: 1, textAlign: 'center' }]}
+              >
+                KL
+              </Text>
+              <Text
+                style={[styles.headerCell, { flex: 1, textAlign: 'center' }]}
+              >
+                ĐVT
+              </Text>
+              <Text
+                style={[styles.headerCell, { flex: 2, textAlign: 'right' }]}
+              >
+                Đơn giá
+              </Text>
+              <Text
+                style={[styles.headerCell, { flex: 2, textAlign: 'right' }]}
+              >
+                Thành tiền
+              </Text>
             </View>
           </View>
         )}
       </View>
     </>
   );
-  
+
   const renderListFooter = () => (
     <>
       {/* Tổng cộng */}
@@ -656,16 +827,22 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           <View style={styles.summaryContainer}>
             <Text style={styles.summaryLabel}>Tổng cộng:</Text>
             <Text style={styles.summaryValue}>
-              {materials.reduce((sum, item) => sum + (item.totalPrice || 0), 0).toLocaleString('vi-VN')} đ
+              {materials
+                .reduce((sum, item) => sum + (item.totalPrice || 0), 0)
+                .toLocaleString('vi-VN')}{' '}
+              đ
             </Text>
           </View>
-          
+
           {/* Nút tiếp tục để hoàn thiện báo giá */}
           <TouchableOpacity
             style={styles.continueButton}
             onPress={() => {
-              const subTotal = materials.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-              
+              const subTotal = materials.reduce(
+                (sum, item) => sum + (item.totalPrice || 0),
+                0
+              );
+
               // Tạo đối tượng customerData từ thông tin dự án
               const customerData = {
                 id: project.customerId || '',
@@ -673,91 +850,181 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                 address: project.customerAddress || '',
                 phone: project.customerPhone || '',
                 email: project.customerEmail || '',
-                contact: project.customerContact || ''
+                contact: project.customerContact || '',
               };
-              
+
               // Truyền thêm projectId và customerData khi chuyển màn hình
-              navigation.navigate('FinalizeQuotation', { 
-                materials, 
-                subTotal, 
-                projectId, 
+              navigation.navigate('FinalizeQuotation', {
+                materials,
+                subTotal,
+                projectId,
                 projectName: project.name || 'Dự án mới',
-                customerData 
+                customerData,
               });
             }}
           >
-            <Text style={styles.continueButtonText}>Tiếp tục hoàn thiện báo giá</Text>
+            <Text style={styles.continueButtonText}>
+              Tiếp tục hoàn thiện báo giá
+            </Text>
             <Ionicons name="arrow-forward" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
       )}
-      
+
+      {/* Quotation History Section */}
+      <View style={styles.infoSection}>
+        <Text style={styles.sectionTitle}>Lịch sử báo giá</Text>
+        {isLoadingQuotations ? (
+          <ActivityIndicator size="small" color="#0066cc" />
+        ) : quotations.length === 0 ? (
+          <Text style={styles.emptyText}>
+            Chưa có báo giá nào được tạo cho dự án này.
+          </Text>
+        ) : (
+          <View style={styles.historyContainer}>
+            {quotations.map((item, index) => (
+              <View
+                key={item.id}
+                style={[
+                  styles.historyItem,
+                  index > 0 && styles.historyItemBorder,
+                ]}
+              >
+                <View style={styles.historyInfo}>
+                  <Text style={styles.historyNumber}>
+                    {item.quotationNumber ||
+                      `Báo giá #${item.id.substring(0, 5)}`}
+                  </Text>
+                  <Text style={styles.historyDate}>
+                    Ngày tạo:{' '}
+                    {item.createdAt
+                      ? new Date(
+                          item.createdAt.seconds * 1000
+                        ).toLocaleDateString('vi-VN')
+                      : 'Không rõ'}
+                  </Text>
+                  <Text style={styles.historyTotal}>
+                    Tổng cộng: {formatCurrency(item.grandTotal)}
+                  </Text>
+                </View>
+                <View style={styles.historyActions}>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() =>
+                      handleViewPdf(item.pdfUrl, item.quotationNumber)
+                    }
+                  >
+                    <Ionicons
+                      name="document-text-outline"
+                      size={20}
+                      color="#0066cc"
+                    />
+                    <Text style={styles.actionButtonText}>Xem PDF</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.requoteButton]}
+                    onPress={() => handleRequote(item)}
+                  >
+                    <Ionicons name="copy-outline" size={20} color="#4CAF50" />
+                    <Text
+                      style={[styles.actionButtonText, { color: '#4CAF50' }]}
+                    >
+                      Báo giá lại
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+
       {/* Phần thông tin khách hàng và các thông tin khác */}
       <View style={styles.infoSection}>
         <Text style={styles.sectionTitle}>Thông tin khách hàng</Text>
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.customerCard}
           onPress={navigateToCustomerDetail}
         >
           <View style={styles.customerInfo}>
-            <Ionicons name="business" size={24} color="#0066cc" style={styles.customerIcon} />
+            <Ionicons
+              name="business"
+              size={24}
+              color="#0066cc"
+              style={styles.customerIcon}
+            />
             <View>
-              <Text style={styles.customerName}>{project.customerName || 'Không xác định'}</Text>
+              <Text style={styles.customerName}>
+                {project.customerName || 'Không xác định'}
+              </Text>
               {project.customerContact && (
-                <Text style={styles.customerDetail}>Người liên hệ: {project.customerContact}</Text>
+                <Text style={styles.customerDetail}>
+                  Người liên hệ: {project.customerContact}
+                </Text>
               )}
               {project.customerEmail && (
-                <Text style={styles.customerDetail}>Email: {project.customerEmail}</Text>
+                <Text style={styles.customerDetail}>
+                  Email: {project.customerEmail}
+                </Text>
               )}
               {project.customerPhone && (
-                <Text style={styles.customerDetail}>SĐT: {project.customerPhone}</Text>
+                <Text style={styles.customerDetail}>
+                  SĐT: {project.customerPhone}
+                </Text>
               )}
             </View>
           </View>
           <Ionicons name="chevron-forward" size={20} color="#999" />
         </TouchableOpacity>
       </View>
-      
+
       <View style={styles.infoSection}>
         <Text style={styles.sectionTitle}>Thông tin cơ bản</Text>
-        
+
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Ngày bắt đầu:</Text>
           <Text style={styles.infoValue}>
-            {project.startDate ? formatDate(project.startDate) : 'Chưa xác định'}
+            {project.startDate
+              ? formatDate(project.startDate)
+              : 'Chưa xác định'}
           </Text>
         </View>
-        
+
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Ngày kết thúc:</Text>
           <Text style={styles.infoValue}>
             {project.endDate ? formatDate(project.endDate) : 'Chưa xác định'}
           </Text>
         </View>
-        
+
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Số ngày thi công:</Text>
           <Text style={styles.infoValue}>
-            {project.durationInDays ? `${project.durationInDays} ngày` : 'Chưa xác định'}
+            {project.durationInDays
+              ? `${project.durationInDays} ngày`
+              : 'Chưa xác định'}
           </Text>
         </View>
-        
+
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Vị trí thi công:</Text>
           <Text style={styles.infoValue}>
-            {project.location === 'workshop' ? 'Tại xưởng' : 
-             project.location === 'site' ? 'Tại công trình' : 'Chưa xác định'}
+            {project.location === 'workshop'
+              ? 'Tại xưởng'
+              : project.location === 'site'
+              ? 'Tại công trình'
+              : 'Chưa xác định'}
           </Text>
         </View>
-        
+
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Ngân sách:</Text>
           <Text style={styles.infoValue}>
             {project.budget ? formatCurrency(project.budget) : 'Chưa xác định'}
           </Text>
         </View>
-        
+
         {project.notes && (
           <>
             <Text style={styles.notesLabel}>Ghi chú:</Text>
@@ -765,11 +1032,11 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           </>
         )}
       </View>
-      
+
       {/* Phần danh sách công việc */}
       <View style={styles.infoSection}>
         <Text style={styles.sectionTitle}>Hạng mục công việc</Text>
-        
+
         {!project?.tasks ? (
           <View style={styles.emptyTasksContainer}>
             <Ionicons name="list-outline" size={40} color="#ccc" />
@@ -781,44 +1048,65 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           <View style={styles.tasksBoard}>
             {TASK_DEFINITIONS.map((taskDef) => {
               const taskData = project.tasks[taskDef.key];
-              
+
               // Nếu là công việc "other" và chưa có tên
-              if (taskDef.key === 'other' && (!taskData?.name || taskData.name === '')) {
+              if (
+                taskDef.key === 'other' &&
+                (!taskData?.name || taskData.name === '')
+              ) {
                 return (
                   <TouchableOpacity
                     key={taskDef.key}
                     style={styles.taskRow}
                     onPress={() => setCustomTaskModalVisible(true)}
                   >
-                    <StatusIndicator status={taskData?.status || 'pending'} size={18} />
+                    <StatusIndicator
+                      status={taskData?.status || 'pending'}
+                      size={18}
+                    />
                     <View style={styles.taskContent}>
                       <Text style={styles.taskNamePlaceholder}>
                         Thêm công việc khác...
                       </Text>
                     </View>
-                    <Ionicons name="add-circle-outline" size={24} color="#0066cc" />
+                    <Ionicons
+                      name="add-circle-outline"
+                      size={24}
+                      color="#0066cc"
+                    />
                   </TouchableOpacity>
                 );
               }
-              
+
               // Nếu là công việc "other" và đã có tên
               if (taskDef.key === 'other' && taskData?.name) {
                 return (
                   <TouchableOpacity
                     key={taskDef.key}
                     style={styles.taskRow}
-                    onPress={() => handleUpdateTaskStatus(taskDef.key, taskData.status)}
+                    onPress={() =>
+                      handleUpdateTaskStatus(taskDef.key, taskData.status)
+                    }
                     activeOpacity={0.7}
                   >
-                    <StatusIndicator status={taskData?.status || 'pending'} size={18} />
+                    <StatusIndicator
+                      status={taskData?.status || 'pending'}
+                      size={18}
+                    />
                     <View style={styles.taskContent}>
-                      <Text style={styles.taskName} numberOfLines={1} ellipsizeMode="tail">
+                      <Text
+                        style={styles.taskName}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
                         {taskData.name}
                       </Text>
-                      <Text style={[
-                        styles.taskStatusText,
-                        { color: getTaskStatusColor(taskData?.status) }
-                      ]}>
+                      <Text
+                        style={[
+                          styles.taskStatusText,
+                          { color: getTaskStatusColor(taskData?.status) },
+                        ]}
+                      >
                         {getTaskStatusLabel(taskData?.status)}
                       </Text>
                     </View>
@@ -827,29 +1115,44 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                       onPress={() => setCustomTaskModalVisible(true)}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                      <Ionicons name="create-outline" size={20} color="#0066cc" />
+                      <Ionicons
+                        name="create-outline"
+                        size={20}
+                        color="#0066cc"
+                      />
                     </TouchableOpacity>
                   </TouchableOpacity>
                 );
               }
-              
+
               // Các công việc thông thường
               return (
                 <TouchableOpacity
                   key={taskDef.key}
                   style={styles.taskRow}
-                  onPress={() => handleUpdateTaskStatus(taskDef.key, taskData?.status)}
+                  onPress={() =>
+                    handleUpdateTaskStatus(taskDef.key, taskData?.status)
+                  }
                   activeOpacity={0.7}
                 >
-                  <StatusIndicator status={taskData?.status || 'pending'} size={18} />
+                  <StatusIndicator
+                    status={taskData?.status || 'pending'}
+                    size={18}
+                  />
                   <View style={styles.taskContent}>
-                    <Text style={styles.taskName} numberOfLines={1} ellipsizeMode="tail">
+                    <Text
+                      style={styles.taskName}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
                       {taskDef.label}
                     </Text>
-                    <Text style={[
-                      styles.taskStatusText,
-                      { color: getTaskStatusColor(taskData?.status) }
-                    ]}>
+                    <Text
+                      style={[
+                        styles.taskStatusText,
+                        { color: getTaskStatusColor(taskData?.status) },
+                      ]}
+                    >
                       {getTaskStatusLabel(taskData?.status)}
                     </Text>
                   </View>
@@ -861,7 +1164,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       </View>
     </>
   );
-  
+
   // Render chính
   return (
     <View style={styles.container}>
@@ -880,7 +1183,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           <Ionicons name="trash-outline" size={24} color="#d11a2a" />
         </TouchableOpacity>
       </View>
-      
+
       {/* Sử dụng FlatList làm component chính cho cuộn trang */}
       {showMaterialsTable && materials.length > 0 ? (
         <FlatList
@@ -891,36 +1194,12 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           ListHeaderComponent={renderListHeader}
           ListFooterComponent={renderListFooter}
           renderItem={({ item, index }) => (
-            <View style={styles.tableRow}>
-              <View style={[styles.tableCell, { flex: 3 }]}>
-                <Text style={styles.materialName}>{item.name}</Text>
-                {item.material ? (
-                  <Text style={styles.materialType}>{item.material}</Text>
-                ) : null}
-                {item.quyCach ? (
-                  <Text style={styles.materialType}>Quy cách: {item.quyCach}</Text>
-                ) : null}
-              </View>
-              <Text style={[styles.tableCell, { flex: 1 }]}>
-                {item.quantity.toLocaleString('vi-VN')}
-              </Text>
-              <Text style={[styles.tableCell, { flex: 1 }]}>
-                {item.unit}
-              </Text>
-              <View style={[styles.tableCell, { flex: 2 }]}>
-                <TextInput
-                  style={styles.priceInput}
-                  value={item.unitPrice > 0 ? item.unitPrice.toString() : ''}
-                  onChangeText={(text) => handlePriceChange(text, index)}
-                  placeholder="Nhập..."
-                  keyboardType="numeric"
-                  selectTextOnFocus
-                />
-              </View>
-              <Text style={[styles.tableCell, styles.totalPrice, { flex: 2 }]}>
-                {item.totalPrice > 0 ? item.totalPrice.toLocaleString('vi-VN') : ''}
-              </Text>
-            </View>
+            <MaterialRow
+              item={item}
+              index={index}
+              onPriceChange={handlePriceChange}
+              formatNumber={formatAppNumber}
+            />
           )}
         />
       ) : (
@@ -932,15 +1211,12 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           ListFooterComponent={renderListFooter}
         />
       )}
-      
+
       {/* Debug button */}
-      <TouchableOpacity
-        style={styles.debugButton}
-        onPress={toggleDebugInfo}
-      >
+      <TouchableOpacity style={styles.debugButton} onPress={toggleDebugInfo}>
         <Text style={styles.debugButtonText}>Debug</Text>
       </TouchableOpacity>
-      
+
       {/* Footer */}
       <View style={styles.footer}>
         <TouchableOpacity
@@ -951,7 +1227,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           <Text style={styles.editButtonText}>Chỉnh sửa</Text>
         </TouchableOpacity>
       </View>
-      
+
       {/* Modal cập nhật tên công việc khác */}
       <Modal
         visible={customTaskModalVisible}
@@ -959,12 +1235,12 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         animationType="fade"
         onRequestClose={() => setCustomTaskModalVisible(false)}
       >
-        <TouchableOpacity 
-          style={styles.modalContainer} 
+        <TouchableOpacity
+          style={styles.modalContainer}
           activeOpacity={1}
           onPress={() => setCustomTaskModalVisible(false)}
         >
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.modalContent}
             activeOpacity={1}
             onPress={(e) => e.stopPropagation()}
@@ -979,7 +1255,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.modalBody}>
               <Text style={styles.inputLabel}>Tên công việc:</Text>
               <TextInput
@@ -988,7 +1264,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                 onChangeText={setCustomTaskName}
                 placeholder="Nhập tên công việc khác..."
               />
-              
+
               <TouchableOpacity
                 style={[styles.saveTaskButton, { marginTop: 20 }]}
                 onPress={handleUpdateCustomTask}
@@ -999,7 +1275,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
-      
+
       {/* Modal picker cho Google Drive files */}
       <Modal
         visible={isPickerVisible}
@@ -1007,12 +1283,12 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         animationType="slide"
         onRequestClose={() => setIsPickerVisible(false)}
       >
-        <TouchableOpacity 
-          style={styles.modalContainer} 
+        <TouchableOpacity
+          style={styles.modalContainer}
           activeOpacity={1}
           onPress={() => setIsPickerVisible(false)}
         >
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.filePickerContent}
             activeOpacity={1}
             onPress={(e) => e.stopPropagation()}
@@ -1027,7 +1303,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
-            
+
             {isLoadingFiles ? (
               <View style={{ padding: 20, alignItems: 'center' }}>
                 <ActivityIndicator size="large" color="#0066cc" />
@@ -1052,18 +1328,24 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                     style={styles.fileItem}
                     onPress={() => handleFileSelect(item.id, item.name)}
                   >
-                    <Ionicons 
-                      name="document-text-outline" 
-                      size={36} 
+                    <Ionicons
+                      name="document-text-outline"
+                      size={36}
                       color="#4CAF50"
                       style={styles.fileIcon}
                     />
                     <View style={styles.fileDetails}>
-                      <Text style={styles.fileName} numberOfLines={1} ellipsizeMode="middle">
+                      <Text
+                        style={styles.fileName}
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                      >
                         {item.name}
                       </Text>
                       <Text style={styles.fileDate}>
-                        {new Date(item.modifiedTime).toLocaleDateString('vi-VN')}
+                        {new Date(item.modifiedTime).toLocaleDateString(
+                          'vi-VN'
+                        )}
                       </Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color="#999" />
@@ -1074,7 +1356,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
-      
+
       {/* Modal hiển thị debug info */}
       <Modal
         visible={showDebugInfo}
@@ -1085,33 +1367,37 @@ const ProjectDetailScreen = ({ route, navigation }) => {
         <View style={styles.debugModalContainer}>
           <View style={styles.debugModalContent}>
             <Text style={styles.debugModalTitle}>Debug Information</Text>
-            
+
             <ScrollView style={styles.debugScrollView}>
               <Text style={styles.debugSectionTitle}>Auth Configuration:</Text>
               <Text style={styles.debugText}>
-                Web Client ID: 370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com
+                Web Client ID:
+                370615243912-o6d5f9a9l5vbui1o1gcnd5t0lbkru9is.apps.googleusercontent.com
               </Text>
-              
+
               {debugInfo.redirectUri && (
                 <Text style={styles.debugText}>
                   Manual Redirect URI: {debugInfo.redirectUri}
                 </Text>
               )}
-              
+
               {debugInfo.request && (
                 <>
                   <Text style={styles.debugText}>
-                    Request Redirect URI: {debugInfo.request.redirectUri || 'N/A'}
+                    Request Redirect URI:{' '}
+                    {debugInfo.request.redirectUri || 'N/A'}
                   </Text>
                   <Text style={styles.debugText}>
-                    iOS Client ID: {debugInfo.request.iosClientId ? '✓ Set' : '✗ Not Set'}
+                    iOS Client ID:{' '}
+                    {debugInfo.request.iosClientId ? '✓ Set' : '✗ Not Set'}
                   </Text>
                   <Text style={styles.debugText}>
-                    Android Client ID: {debugInfo.request.androidClientId ? '✓ Set' : '✗ Not Set'}
+                    Android Client ID:{' '}
+                    {debugInfo.request.androidClientId ? '✓ Set' : '✗ Not Set'}
                   </Text>
                 </>
               )}
-              
+
               {debugInfo.response && (
                 <>
                   <Text style={styles.debugSectionTitle}>Auth Response:</Text>
@@ -1130,14 +1416,14 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                   )}
                 </>
               )}
-              
+
               <Text style={styles.debugSectionTitle}>Access Token:</Text>
               <Text style={styles.debugText}>
                 {/* Sửa lỗi: Không còn state accessToken, tạm thời bỏ hiển thị */}
                 Token status is no longer tracked in component state.
               </Text>
             </ScrollView>
-            
+
             <TouchableOpacity
               style={styles.debugCloseButton}
               onPress={() => setShowDebugInfo(false)}
@@ -1635,7 +1921,7 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
-  
+
   // Styles cho bảng vật tư
   materialsContainer: {
     marginTop: 20,
@@ -1737,6 +2023,59 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 24,
+  },
+  // Quotation History Styles
+  historyContainer: {
+    marginTop: 10,
+  },
+  historyItem: {
+    paddingVertical: 12,
+  },
+  historyItemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  historyInfo: {
+    marginBottom: 12,
+  },
+  historyNumber: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  historyDate: {
+    fontSize: 14,
+    color: '#666',
+    marginVertical: 4,
+  },
+  historyTotal: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#333',
+  },
+  historyActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 6,
+  },
+  requoteButton: {},
+  actionButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#0066cc',
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#666',
+    marginTop: 10,
+    fontStyle: 'italic',
   },
 });
 

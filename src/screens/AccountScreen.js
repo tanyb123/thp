@@ -1,38 +1,61 @@
-import React, { useContext } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  Switch, 
+//src/screens/AccountScreen.js
+import React, { useContext, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Switch,
   ScrollView,
-  Alert
+  Alert,
+  LayoutAnimation,
+  UIManager,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 
-const SettingItem = ({ icon, title, value, onPress, type = 'chevron', color }) => {
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const SettingItem = ({
+  icon,
+  title,
+  value,
+  onPress,
+  type = 'chevron',
+  color,
+}) => {
   const { theme } = useTheme();
-  
+
   return (
-    <TouchableOpacity 
-      style={[styles.settingItem, { borderBottomColor: theme.border }]} 
+    <TouchableOpacity
+      style={[styles.settingItem, { borderBottomColor: theme.border }]}
       onPress={onPress}
       disabled={type === 'switch'}
     >
       <View style={styles.settingLeft}>
-        <Ionicons 
-          name={icon} 
-          size={22} 
-          color={color || theme.text} 
-          style={styles.settingIcon} 
+        <Ionicons
+          name={icon}
+          size={22}
+          color={color || theme.text}
+          style={styles.settingIcon}
         />
-        <Text style={[styles.settingTitle, { color: theme.text }]}>{title}</Text>
+        <Text style={[styles.settingTitle, { color: theme.text }]}>
+          {title}
+        </Text>
       </View>
-      
+
       <View style={styles.settingRight}>
         {type === 'switch' && (
           <Switch
@@ -43,7 +66,9 @@ const SettingItem = ({ icon, title, value, onPress, type = 'chevron', color }) =
           />
         )}
         {type === 'value' && (
-          <Text style={[styles.settingValue, { color: theme.textSecondary }]}>{value}</Text>
+          <Text style={[styles.settingValue, { color: theme.textSecondary }]}>
+            {value}
+          </Text>
         )}
         {type === 'chevron' && (
           <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
@@ -53,9 +78,75 @@ const SettingItem = ({ icon, title, value, onPress, type = 'chevron', color }) =
   );
 };
 
+// Helper function to map role keys to display labels
+const getRoleLabel = (role) => {
+  switch (role) {
+    case 'admin':
+      return 'Quản trị viên';
+    case 'giam_doc':
+      return 'Giám đốc';
+    case 'pho_giam_doc':
+      return 'Phó Giám đốc';
+    case 'quan_ly':
+      return 'Quản lý';
+    case 'ky_su':
+      return 'Kỹ sư';
+    case 'ke_toan':
+      return 'Kế toán';
+    case 'thuong_mai':
+      return 'Thương mại';
+    case 'cong_nhan':
+      return 'Công nhân';
+    case 'user':
+      return 'Người dùng';
+    default:
+      return 'Không xác định';
+  }
+};
+
+// Helper function to get style based on role
+const getRoleStyle = (role) => {
+  switch (role) {
+    case 'giam_doc':
+      return { backgroundColor: '#FFD700', textColor: '#8C6D00' };
+    case 'pho_giam_doc':
+      return { backgroundColor: '#E6E6FA', textColor: '#483D8B' };
+    case 'ky_su':
+      return {
+        backgroundColor: 'rgba(0, 102, 204, 0.2)',
+        textColor: '#0066cc',
+      };
+    case 'ke_toan':
+      return {
+        backgroundColor: 'rgba(46, 204, 113, 0.2)',
+        textColor: '#27AE60',
+      };
+    case 'thuong_mai':
+      return {
+        backgroundColor: 'rgba(243, 156, 18, 0.2)',
+        textColor: '#D35400',
+      };
+    case 'cong_nhan':
+      return { backgroundColor: '#f0f0f0', textColor: '#555' };
+    case 'admin':
+    case 'quan_ly':
+    case 'user':
+    default:
+      return {
+        backgroundColor: 'rgba(108, 122, 137, 0.2)',
+        textColor: '#6C7A89',
+      };
+  }
+};
+
 const AccountScreen = () => {
   const { logout, currentUser } = useAuth();
-  const { theme, isDarkMode, toggleTheme, followSystem, toggleFollowSystem } = useTheme();
+  const { theme, isDarkMode, toggleTheme, followSystem, toggleFollowSystem } =
+    useTheme();
+
+  useEffect(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+  }, []);
 
   const handleLogout = () => {
     Alert.alert(
@@ -81,93 +172,153 @@ const AccountScreen = () => {
       // Ngắt kết nối tài khoản Google hiện tại
       await GoogleSignin.revokeAccess();
       await GoogleSignin.signOut();
-      
+
       Alert.alert(
-        "Đã ngắt kết nối",
-        "Tài khoản Google đã được ngắt kết nối. Bạn có thể kết nối lại khi cần thiết trong màn hình chi tiết dự án."
+        'Đã ngắt kết nối',
+        'Tài khoản Google đã được ngắt kết nối. Bạn có thể kết nối lại khi cần thiết trong màn hình chi tiết dự án.'
       );
     } catch (error) {
-      console.error("Lỗi khi chuyển tài khoản Google:", error);
-      Alert.alert("Lỗi", "Không thể ngắt kết nối tài khoản Google. Vui lòng thử lại.");
+      if (error.code === statusCodes.SIGN_IN_REQUIRED) {
+        // This error is expected after a sign-out or if the user isn't signed in.
+        // We can safely ignore it.
+        console.log(
+          'User is not signed in, which is expected after revokeAccess.'
+        );
+        Alert.alert(
+          'Đã ngắt kết nối',
+          'Tài khoản Google đã được ngắt kết nối thành công.'
+        );
+      } else {
+        // For any other unexpected errors, show an alert to the user.
+        console.error('Lỗi khi chuyển tài khoản Google:', error);
+        Alert.alert(
+          'Lỗi',
+          'Không thể ngắt kết nối tài khoản Google. Vui lòng thử lại.'
+        );
+      }
     }
   };
 
+  // Get dynamic style for role badge
+  const roleStyle = getRoleStyle(currentUser?.role);
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView style={styles.scrollView}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollViewContent}
+      >
         {/* Header */}
         <View style={styles.header}>
-          <View style={[styles.avatarContainer, { backgroundColor: theme.primaryLight }]}>
-            <Text style={[styles.avatarText, { color: theme.primary }]}>
-              {currentUser?.email ? currentUser.email[0].toUpperCase() : 'U'}
-            </Text>
+          <View style={[styles.profileCard, { backgroundColor: theme.card }]}>
+            <View
+              style={[
+                styles.avatarContainer,
+                { backgroundColor: theme.primaryLight },
+              ]}
+            >
+              <Text style={[styles.avatarText, { color: theme.primary }]}>
+                {currentUser?.displayName
+                  ? currentUser.displayName[0].toUpperCase()
+                  : currentUser?.email
+                  ? currentUser.email[0].toUpperCase()
+                  : 'U'}
+              </Text>
+            </View>
+            <View style={styles.userInfoContainer}>
+              <Text style={[styles.nameText, { color: theme.text }]}>
+                {currentUser?.displayName || 'Tên Người Dùng'}
+              </Text>
+              <View
+                style={[
+                  styles.roleBadge,
+                  { backgroundColor: roleStyle.backgroundColor },
+                ]}
+              >
+                <Text
+                  style={[styles.roleBadgeText, { color: roleStyle.textColor }]}
+                >
+                  {getRoleLabel(currentUser?.role)}
+                </Text>
+              </View>
+            </View>
           </View>
-          <Text style={[styles.emailText, { color: theme.text }]}>
-            {currentUser?.email || 'user@example.com'}
-          </Text>
         </View>
-        
+
         {/* Settings Groups */}
         <View style={[styles.settingsGroup, { backgroundColor: theme.card }]}>
-          <Text style={[styles.groupTitle, { color: theme.textSecondary }]}>Giao diện</Text>
-          <SettingItem 
-            icon="contrast-outline" 
-            title="Chế độ tối" 
+          <Text style={[styles.groupTitle, { color: theme.textSecondary }]}>
+            Giao diện
+          </Text>
+          <SettingItem
+            icon="contrast-outline"
+            title="Chế độ tối"
             value={isDarkMode}
             onPress={toggleTheme}
             type="switch"
           />
-          <SettingItem 
-            icon="phone-portrait-outline" 
-            title="Theo hệ thống" 
+          <SettingItem
+            icon="phone-portrait-outline"
+            title="Theo hệ thống"
             value={followSystem}
             onPress={toggleFollowSystem}
             type="switch"
           />
         </View>
-        
+
         <View style={[styles.settingsGroup, { backgroundColor: theme.card }]}>
-          <Text style={[styles.groupTitle, { color: theme.textSecondary }]}>Tài khoản</Text>
-          <SettingItem 
-            icon="person-outline" 
-            title="Thông tin cá nhân" 
+          <Text style={[styles.groupTitle, { color: theme.textSecondary }]}>
+            Tài khoản
+          </Text>
+          <SettingItem
+            icon="person-outline"
+            title="Thông tin cá nhân"
             onPress={() => {}}
           />
-          <SettingItem 
-            icon="key-outline" 
-            title="Đổi mật khẩu" 
+          <SettingItem
+            icon="key-outline"
+            title="Đổi mật khẩu"
             onPress={() => {}}
           />
-           <SettingItem 
-            icon="swap-horizontal-outline" 
-            title="Chuyển tài khoản Google" 
+          <SettingItem
+            icon="swap-horizontal-outline"
+            title="Chuyển tài khoản Google"
             onPress={switchGoogleAccount}
             color="#4285F4"
           />
         </View>
-        
+
         <View style={[styles.settingsGroup, { backgroundColor: theme.card }]}>
-          <Text style={[styles.groupTitle, { color: theme.textSecondary }]}>Ứng dụng</Text>
-          <SettingItem 
-            icon="information-circle-outline" 
-            title="Thông tin ứng dụng" 
+          <Text style={[styles.groupTitle, { color: theme.textSecondary }]}>
+            Ứng dụng
+          </Text>
+          <SettingItem
+            icon="information-circle-outline"
+            title="Thông tin ứng dụng"
             value="1.0.0"
             type="value"
             onPress={() => {}}
           />
-          <SettingItem 
-            icon="help-circle-outline" 
-            title="Trợ giúp & Hỗ trợ" 
+          <SettingItem
+            icon="help-circle-outline"
+            title="Trợ giúp & Hỗ trợ"
             onPress={() => {}}
           />
         </View>
-        
+
         {/* Logout Button */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.logoutButton, { backgroundColor: theme.danger }]}
           onPress={handleLogout}
         >
-          <Ionicons name="log-out-outline" size={20} color="#fff" style={styles.logoutIcon} />
+          <Ionicons
+            name="log-out-outline"
+            size={20}
+            color="#fff"
+            style={styles.logoutIcon}
+          />
           <Text style={styles.logoutText}>Đăng xuất</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -179,28 +330,55 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollView: {
-    flex: 1,
+  scrollViewContent: {
+    paddingVertical: 16,
   },
   header: {
+    paddingHorizontal: 16,
+    marginBottom: 24,
+  },
+  profileCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 20,
+    padding: 16,
+    borderRadius: 16,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   avatarContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginRight: 16,
   },
   avatarText: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: 'bold',
   },
-  emailText: {
-    fontSize: 16,
-    fontWeight: '500',
+  userInfoContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  nameText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  roleBadge: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+  },
+  roleBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   settingsGroup: {
     marginHorizontal: 16,
@@ -210,9 +388,11 @@ const styles = StyleSheet.create({
   },
   groupTitle: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
+    textTransform: 'uppercase',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   settingItem: {
     flexDirection: 'row',
@@ -245,7 +425,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginHorizontal: 16,
-    marginVertical: 20,
+    marginTop: 24,
     paddingVertical: 14,
     borderRadius: 12,
   },

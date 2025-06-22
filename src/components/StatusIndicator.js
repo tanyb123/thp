@@ -1,3 +1,4 @@
+//src/components/StatusIndicator.js
 import React from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 
@@ -31,8 +32,8 @@ const StatusIndicator = ({ status, size = 16 }) => {
           backgroundColor: getStatusColor(),
           width: size,
           height: size,
-          borderRadius: size / 2
-        }
+          borderRadius: size / 2,
+        },
       ]}
     />
   );
@@ -50,8 +51,8 @@ const styles = StyleSheet.create({
     // Các style khác
     marginRight: 10,
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.05)'
-  }
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
 });
 
-export default StatusIndicator; 
+export default StatusIndicator;

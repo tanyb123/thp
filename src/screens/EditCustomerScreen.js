@@ -1,3 +1,4 @@
+//src/screens/EditCustomerScreen.js
 import React, { useState } from 'react';
 import {
   View,
@@ -9,7 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Platform
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { updateCustomer } from '../api/customerService';
@@ -26,72 +27,78 @@ const EditCustomerScreen = ({ route, navigation }) => {
     email: customer.email || '',
     address: customer.address || '',
     type: customer.type || 'regular',
-    taxCode: customer.taxCode || ''
+    taxCode: customer.taxCode || '',
   });
-  
+
   // Cập nhật giá trị form
   const handleChange = (field, value) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }));
   };
-  
+
   // Kiểm tra form hợp lệ
   const validateForm = () => {
     if (!formData.name.trim()) {
       Alert.alert('Lỗi', 'Vui lòng nhập tên khách hàng');
       return false;
     }
-    
+
     if (!formData.contactPerson.trim()) {
       Alert.alert('Lỗi', 'Vui lòng nhập tên người liên hệ');
       return false;
     }
-    
+
     if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       Alert.alert('Lỗi', 'Email không hợp lệ');
       return false;
     }
-    
+
     return true;
   };
-  
+
   // Xử lý cập nhật khách hàng
   const handleUpdate = async () => {
     if (!validateForm()) {
       return;
     }
-    
+
     setIsLoading(true);
-    
+
     try {
       // Gọi API cập nhật thông tin khách hàng
       await updateCustomer(customer.id, formData, currentUser?.uid);
-      
-      Alert.alert(
-        'Thành công',
-        'Đã cập nhật thông tin khách hàng thành công',
-        [
-          { 
-            text: 'OK', 
-            onPress: () => navigation.goBack() 
-          }
-        ]
-      );
+
+      Alert.alert('Thành công', 'Đã cập nhật thông tin khách hàng thành công', [
+        {
+          text: 'OK',
+          onPress: () => navigation.goBack(),
+        },
+      ]);
     } catch (error) {
-      console.error('Lỗi khi cập nhật khách hàng:', error);
-      Alert.alert('Lỗi', 'Không thể cập nhật thông tin khách hàng. Vui lòng thử lại sau.');
+      if (error.code === 'permission-denied') {
+        Alert.alert(
+          'Lỗi quyền',
+          'Bạn không có đủ quyền để thực hiện hành động này.'
+        );
+      } else {
+        console.error('Lỗi khi cập nhật khách hàng:', error);
+        Alert.alert(
+          'Lỗi',
+          'Không thể cập nhật thông tin khách hàng. Vui lòng thử lại sau.'
+        );
+      }
     } finally {
       setIsLoading(false);
     }
   };
-  
+
   // Xử lý thay đổi loại khách hàng
   const handleSelectType = (type) => {
     handleChange('type', type);
   };
-  
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -107,14 +114,16 @@ const EditCustomerScreen = ({ route, navigation }) => {
         <Text style={styles.headerTitle}>Chỉnh sửa thông tin khách hàng</Text>
         <View style={styles.placeholder} />
       </View>
-      
-      <ScrollView 
+
+      <ScrollView
         style={styles.formContainer}
         contentContainerStyle={styles.formContent}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Tên công ty / Tổ chức <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>
+            Tên công ty / Tổ chức <Text style={styles.required}>*</Text>
+          </Text>
           <TextInput
             style={styles.input}
             value={formData.name}
@@ -122,9 +131,11 @@ const EditCustomerScreen = ({ route, navigation }) => {
             placeholder="Nhập tên công ty hoặc tổ chức"
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Người liên hệ <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>
+            Người liên hệ <Text style={styles.required}>*</Text>
+          </Text>
           <TextInput
             style={styles.input}
             value={formData.contactPerson}
@@ -132,7 +143,7 @@ const EditCustomerScreen = ({ route, navigation }) => {
             placeholder="Nhập tên người liên hệ"
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Số điện thoại</Text>
           <TextInput
@@ -143,7 +154,7 @@ const EditCustomerScreen = ({ route, navigation }) => {
             keyboardType="phone-pad"
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Email</Text>
           <TextInput
@@ -155,7 +166,7 @@ const EditCustomerScreen = ({ route, navigation }) => {
             autoCapitalize="none"
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Địa chỉ</Text>
           <TextInput
@@ -167,7 +178,7 @@ const EditCustomerScreen = ({ route, navigation }) => {
             numberOfLines={3}
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Mã số thuế</Text>
           <TextInput
@@ -177,55 +188,56 @@ const EditCustomerScreen = ({ route, navigation }) => {
             placeholder="Nhập mã số thuế"
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Loại khách hàng</Text>
           <View style={styles.typeButtonsContainer}>
             <TouchableOpacity
               style={[
                 styles.typeButton,
-                formData.type === 'potential' && styles.selectedTypeButton
+                formData.type === 'potential' && styles.selectedTypeButton,
               ]}
               onPress={() => handleSelectType('potential')}
             >
               <Text
                 style={[
                   styles.typeButtonText,
-                  formData.type === 'potential' && styles.selectedTypeButtonText
+                  formData.type === 'potential' &&
+                    styles.selectedTypeButtonText,
                 ]}
               >
                 Tiềm năng
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.typeButton,
-                formData.type === 'regular' && styles.selectedTypeButton
+                formData.type === 'regular' && styles.selectedTypeButton,
               ]}
               onPress={() => handleSelectType('regular')}
             >
               <Text
                 style={[
                   styles.typeButtonText,
-                  formData.type === 'regular' && styles.selectedTypeButtonText
+                  formData.type === 'regular' && styles.selectedTypeButtonText,
                 ]}
               >
                 Thường xuyên
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.typeButton,
-                formData.type === 'vip' && styles.selectedTypeButton
+                formData.type === 'vip' && styles.selectedTypeButton,
               ]}
               onPress={() => handleSelectType('vip')}
             >
               <Text
                 style={[
                   styles.typeButtonText,
-                  formData.type === 'vip' && styles.selectedTypeButtonText
+                  formData.type === 'vip' && styles.selectedTypeButtonText,
                 ]}
               >
                 VIP
@@ -234,7 +246,7 @@ const EditCustomerScreen = ({ route, navigation }) => {
           </View>
         </View>
       </ScrollView>
-      
+
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.saveButton}
@@ -359,4 +371,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default EditCustomerScreen; 
+export default EditCustomerScreen;

@@ -1,3 +1,4 @@
+//src/screens/ProjectManagementScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -11,13 +12,15 @@ import {
   StatusBar,
   TextInput,
   LayoutAnimation,
-  Platform
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getProjects } from '../api/projectService';
+import { useTheme } from '../contexts/ThemeContext';
 
 // Component hiển thị từng dự án trong danh sách
 const ProjectListItem = ({ project, onPress }) => {
+  const { theme } = useTheme();
   // Xác định màu sắc theo trạng thái dự án
   const getStatusColor = (status) => {
     switch (status) {
@@ -30,7 +33,7 @@ const ProjectListItem = ({ project, onPress }) => {
       case 'cancelled':
         return '#F44336'; // đỏ
       default:
-        return '#9E9E9E'; // xám
+        return theme.textMuted; // Sử dụng màu từ theme
     }
   };
 
@@ -54,52 +57,71 @@ const ProjectListItem = ({ project, onPress }) => {
     <Pressable
       style={({ pressed }) => [
         styles.projectCard,
-        pressed && styles.cardPressed
+        { backgroundColor: theme.card },
+        pressed && styles.cardPressed,
       ]}
       onPress={() => onPress(project)}
     >
       <View style={styles.projectInfo}>
-        <Text style={styles.projectName}>{project.name || 'Chưa có tên'}</Text>
-        
+        <Text style={[styles.projectName, { color: theme.text }]}>
+          {project.name || 'Chưa có tên'}
+        </Text>
+
         {project.customerName && (
           <View style={styles.infoRow}>
-            <Ionicons name="business-outline" size={14} color="#666" />
-            <Text style={styles.infoText}>
+            <Ionicons
+              name="business-outline"
+              size={14}
+              color={theme.textSecondary}
+            />
+            <Text style={[styles.infoText, { color: theme.textSecondary }]}>
               {project.customerName}
             </Text>
           </View>
         )}
-        
+
         {project.startDate && (
           <View style={styles.infoRow}>
-            <Ionicons name="calendar-outline" size={14} color="#666" />
-            <Text style={styles.infoText}>
-              {new Date(project.startDate.seconds * 1000).toLocaleDateString('vi-VN')}
+            <Ionicons
+              name="calendar-outline"
+              size={14}
+              color={theme.textSecondary}
+            />
+            <Text style={[styles.infoText, { color: theme.textSecondary }]}>
+              {new Date(project.startDate.seconds * 1000).toLocaleDateString(
+                'vi-VN'
+              )}
             </Text>
           </View>
         )}
-        
+
         {project.endDate && (
           <View style={styles.infoRow}>
-            <Ionicons name="flag-outline" size={14} color="#666" />
-            <Text style={styles.infoText}>
-              {new Date(project.endDate.seconds * 1000).toLocaleDateString('vi-VN')}
+            <Ionicons
+              name="flag-outline"
+              size={14}
+              color={theme.textSecondary}
+            />
+            <Text style={[styles.infoText, { color: theme.textSecondary }]}>
+              {new Date(project.endDate.seconds * 1000).toLocaleDateString(
+                'vi-VN'
+              )}
             </Text>
           </View>
         )}
       </View>
-      
+
       <View style={styles.projectStatusContainer}>
-        <View 
+        <View
           style={[
-            styles.projectStatusTag, 
-            { borderColor: getStatusColor(project.status) }
+            styles.projectStatusTag,
+            { borderColor: getStatusColor(project.status) },
           ]}
         >
-          <Text 
+          <Text
             style={[
-              styles.projectStatusText, 
-              { color: getStatusColor(project.status) }
+              styles.projectStatusText,
+              { color: getStatusColor(project.status) },
             ]}
           >
             {getStatusLabel(project.status)}
@@ -111,6 +133,7 @@ const ProjectListItem = ({ project, onPress }) => {
 };
 
 const ProjectManagementScreen = ({ navigation }) => {
+  const { theme } = useTheme();
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -124,10 +147,10 @@ const ProjectManagementScreen = ({ navigation }) => {
       setLoading(true);
       setError(null);
       const data = await getProjects();
-      
+
       // Thêm animation khi cập nhật danh sách
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      
+
       setProjects(data);
       setFilteredProjects(data); // Khởi tạo danh sách lọc ban đầu
     } catch (err) {
@@ -142,12 +165,12 @@ const ProjectManagementScreen = ({ navigation }) => {
   // Tải dữ liệu khi màn hình được mở
   useEffect(() => {
     loadProjects();
-    
+
     // Thêm listener để làm mới danh sách khi quay lại từ màn hình khác
     const unsubscribe = navigation.addListener('focus', () => {
       loadProjects();
     });
-    
+
     return unsubscribe;
   }, [navigation]);
 
@@ -158,23 +181,23 @@ const ProjectManagementScreen = ({ navigation }) => {
       setFilteredProjects(projects);
       return;
     }
-    
+
     const query = searchQuery.toLowerCase().trim();
-    const filtered = projects.filter(project => {
+    const filtered = projects.filter((project) => {
       const name = (project.name || '').toLowerCase();
       const customerName = (project.customerName || '').toLowerCase();
       const description = (project.description || '').toLowerCase();
-      
+
       return (
-        name.includes(query) || 
-        customerName.includes(query) || 
+        name.includes(query) ||
+        customerName.includes(query) ||
         description.includes(query)
       );
     });
-    
+
     // Thêm animation khi cập nhật kết quả tìm kiếm
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    
+
     setFilteredProjects(filtered);
   }, [searchQuery, projects]);
 
@@ -207,9 +230,13 @@ const ProjectManagementScreen = ({ navigation }) => {
   // Hiển thị khi đang tải dữ liệu
   if (loading && !refreshing) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#0066cc" />
-        <Text style={styles.loadingText}>Đang tải danh sách dự án...</Text>
+      <View
+        style={[styles.centerContainer, { backgroundColor: theme.background }]}
+      >
+        <ActivityIndicator size="large" color={theme.primary} />
+        <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+          Đang tải danh sách dự án...
+        </Text>
       </View>
     );
   }
@@ -217,10 +244,15 @@ const ProjectManagementScreen = ({ navigation }) => {
   // Hiển thị khi có lỗi
   if (error) {
     return (
-      <View style={styles.centerContainer}>
-        <Ionicons name="alert-circle-outline" size={50} color="#FF3B30" />
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadProjects}>
+      <View
+        style={[styles.centerContainer, { backgroundColor: theme.background }]}
+      >
+        <Ionicons name="alert-circle-outline" size={50} color={theme.danger} />
+        <Text style={[styles.errorText, { color: theme.text }]}>{error}</Text>
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: theme.primary }]}
+          onPress={loadProjects}
+        >
           <Text style={styles.retryButtonText}>Thử lại</Text>
         </TouchableOpacity>
       </View>
@@ -230,18 +262,42 @@ const ProjectManagementScreen = ({ navigation }) => {
   // Hiển thị khi không có dự án
   if (projects.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Quản lý Dự án</Text>
-          <TouchableOpacity style={styles.addButton} onPress={handleAddProject}>
-            <Ionicons name="add" size={24} color="white" />
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
+        <View style={[styles.header, { borderBottomColor: theme.border }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>
+            Quản lý Dự án
+          </Text>
+          <TouchableOpacity
+            style={[styles.addButton, { backgroundColor: theme.primary }]}
+            onPress={handleAddProject}
+          >
+            <Ionicons name="add" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
-        
-        <View style={styles.centerContainer}>
-          <Ionicons name="briefcase-outline" size={60} color="#CCCCCC" />
-          <Text style={styles.emptyText}>Chưa có dự án nào</Text>
-          <TouchableOpacity style={styles.addProjectButton} onPress={handleAddProject}>
+
+        <View
+          style={[
+            styles.centerContainer,
+            { backgroundColor: theme.background },
+          ]}
+        >
+          <Ionicons
+            name="briefcase-outline"
+            size={60}
+            color={theme.textMuted}
+          />
+          <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+            Chưa có dự án nào
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.addProjectButton,
+              { backgroundColor: theme.primary },
+            ]}
+            onPress={handleAddProject}
+          >
             <Text style={styles.addProjectButtonText}>Thêm dự án mới</Text>
           </TouchableOpacity>
         </View>
@@ -249,59 +305,62 @@ const ProjectManagementScreen = ({ navigation }) => {
     );
   }
 
-  // Hiển thị danh sách dự án
+  // Hiển thị giao diện chính
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
-      
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Quản lý Dự án</Text>
-        <TouchableOpacity style={styles.addButton} onPress={handleAddProject}>
-          <Ionicons name="add" size={24} color="white" />
-        </TouchableOpacity>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
+      <StatusBar
+        barStyle={theme.dark ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
+
+      {/* Search Bar */}
+      <View
+        style={[
+          styles.searchContainer,
+          { backgroundColor: theme.card, borderColor: theme.border },
+        ]}
+      >
+        <Ionicons
+          name="search"
+          size={20}
+          color={theme.textMuted}
+          style={styles.searchIcon}
+        />
+        <TextInput
+          style={[styles.searchInput, { color: theme.text }]}
+          placeholder="Tìm kiếm dự án..."
+          placeholderTextColor={theme.textMuted}
+          value={searchQuery}
+          onChangeText={handleSearch}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={handleClearSearch}>
+            <Ionicons name="close-circle" size={20} color={theme.textMuted} />
+          </TouchableOpacity>
+        )}
       </View>
-      
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Tìm kiếm dự án..."
-            value={searchQuery}
-            onChangeText={handleSearch}
-            clearButtonMode="while-editing"
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
-              <Ionicons name="close-circle" size={18} color="#999" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-      
+
+      {/* Result Count */}
+      {filteredProjects.length > 0 && (
+        <Text style={[styles.resultCount, { color: theme.textSecondary }]}>
+          {filteredProjects.length} / {projects.length} dự án
+        </Text>
+      )}
+
+      {/* Project List */}
       <FlatList
         data={filteredProjects}
-        keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <ProjectListItem project={item} onPress={handleProjectPress} />
         )}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
         refreshing={refreshing}
         onRefresh={handleRefresh}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={() => (
-          <Text style={styles.listSummary}>
-            {filteredProjects.length} / {projects.length} dự án
-          </Text>
-        )}
-        ListEmptyComponent={() => (
-          <View style={styles.emptySearchContainer}>
-            <Ionicons name="search-outline" size={50} color="#CCCCCC" />
-            <Text style={styles.emptySearchText}>
-              Không tìm thấy dự án phù hợp
-            </Text>
-          </View>
-        )}
+        ListFooterComponent={<View style={{ height: 20 }} />}
       />
     </SafeAreaView>
   );
@@ -310,43 +369,41 @@ const ProjectManagementScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f8f9fa',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: '#fff',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: 'white',
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#333333',
   },
   addButton: {
-    backgroundColor: '#0066cc',
     width: 40,
     height: 40,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'absolute',
+    right: 16,
+    bottom: 24,
+    zIndex: 1,
+    elevation: 4,
   },
   searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: 'white',
@@ -365,7 +422,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    height: 40,
+    height: 44,
     fontSize: 16,
     color: '#333',
   },
@@ -373,14 +430,12 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   listContainer: {
-    padding: 12,
-    flexGrow: 1,
+    paddingHorizontal: 16,
   },
-  listSummary: {
-    fontSize: 14,
-    color: '#666666',
+  resultCount: {
+    marginHorizontal: 16,
     marginBottom: 8,
-    marginLeft: 4,
+    fontSize: 14,
   },
   projectCard: {
     backgroundColor: 'white',
@@ -471,7 +526,7 @@ const styles = StyleSheet.create({
   addProjectButtonText: {
     color: 'white',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
   emptySearchContainer: {
     alignItems: 'center',
@@ -486,4 +541,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ProjectManagementScreen; 
+export default ProjectManagementScreen;

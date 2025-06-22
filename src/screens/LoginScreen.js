@@ -1,3 +1,4 @@
+//src/screens/LoginScreen.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -11,7 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
-  Keyboard
+  Keyboard,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,47 +29,53 @@ const LoginScreen = () => {
   const [isFormValid, setIsFormValid] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  
+
   const passwordRef = useRef(null);
   const { login, error } = useAuth();
-  
+
   // Kiểm tra tính hợp lệ của form
   useEffect(() => {
     const validateEmail = (email) => {
-      const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+      const re =
+        /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
       return re.test(String(email).toLowerCase());
     };
-    
-    const isValid = email.trim() !== '' && 
-                    password.trim() !== '' && 
-                    validateEmail(email);
-    
+
+    const isValid =
+      email.trim() !== '' && password.trim() !== '' && validateEmail(email);
+
     setIsEmailValid(email === '' || validateEmail(email));
     setIsFormValid(isValid);
   }, [email, password]);
-  
+
   // Theo dõi trạng thái hiển thị của bàn phím
   useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
-      setKeyboardVisible(true);
-    });
-    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardVisible(false);
-    });
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => {
+        setKeyboardVisible(true);
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setKeyboardVisible(false);
+      }
+    );
 
     return () => {
       keyboardDidShowListener.remove();
       keyboardDidHideListener.remove();
     };
   }, []);
-  
+
   // Xử lý đăng nhập
   const handleLogin = async () => {
     if (!isFormValid) {
       Alert.alert('Lỗi đăng nhập', 'Vui lòng nhập email và mật khẩu hợp lệ');
       return;
     }
-    
+
     Keyboard.dismiss();
     setIsLoggingIn(true);
     try {
@@ -78,12 +85,15 @@ const LoginScreen = () => {
       }
     } catch (error) {
       console.error('Lỗi khi đăng nhập:', error);
-      Alert.alert('Lỗi đăng nhập', 'Đã xảy ra lỗi khi đăng nhập. Vui lòng thử lại sau.');
+      Alert.alert(
+        'Lỗi đăng nhập',
+        'Đã xảy ra lỗi khi đăng nhập. Vui lòng thử lại sau.'
+      );
     } finally {
       setIsLoggingIn(false);
     }
   };
-  
+
   // Xử lý quên mật khẩu
   const handleForgotPassword = () => {
     // Sẽ triển khai sau
@@ -92,21 +102,21 @@ const LoginScreen = () => {
       'Tính năng này sẽ được triển khai trong phiên bản tiếp theo.'
     );
   };
-  
+
   // Tạo nút hiển thị/ẩn mật khẩu
   const PasswordToggleButton = (
     <TouchableOpacity
       onPress={() => setShowPassword(!showPassword)}
       style={styles.passwordToggle}
     >
-      <Ionicons 
-        name={showPassword ? "eye-off-outline" : "eye-outline"} 
-        size={20} 
-        color="#666" 
+      <Ionicons
+        name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+        size={20}
+        color="#666"
       />
     </TouchableOpacity>
   );
-  
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -114,30 +124,37 @@ const LoginScreen = () => {
         style={styles.container}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={[
             styles.scrollContainer,
-            keyboardVisible && { justifyContent: 'flex-start', paddingTop: 20 }
+            keyboardVisible && { justifyContent: 'flex-start', paddingTop: 20 },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={[
-            styles.logoContainer, 
-            keyboardVisible && { marginBottom: 10, transform: [{ scale: 0.8 }] }
-          ]}>
+          <View
+            style={[
+              styles.logoContainer,
+              keyboardVisible && {
+                marginBottom: 10,
+                transform: [{ scale: 0.8 }],
+              },
+            ]}
+          >
             <Image
               source={require('../../assets/logo-placeholder.png')}
               style={styles.logo}
               resizeMode="contain"
             />
             <Text style={styles.appName}>Tân Hòa Phát</Text>
-            <Text style={styles.appDescription}>Hệ thống quản lý khách hàng</Text>
+            <Text style={styles.appDescription}>
+              Hệ thống quản lý khách hàng
+            </Text>
           </View>
-          
+
           <View style={styles.formContainer}>
             <Text style={styles.welcomeText}>Đăng nhập</Text>
-            
+
             <StyledTextInput
               iconName="mail-outline"
               placeholder="Email"
@@ -148,9 +165,9 @@ const LoginScreen = () => {
               returnKeyType="next"
               blurOnSubmit={false}
               onSubmitEditing={() => passwordRef.current.focus()}
-              error={!isEmailValid ? "Email không hợp lệ" : null}
+              error={!isEmailValid ? 'Email không hợp lệ' : null}
             />
-            
+
             <StyledTextInput
               ref={passwordRef}
               iconName="lock-closed-outline"
@@ -162,18 +179,18 @@ const LoginScreen = () => {
               onSubmitEditing={handleLogin}
               rightIcon={PasswordToggleButton}
             />
-            
-            <TouchableOpacity 
-              style={styles.forgotPassword} 
+
+            <TouchableOpacity
+              style={styles.forgotPassword}
               onPress={handleForgotPassword}
             >
               <Text style={styles.forgotPasswordText}>Quên mật khẩu?</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.loginButton,
-                (!isFormValid || isLoggingIn) && styles.loginButtonDisabled
+                (!isFormValid || isLoggingIn) && styles.loginButtonDisabled,
               ]}
               onPress={handleLogin}
               disabled={!isFormValid || isLoggingIn}
@@ -184,18 +201,24 @@ const LoginScreen = () => {
                 <Text style={styles.loginButtonText}>Đăng nhập</Text>
               )}
             </TouchableOpacity>
-            
+
             {error && (
               <View style={styles.errorContainer}>
-                <Ionicons name="alert-circle-outline" size={18} color="#e74c3c" />
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={18}
+                  color="#e74c3c"
+                />
                 <Text style={styles.errorMessage}>{error}</Text>
               </View>
             )}
           </View>
-          
+
           {!keyboardVisible && (
             <View style={styles.footer}>
-              <Text style={styles.footerText}>© 2023 Tân Hòa Phát. All rights reserved.</Text>
+              <Text style={styles.footerText}>
+                © 2023 Tân Hòa Phát. All rights reserved.
+              </Text>
             </View>
           )}
         </ScrollView>
@@ -306,4 +329,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default LoginScreen; 
+export default LoginScreen;

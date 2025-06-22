@@ -1,73 +1,40 @@
-import { 
-    collection, 
-    addDoc, 
-    updateDoc,
-    deleteDoc,
-    doc, 
-    query, 
-    orderBy, 
-    getDocs,
-    getDoc,
-    where,
-    serverTimestamp 
+//src/api/projectService.js
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+  getDocs,
+  getDoc,
+  where,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
+import { getCustomerById } from './customerService'; // Import getCustomerById
 
 /**
- * Lấy tất cả dự án kèm thông tin khách hàng
- * @returns {Promise<Array>} - Mảng dự án với thông tin khách hàng
+ * Lấy tất cả dự án
+ * @returns {Promise<Array>} - Mảng dự án
  */
 export const getProjects = async () => {
-    try {
-        const projectsRef = collection(db, 'projects');
-        const q = query(projectsRef, orderBy('createdAt', 'desc'));
-        const querySnapshot = await getDocs(q);
-        
-        // Lấy danh sách dự án
-        const projects = querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-        
-        // Lấy thông tin khách hàng cho mỗi dự án
-        const projectsWithCustomers = await Promise.all(
-            projects.map(async (project) => {
-                // Nếu dự án có customerId
-                if (project.customerId) {
-                    try {
-                        const customerRef = doc(db, 'customers', project.customerId);
-                        const customerSnapshot = await getDoc(customerRef);
-                        
-                        if (customerSnapshot.exists()) {
-                            const customerData = customerSnapshot.data();
-                            // Thêm thông tin khách hàng vào dự án
-                            return {
-                                ...project,
-                                customerName: customerData.name || 'Không xác định',
-                                customerContact: customerData.contactPerson || '',
-                                customerEmail: customerData.email || ''
-                            };
-                        }
-                    } catch (error) {
-                        console.error(`Lỗi khi lấy thông tin khách hàng cho dự án ${project.id}:`, error);
-                    }
-                }
-                
-                // Trả về dự án gốc nếu không có customerId hoặc có lỗi
-                return {
-                    ...project,
-                    customerName: 'Không xác định',
-                    customerContact: '',
-                    customerEmail: ''
-                };
-            })
-        );
-        
-        return projectsWithCustomers;
-    } catch (error) {
-        console.error('Lỗi khi lấy danh sách dự án:', error);
-        throw error;
-    }
+  try {
+    const projectsRef = collection(db, 'projects');
+    const q = query(projectsRef, orderBy('createdAt', 'desc'));
+    const querySnapshot = await getDocs(q);
+
+    // Dữ liệu đã được denormalize, không cần query thêm
+    const projects = querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    return projects;
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -76,57 +43,59 @@ export const getProjects = async () => {
  * @returns {Promise<Object|null>} - Dữ liệu dự án hoặc null nếu không tìm thấy
  */
 export const getProjectById = async (projectId) => {
-    try {
-        const projectRef = doc(db, 'projects', projectId);
-        const projectSnapshot = await getDoc(projectRef);
-        
-        if (projectSnapshot.exists()) {
-            const projectData = {
-                id: projectSnapshot.id,
-                ...projectSnapshot.data()
-            };
-            
-            // Nếu dự án có customerId, lấy thông tin khách hàng
-            if (projectData.customerId) {
-                try {
-                    const customerRef = doc(db, 'customers', projectData.customerId);
-                    const customerSnapshot = await getDoc(customerRef);
-                    
-                    if (customerSnapshot.exists()) {
-                        const customerData = customerSnapshot.data();
-                        // Thêm thông tin khách hàng vào dự án
-                        return {
-                            ...projectData,
-                            customerName: customerData.name || 'Không xác định',
-                            customerContact: customerData.contactPerson || '',
-                            customerEmail: customerData.email || '',
-                            customerPhone: customerData.phone || '',
-                            customer: {
-                                id: projectData.customerId,
-                                ...customerData
-                            }
-                        };
-                    }
-                } catch (error) {
-                    console.error(`Lỗi khi lấy thông tin khách hàng cho dự án ${projectId}:`, error);
-                }
-            }
-            
-            // Trả về dự án gốc nếu không có customerId hoặc có lỗi
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const projectSnapshot = await getDoc(projectRef);
+
+    if (projectSnapshot.exists()) {
+      const projectData = {
+        id: projectSnapshot.id,
+        ...projectSnapshot.data(),
+      };
+
+      // Nếu dự án có customerId, lấy thông tin khách hàng
+      if (projectData.customerId) {
+        try {
+          const customerRef = doc(db, 'customers', projectData.customerId);
+          const customerSnapshot = await getDoc(customerRef);
+
+          if (customerSnapshot.exists()) {
+            const customerData = customerSnapshot.data();
+            // Thêm thông tin khách hàng vào dự án
             return {
-                ...projectData,
-                customerName: 'Không xác định',
-                customerContact: '',
-                customerEmail: '',
-                customerPhone: ''
+              ...projectData,
+              customerName: customerData.name || 'Không xác định',
+              customerContact: customerData.contactPerson || '',
+              customerEmail: customerData.email || '',
+              customerPhone: customerData.phone || '',
+              customer: {
+                id: projectData.customerId,
+                ...customerData,
+              },
             };
-        } else {
-            return null;
+          }
+        } catch (error) {
+          console.error(
+            `Lỗi khi lấy thông tin khách hàng cho dự án ${projectId}:`,
+            error
+          );
         }
-    } catch (error) {
-        console.error('Lỗi khi lấy dự án theo ID:', error);
-        throw error;
+      }
+
+      // Trả về dự án gốc nếu không có customerId hoặc có lỗi
+      return {
+        ...projectData,
+        customerName: 'Không xác định',
+        customerContact: '',
+        customerEmail: '',
+        customerPhone: '',
+      };
+    } else {
+      return null;
     }
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -136,35 +105,48 @@ export const getProjectById = async (projectId) => {
  * @returns {Promise<Object>} - Dự án đã tạo kèm ID
  */
 export const createProject = async (projectData, userId) => {
-    try {
-        // Tạo cấu trúc tasks mặc định
-        const defaultTasks = {
-            quotation: { status: 'pending' },
-            material_separation: { status: 'pending' },
-            material_cutting: { status: 'pending' },
-            assembly: { status: 'pending' },
-            painting: { status: 'pending' },
-            shipping: { status: 'pending' },
-            other: { name: '', status: 'pending' }
-        };
+  try {
+    const projectToSave = { ...projectData };
 
-        const docRef = await addDoc(collection(db, 'projects'), {
-            ...projectData,
-            tasks: defaultTasks, // Thêm cấu trúc tasks mặc định
-            createdAt: serverTimestamp(),
-            createdBy: userId,
-            updatedAt: serverTimestamp()
-        });
-        
-        return {
-            id: docRef.id,
-            ...projectData,
-            tasks: defaultTasks
-        };
-    } catch (error) {
-        console.error('Lỗi khi tạo dự án:', error);
-        throw error;
+    // Denormalization: Fetch and add customerName if customerId exists
+    if (projectToSave.customerId) {
+      const customer = await getCustomerById(projectToSave.customerId);
+      if (customer) {
+        projectToSave.customerName = customer.name;
+      }
     }
+
+    // Tạo cấu trúc tasks mặc định
+    const defaultTasks = {
+      quotation: { status: 'pending' },
+      material_separation: { status: 'pending' },
+      material_purchasing: {
+        label: 'Mua vật tư & phụ kiện',
+        status: 'pending',
+      },
+      material_cutting: { status: 'pending' },
+      assembly: { status: 'pending' },
+      painting: { status: 'pending' },
+      shipping: { status: 'pending' },
+      other: { name: '', status: 'pending' },
+    };
+
+    const docRef = await addDoc(collection(db, 'projects'), {
+      ...projectToSave,
+      tasks: defaultTasks, // Thêm cấu trúc tasks mặc định
+      createdAt: serverTimestamp(),
+      createdBy: userId,
+      updatedAt: serverTimestamp(),
+    });
+
+    return {
+      id: docRef.id,
+      ...projectToSave,
+      tasks: defaultTasks,
+    };
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -175,17 +157,28 @@ export const createProject = async (projectData, userId) => {
  * @returns {Promise<void>}
  */
 export const updateProject = async (projectId, projectData, userId) => {
-    try {
-        const projectRef = doc(db, 'projects', projectId);
-        await updateDoc(projectRef, {
-            ...projectData,
-            updatedAt: serverTimestamp(),
-            updatedBy: userId
-        });
-    } catch (error) {
-        console.error('Lỗi khi cập nhật dự án:', error);
-        throw error;
+  try {
+    const projectToUpdate = { ...projectData };
+
+    // Denormalization: If customerId is being updated, also update customerName
+    if (projectToUpdate.customerId) {
+      const customer = await getCustomerById(projectToUpdate.customerId);
+      if (customer) {
+        projectToUpdate.customerName = customer.name;
+      } else {
+        projectToUpdate.customerName = 'Không xác định'; // Handle case where customer might not be found
+      }
     }
+
+    const projectRef = doc(db, 'projects', projectId);
+    await updateDoc(projectRef, {
+      ...projectToUpdate,
+      updatedAt: serverTimestamp(),
+      updatedBy: userId,
+    });
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -194,13 +187,12 @@ export const updateProject = async (projectId, projectData, userId) => {
  * @returns {Promise<void>}
  */
 export const deleteProject = async (projectId) => {
-    try {
-        const projectRef = doc(db, 'projects', projectId);
-        await deleteDoc(projectRef);
-    } catch (error) {
-        console.error('Lỗi khi xóa dự án:', error);
-        throw error;
-    }
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    await deleteDoc(projectRef);
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -209,24 +201,23 @@ export const deleteProject = async (projectId) => {
  * @returns {Promise<Array>} - Mảng dự án thuộc khách hàng
  */
 export const getProjectsByCustomer = async (customerId) => {
-    try {
-        const projectsRef = collection(db, 'projects');
-        const q = query(
-            projectsRef,
-            where('customerId', '==', customerId),
-            orderBy('createdAt', 'desc')
-        );
-        
-        const querySnapshot = await getDocs(q);
-        
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-    } catch (error) {
-        console.error('Lỗi khi lấy dự án theo khách hàng:', error);
-        throw error;
-    }
+  try {
+    const projectsRef = collection(db, 'projects');
+    const q = query(
+      projectsRef,
+      where('customerId', '==', customerId),
+      orderBy('createdAt', 'desc')
+    );
+
+    const querySnapshot = await getDocs(q);
+
+    return querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -235,24 +226,23 @@ export const getProjectsByCustomer = async (customerId) => {
  * @returns {Promise<Array>} - Mảng dự án thuộc trạng thái đã chỉ định
  */
 export const getProjectsByStatus = async (status) => {
-    try {
-        const projectsRef = collection(db, 'projects');
-        const q = query(
-            projectsRef,
-            where('status', '==', status),
-            orderBy('createdAt', 'desc')
-        );
-        
-        const querySnapshot = await getDocs(q);
-        
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-    } catch (error) {
-        console.error('Lỗi khi lấy dự án theo trạng thái:', error);
-        throw error;
-    }
+  try {
+    const projectsRef = collection(db, 'projects');
+    const q = query(
+      projectsRef,
+      where('status', '==', status),
+      orderBy('createdAt', 'desc')
+    );
+
+    const querySnapshot = await getDocs(q);
+
+    return querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -261,24 +251,23 @@ export const getProjectsByStatus = async (status) => {
  * @returns {Promise<Array>} - Mảng dự án phù hợp
  */
 export const searchProjects = async (searchTerm) => {
-    try {
-        const projectsRef = collection(db, 'projects');
-        const nameQuery = query(
-            projectsRef,
-            where('name', '>=', searchTerm),
-            where('name', '<=', searchTerm + '\uf8ff')
-        );
-        
-        const querySnapshot = await getDocs(nameQuery);
-        
-        return querySnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        }));
-    } catch (error) {
-        console.error('Lỗi khi tìm kiếm dự án:', error);
-        throw error;
-    }
+  try {
+    const projectsRef = collection(db, 'projects');
+    const nameQuery = query(
+      projectsRef,
+      where('name', '>=', searchTerm),
+      where('name', '<=', searchTerm + '\uf8ff')
+    );
+
+    const querySnapshot = await getDocs(nameQuery);
+
+    return querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -289,20 +278,24 @@ export const searchProjects = async (searchTerm) => {
  * @param {string} userId - ID của người dùng cập nhật
  * @returns {Promise<void>}
  */
-export const updateTaskStatus = async (projectId, taskKey, newStatus, userId) => {
-    try {
-        const projectRef = doc(db, 'projects', projectId);
-        
-        // Sử dụng dot notation để cập nhật trạng thái của một công việc cụ thể
-        await updateDoc(projectRef, {
-            [`tasks.${taskKey}.status`]: newStatus,
-            updatedAt: serverTimestamp(),
-            updatedBy: userId
-        });
-    } catch (error) {
-        console.error('Lỗi khi cập nhật trạng thái công việc:', error);
-        throw error;
-    }
+export const updateTaskStatus = async (
+  projectId,
+  taskKey,
+  newStatus,
+  userId
+) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const updatePath = `tasks.${taskKey}.status`;
+
+    await updateDoc(projectRef, {
+      [updatePath]: newStatus,
+      updatedAt: serverTimestamp(),
+      updatedBy: userId,
+    });
+  } catch (error) {
+    throw error;
+  }
 };
 
 /**
@@ -313,17 +306,16 @@ export const updateTaskStatus = async (projectId, taskKey, newStatus, userId) =>
  * @returns {Promise<void>}
  */
 export const updateCustomTask = async (projectId, taskName, userId) => {
-    try {
-        const projectRef = doc(db, 'projects', projectId);
-        
-        // Cập nhật tên của công việc "other"
-        await updateDoc(projectRef, {
-            'tasks.other.name': taskName,
-            updatedAt: serverTimestamp(),
-            updatedBy: userId
-        });
-    } catch (error) {
-        console.error('Lỗi khi cập nhật tên công việc khác:', error);
-        throw error;
-    }
-}; 
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const updatePath = `tasks.other.name`;
+
+    await updateDoc(projectRef, {
+      [updatePath]: taskName,
+      updatedAt: serverTimestamp(),
+      updatedBy: userId,
+    });
+  } catch (error) {
+    throw error;
+  }
+};

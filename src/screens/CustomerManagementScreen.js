@@ -1,3 +1,4 @@
+//src/screens/CustomerManagementScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -11,13 +12,15 @@ import {
   StatusBar,
   TextInput,
   LayoutAnimation,
-  Platform
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getCustomers } from '../api/customerService';
+import { useTheme } from '../contexts/ThemeContext';
 
 // Component hiển thị từng khách hàng trong danh sách
 const CustomerListItem = ({ customer, onPress }) => {
+  const { theme } = useTheme();
   // Xác định loại khách hàng để hiển thị màu sắc phù hợp
   const getTypeColor = (type) => {
     switch (type) {
@@ -26,7 +29,7 @@ const CustomerListItem = ({ customer, onPress }) => {
       case 'potential':
         return '#FF9800'; // cam
       default:
-        return '#9E9E9E'; // xám
+        return theme.textMuted; // Sử dụng màu từ theme
     }
   };
 
@@ -48,46 +51,65 @@ const CustomerListItem = ({ customer, onPress }) => {
     <Pressable
       style={({ pressed }) => [
         styles.customerCard,
-        pressed && styles.cardPressed
+        { backgroundColor: theme.card },
+        pressed && styles.cardPressed,
       ]}
       onPress={() => onPress(customer)}
     >
       <View style={styles.customerInfo}>
-        <Text style={styles.customerName}>{customer.name || 'Chưa có tên'}</Text>
-        
+        <Text style={[styles.customerName, { color: theme.text }]}>
+          {customer.name || 'Chưa có tên'}
+        </Text>
+
         <View style={styles.contactRow}>
-          <Ionicons name="person-outline" size={14} color="#666" />
-          <Text style={styles.contactText}>
+          <Ionicons
+            name="person-outline"
+            size={14}
+            color={theme.textSecondary}
+          />
+          <Text style={[styles.contactText, { color: theme.textSecondary }]}>
             {customer.contactPerson || 'Chưa có người liên hệ'}
           </Text>
         </View>
-        
+
         {customer.email && (
           <View style={styles.contactRow}>
-            <Ionicons name="mail-outline" size={14} color="#666" />
-            <Text style={styles.contactText}>{customer.email}</Text>
+            <Ionicons
+              name="mail-outline"
+              size={14}
+              color={theme.textSecondary}
+            />
+            <Text style={[styles.contactText, { color: theme.textSecondary }]}>
+              {customer.email}
+            </Text>
           </View>
         )}
-        
+
         {customer.phone && (
           <View style={styles.contactRow}>
-            <Ionicons name="call-outline" size={14} color="#666" />
-            <Text style={styles.contactText}>{customer.phone}</Text>
+            <Ionicons
+              name="call-outline"
+              size={14}
+              color={theme.textSecondary}
+            />
+            <Text style={[styles.contactText, { color: theme.textSecondary }]}>
+              {customer.phone}
+            </Text>
           </View>
         )}
       </View>
-      
+
       <View style={styles.customerTypeContainer}>
-        <View 
+        <View
           style={[
-            styles.customerTypeTag, 
-            { borderColor: getTypeColor(customer.type) }
+            styles.customerTypeTag,
+            { borderColor: getTypeColor(customer.type) },
           ]}
         >
-          <Text 
+          <Text
             style={[
-              styles.customerTypeText, 
-              { color: getTypeColor(customer.type) }
+              styles.customerTypeText,
+              { color: getTypeColor(customer.type) },
             ]}
           >
             {getTypeLabel(customer.type)}
@@ -99,6 +121,7 @@ const CustomerListItem = ({ customer, onPress }) => {
 };
 
 const CustomerManagementScreen = ({ navigation }) => {
+  const { theme } = useTheme();
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -112,10 +135,10 @@ const CustomerManagementScreen = ({ navigation }) => {
       setLoading(true);
       setError(null);
       const data = await getCustomers();
-      
+
       // Thêm animation khi cập nhật danh sách
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      
+
       setCustomers(data);
       setFilteredCustomers(data); // Khởi tạo danh sách lọc ban đầu
     } catch (err) {
@@ -130,12 +153,12 @@ const CustomerManagementScreen = ({ navigation }) => {
   // Tải dữ liệu khi màn hình được mở
   useEffect(() => {
     loadCustomers();
-    
+
     // Thêm listener để làm mới danh sách khi quay lại từ màn hình khác
     const unsubscribe = navigation.addListener('focus', () => {
       loadCustomers();
     });
-    
+
     return unsubscribe;
   }, [navigation]);
 
@@ -146,25 +169,25 @@ const CustomerManagementScreen = ({ navigation }) => {
       setFilteredCustomers(customers);
       return;
     }
-    
+
     const query = searchQuery.toLowerCase().trim();
-    const filtered = customers.filter(customer => {
+    const filtered = customers.filter((customer) => {
       const name = (customer.name || '').toLowerCase();
       const contactPerson = (customer.contactPerson || '').toLowerCase();
       const email = (customer.email || '').toLowerCase();
       const phone = (customer.phone || '').toLowerCase();
-      
+
       return (
-        name.includes(query) || 
-        contactPerson.includes(query) || 
-        email.includes(query) || 
+        name.includes(query) ||
+        contactPerson.includes(query) ||
+        email.includes(query) ||
         phone.includes(query)
       );
     });
-    
+
     // Thêm animation khi cập nhật kết quả tìm kiếm
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    
+
     setFilteredCustomers(filtered);
   }, [searchQuery, customers]);
 
@@ -197,9 +220,13 @@ const CustomerManagementScreen = ({ navigation }) => {
   // Hiển thị khi đang tải dữ liệu
   if (loading && !refreshing) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#0066cc" />
-        <Text style={styles.loadingText}>Đang tải danh sách khách hàng...</Text>
+      <View
+        style={[styles.centerContainer, { backgroundColor: theme.background }]}
+      >
+        <ActivityIndicator size="large" color={theme.primary} />
+        <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+          Đang tải danh sách khách hàng...
+        </Text>
       </View>
     );
   }
@@ -207,10 +234,15 @@ const CustomerManagementScreen = ({ navigation }) => {
   // Hiển thị khi có lỗi
   if (error) {
     return (
-      <View style={styles.centerContainer}>
-        <Ionicons name="alert-circle-outline" size={50} color="#FF3B30" />
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadCustomers}>
+      <View
+        style={[styles.centerContainer, { backgroundColor: theme.background }]}
+      >
+        <Ionicons name="alert-circle-outline" size={50} color={theme.danger} />
+        <Text style={[styles.errorText, { color: theme.text }]}>{error}</Text>
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: theme.primary }]}
+          onPress={loadCustomers}
+        >
           <Text style={styles.retryButtonText}>Thử lại</Text>
         </TouchableOpacity>
       </View>
@@ -220,19 +252,41 @@ const CustomerManagementScreen = ({ navigation }) => {
   // Hiển thị khi không có khách hàng
   if (customers.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Quản lý Khách hàng</Text>
-          <TouchableOpacity style={styles.addButton} onPress={handleAddCustomer}>
-            <Ionicons name="add" size={24} color="white" />
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
+        <View style={[styles.header, { borderBottomColor: theme.border }]}>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>
+            Quản lý Khách hàng
+          </Text>
+          <TouchableOpacity
+            style={[styles.addButton, { backgroundColor: theme.primary }]}
+            onPress={handleAddCustomer}
+          >
+            <Ionicons name="add" size={24} color="#fff" />
           </TouchableOpacity>
         </View>
-        
-        <View style={styles.centerContainer}>
-          <Ionicons name="people-outline" size={60} color="#CCCCCC" />
-          <Text style={styles.emptyText}>Chưa có khách hàng nào</Text>
-          <TouchableOpacity style={styles.addCustomerButton} onPress={handleAddCustomer}>
-            <Text style={styles.addCustomerButtonText}>Thêm khách hàng mới</Text>
+
+        <View
+          style={[
+            styles.centerContainer,
+            { backgroundColor: theme.background },
+          ]}
+        >
+          <Ionicons name="people-outline" size={60} color={theme.textMuted} />
+          <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
+            Chưa có khách hàng nào
+          </Text>
+          <TouchableOpacity
+            style={[
+              styles.addCustomerButton,
+              { backgroundColor: theme.primary },
+            ]}
+            onPress={handleAddCustomer}
+          >
+            <Text style={styles.addCustomerButtonText}>
+              Thêm khách hàng mới
+            </Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -241,48 +295,62 @@ const CustomerManagementScreen = ({ navigation }) => {
 
   // Hiển thị danh sách khách hàng
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
-      
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Quản lý Khách hàng</Text>
-        <TouchableOpacity style={styles.addButton} onPress={handleAddCustomer}>
-          <Ionicons name="add" size={24} color="white" />
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
+      <StatusBar
+        barStyle={theme.dark ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
+
+      <View style={[styles.header, { borderBottomColor: theme.border }]}>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>
+          Quản lý Khách hàng
+        </Text>
+        <TouchableOpacity
+          style={[styles.addButton, { backgroundColor: theme.primary }]}
+          onPress={handleAddCustomer}
+        >
+          <Ionicons name="add" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
-      
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Tìm kiếm khách hàng..."
-            value={searchQuery}
-            onChangeText={handleSearch}
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-          />
-          {searchQuery ? (
-            <TouchableOpacity onPress={handleClearSearch} style={styles.clearButton}>
-              <Ionicons name="close-circle" size={18} color="#999" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        
-        {searchQuery ? (
-          <Text style={styles.resultCount}>
-            {filteredCustomers.length} kết quả
-          </Text>
-        ) : null}
+
+      <View
+        style={[
+          styles.searchContainer,
+          { backgroundColor: theme.card, borderColor: theme.border },
+        ]}
+      >
+        <Ionicons
+          name="search"
+          size={20}
+          color={theme.textMuted}
+          style={styles.searchIcon}
+        />
+        <TextInput
+          style={[styles.searchInput, { color: theme.text }]}
+          placeholder="Tìm kiếm khách hàng..."
+          placeholderTextColor={theme.textMuted}
+          value={searchQuery}
+          onChangeText={handleSearch}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={handleClearSearch}>
+            <Ionicons name="close-circle" size={20} color={theme.textMuted} />
+          </TouchableOpacity>
+        )}
       </View>
-      
+
       {filteredCustomers.length === 0 && searchQuery ? (
         <View style={styles.emptyResultContainer}>
           <Ionicons name="search-outline" size={50} color="#CCCCCC" />
           <Text style={styles.emptyResultText}>
             Không tìm thấy khách hàng phù hợp
           </Text>
-          <TouchableOpacity onPress={handleClearSearch} style={styles.tryAgainButton}>
+          <TouchableOpacity
+            onPress={handleClearSearch}
+            style={styles.tryAgainButton}
+          >
             <Text style={styles.tryAgainButtonText}>Xóa tìm kiếm</Text>
           </TouchableOpacity>
         </View>
@@ -305,8 +373,13 @@ const CustomerManagementScreen = ({ navigation }) => {
               <View style={styles.emptyContainer}>
                 <Ionicons name="people-outline" size={60} color="#CCCCCC" />
                 <Text style={styles.emptyText}>Chưa có khách hàng nào</Text>
-                <TouchableOpacity style={styles.addCustomerButton} onPress={handleAddCustomer}>
-                  <Text style={styles.addCustomerButtonText}>Thêm khách hàng mới</Text>
+                <TouchableOpacity
+                  style={styles.addCustomerButton}
+                  onPress={handleAddCustomer}
+                >
+                  <Text style={styles.addCustomerButtonText}>
+                    Thêm khách hàng mới
+                  </Text>
                 </TouchableOpacity>
               </View>
             ) : null
@@ -320,114 +393,89 @@ const CustomerManagementScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#f8f9fa',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: '#fff',
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
+    alignItems: 'center',
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
   },
   addButton: {
-    backgroundColor: '#0066cc',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.5,
+    alignItems: 'center',
   },
   searchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: '#fff',
   },
   searchIcon: {
     marginRight: 8,
   },
   searchInput: {
     flex: 1,
-    height: 40,
+    height: 44,
     fontSize: 16,
-    color: '#333',
-  },
-  clearButton: {
-    padding: 6,
-  },
-  resultCount: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-    marginLeft: 4,
   },
   listContainer: {
-    flexGrow: 1,
-    padding: 16,
+    paddingHorizontal: 16,
   },
   customerCard: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    padding: 16,
+    marginVertical: 8,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.05,
     shadowRadius: 2,
-    elevation: 2,
   },
   cardPressed: {
-    backgroundColor: '#f9f9f9',
+    transform: [{ scale: 0.98 }],
+    opacity: 0.9,
   },
   customerInfo: {
     flex: 1,
+    marginRight: 10,
   },
   customerName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    marginBottom: 4,
   },
   contactText: {
-    fontSize: 14,
-    color: '#666',
     marginLeft: 6,
-    flex: 1,
+    fontSize: 14,
   },
   customerTypeContainer: {
     marginLeft: 12,
@@ -443,27 +491,26 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: 10,
     fontSize: 16,
     color: '#666',
   },
   errorText: {
-    marginTop: 12,
+    marginTop: 10,
     fontSize: 16,
-    color: '#666',
+    color: '#333',
     textAlign: 'center',
+    marginBottom: 20,
   },
   retryButton: {
-    marginTop: 16,
-    backgroundColor: '#0066cc',
     paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 6,
+    borderRadius: 8,
   },
   retryButtonText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
   emptyContainer: {
     flex: 1,
@@ -516,4 +563,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CustomerManagementScreen; 
+export default CustomerManagementScreen;

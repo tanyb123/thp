@@ -1,3 +1,4 @@
+//src/screens/AddProjectScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -11,7 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
-  FlatList
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -27,11 +28,11 @@ const AddProjectScreen = ({ navigation }) => {
   const [customerModalVisible, setCustomerModalVisible] = useState(false);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [filteredCustomers, setFilteredCustomers] = useState([]);
-  
+
   // Thêm state cho date picker
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-  
+
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -43,9 +44,9 @@ const AddProjectScreen = ({ navigation }) => {
     durationInDays: '',
     location: 'workshop', // 'workshop' (tại xưởng) hoặc 'site' (tại công trình)
     budget: '',
-    notes: ''
+    notes: '',
   });
-  
+
   // Lấy danh sách khách hàng khi màn hình được tải
   useEffect(() => {
     const fetchCustomers = async () => {
@@ -61,47 +62,45 @@ const AddProjectScreen = ({ navigation }) => {
         setLoadingCustomers(false);
       }
     };
-    
+
     fetchCustomers();
   }, []);
-  
+
   // Lọc danh sách khách hàng khi từ khóa tìm kiếm thay đổi
   useEffect(() => {
     if (!customerSearchQuery.trim()) {
       setFilteredCustomers(customers);
       return;
     }
-    
+
     const query = customerSearchQuery.toLowerCase().trim();
-    const filtered = customers.filter(customer => {
+    const filtered = customers.filter((customer) => {
       const name = (customer.name || '').toLowerCase();
       const contact = (customer.contactPerson || '').toLowerCase();
       const email = (customer.email || '').toLowerCase();
-      
+
       return (
-        name.includes(query) ||
-        contact.includes(query) ||
-        email.includes(query)
+        name.includes(query) || contact.includes(query) || email.includes(query)
       );
     });
-    
+
     setFilteredCustomers(filtered);
   }, [customerSearchQuery, customers]);
-  
+
   // Cập nhật giá trị form
   const handleChange = (field, value) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }));
   };
-  
+
   // Xử lý khi chọn ngày bắt đầu
   const handleStartDateChange = (event, selectedDate) => {
     setShowStartDatePicker(false);
     if (selectedDate) {
       handleChange('startDate', selectedDate);
-      
+
       // Tự động tính ngày kết thúc nếu có số ngày thi công
       if (formData.durationInDays) {
         const endDate = new Date(selectedDate);
@@ -110,11 +109,11 @@ const AddProjectScreen = ({ navigation }) => {
       }
     }
   };
-  
+
   // Xử lý khi nhập số ngày thi công
   const handleDurationChange = (text) => {
     handleChange('durationInDays', text);
-    
+
     // Tự động tính ngày kết thúc nếu có ngày bắt đầu
     if (formData.startDate && text) {
       const endDate = new Date(formData.startDate);
@@ -122,105 +121,110 @@ const AddProjectScreen = ({ navigation }) => {
       handleChange('endDate', endDate);
     }
   };
-  
+
   // Xử lý khi chọn vị trí
   const handleLocationChange = (location) => {
     handleChange('location', location);
   };
-  
+
   // Định dạng ngày để hiển thị
   const formatDate = (date) => {
     if (!date) return '';
     return date.toLocaleDateString('vi-VN');
   };
-  
+
   // Kiểm tra form hợp lệ
   const validateForm = () => {
     if (!formData.name.trim()) {
       Alert.alert('Lỗi', 'Vui lòng nhập tên dự án');
       return false;
     }
-    
+
     return true;
   };
-  
+
   // Xử lý lưu dự án
   const handleSave = async () => {
     if (!validateForm()) {
       return;
     }
-    
+
     setIsLoading(true);
-    
+
     try {
       // Chuẩn bị dữ liệu để lưu
       const projectData = {
         ...formData,
         budget: formData.budget ? Number(formData.budget) : null,
-        durationInDays: formData.durationInDays ? Number(formData.durationInDays) : null
+        durationInDays: formData.durationInDays
+          ? Number(formData.durationInDays)
+          : null,
       };
-      
+
       // Gọi API tạo dự án mới
       await createProject(projectData, currentUser?.uid);
-      
-      Alert.alert(
-        'Thành công',
-        'Đã thêm dự án mới thành công',
-        [
-          { 
-            text: 'OK', 
-            onPress: () => navigation.goBack() 
-          }
-        ]
-      );
+
+      Alert.alert('Thành công', 'Đã thêm dự án mới thành công', [
+        {
+          text: 'OK',
+          onPress: () => navigation.goBack(),
+        },
+      ]);
     } catch (error) {
-      console.error('Lỗi khi thêm dự án:', error);
-      Alert.alert('Lỗi', 'Không thể thêm dự án. Vui lòng thử lại sau.');
+      if (error.code === 'permission-denied') {
+        Alert.alert(
+          'Lỗi quyền',
+          'Bạn không có đủ quyền để thực hiện hành động này.'
+        );
+      } else {
+        console.error('Lỗi khi thêm dự án:', error);
+        Alert.alert('Lỗi', 'Không thể thêm dự án. Vui lòng thử lại sau.');
+      }
     } finally {
       setIsLoading(false);
     }
   };
-  
+
   // Xử lý thay đổi trạng thái dự án
   const handleSelectStatus = (status) => {
     handleChange('status', status);
   };
-  
+
   // Xử lý mở modal chọn khách hàng
   const handleOpenCustomerModal = () => {
     setCustomerModalVisible(true);
   };
-  
+
   // Xử lý đóng modal chọn khách hàng
   const handleCloseCustomerModal = () => {
     setCustomerModalVisible(false);
     setCustomerSearchQuery('');
   };
-  
+
   // Xử lý khi chọn khách hàng
   const handleSelectCustomer = (customer) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       customerId: customer.id,
-      customerName: customer.name
+      customerName: customer.name,
     }));
     handleCloseCustomerModal();
   };
-  
+
   // Xử lý khi tìm kiếm khách hàng
   const handleSearchCustomer = (text) => {
     setCustomerSearchQuery(text);
   };
-  
+
   // Xử lý khi xóa khách hàng đã chọn
   const handleClearCustomer = () => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       customerId: '',
-      customerName: ''
+      customerName: '',
     }));
   };
-  
+
   // Render một item trong danh sách khách hàng
   const renderCustomerItem = ({ item }) => (
     <TouchableOpacity
@@ -235,15 +239,13 @@ const AddProjectScreen = ({ navigation }) => {
           </Text>
         )}
         {item.email && (
-          <Text style={styles.customerDetail}>
-            Email: {item.email}
-          </Text>
+          <Text style={styles.customerDetail}>Email: {item.email}</Text>
         )}
       </View>
       <Ionicons name="chevron-forward" size={20} color="#999" />
     </TouchableOpacity>
   );
-  
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -259,14 +261,16 @@ const AddProjectScreen = ({ navigation }) => {
         <Text style={styles.headerTitle}>Thêm dự án mới</Text>
         <View style={styles.placeholder} />
       </View>
-      
-      <ScrollView 
+
+      <ScrollView
         style={styles.formContainer}
         contentContainerStyle={styles.formContent}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Tên dự án <Text style={styles.required}>*</Text></Text>
+          <Text style={styles.label}>
+            Tên dự án <Text style={styles.required}>*</Text>
+          </Text>
           <TextInput
             style={styles.input}
             value={formData.name}
@@ -274,7 +278,7 @@ const AddProjectScreen = ({ navigation }) => {
             placeholder="Nhập tên dự án"
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Mô tả</Text>
           <TextInput
@@ -286,16 +290,18 @@ const AddProjectScreen = ({ navigation }) => {
             numberOfLines={3}
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Khách hàng</Text>
           {formData.customerName ? (
             <View style={styles.selectedCustomerContainer}>
               <View style={styles.selectedCustomer}>
                 <Ionicons name="business-outline" size={20} color="#0066cc" />
-                <Text style={styles.selectedCustomerText}>{formData.customerName}</Text>
+                <Text style={styles.selectedCustomerText}>
+                  {formData.customerName}
+                </Text>
               </View>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.clearCustomerButton}
                 onPress={handleClearCustomer}
               >
@@ -308,78 +314,85 @@ const AddProjectScreen = ({ navigation }) => {
               onPress={handleOpenCustomerModal}
             >
               <Ionicons name="add-circle-outline" size={20} color="#0066cc" />
-              <Text style={styles.customerSelectButtonText}>Chọn khách hàng</Text>
+              <Text style={styles.customerSelectButtonText}>
+                Chọn khách hàng
+              </Text>
             </TouchableOpacity>
           )}
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Trạng thái</Text>
           <View style={styles.statusButtonsContainer}>
             <TouchableOpacity
               style={[
                 styles.statusButton,
-                formData.status === 'pending' && styles.selectedStatusButton
+                formData.status === 'pending' && styles.selectedStatusButton,
               ]}
               onPress={() => handleSelectStatus('pending')}
             >
               <Text
                 style={[
                   styles.statusButtonText,
-                  formData.status === 'pending' && styles.selectedStatusButtonText
+                  formData.status === 'pending' &&
+                    styles.selectedStatusButtonText,
                 ]}
               >
                 Chờ xử lý
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.statusButton,
-                formData.status === 'in-progress' && styles.selectedStatusButton
+                formData.status === 'in-progress' &&
+                  styles.selectedStatusButton,
               ]}
               onPress={() => handleSelectStatus('in-progress')}
             >
               <Text
                 style={[
                   styles.statusButtonText,
-                  formData.status === 'in-progress' && styles.selectedStatusButtonText
+                  formData.status === 'in-progress' &&
+                    styles.selectedStatusButtonText,
                 ]}
               >
                 Đang thực hiện
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.statusButton,
-                formData.status === 'completed' && styles.selectedStatusButton
+                formData.status === 'completed' && styles.selectedStatusButton,
               ]}
               onPress={() => handleSelectStatus('completed')}
             >
               <Text
                 style={[
                   styles.statusButtonText,
-                  formData.status === 'completed' && styles.selectedStatusButtonText
+                  formData.status === 'completed' &&
+                    styles.selectedStatusButtonText,
                 ]}
               >
                 Hoàn thành
               </Text>
             </TouchableOpacity>
           </View>
-          
+
           <View style={[styles.statusButtonsContainer, { marginTop: 8 }]}>
             <TouchableOpacity
               style={[
                 styles.statusButton,
-                formData.status === 'cancelled' && styles.selectedStatusButton
+                formData.status === 'cancelled' && styles.selectedStatusButton,
               ]}
               onPress={() => handleSelectStatus('cancelled')}
             >
               <Text
                 style={[
                   styles.statusButtonText,
-                  formData.status === 'cancelled' && styles.selectedStatusButtonText
+                  formData.status === 'cancelled' &&
+                    styles.selectedStatusButtonText,
                 ]}
               >
                 Đã hủy
@@ -387,7 +400,7 @@ const AddProjectScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
-        
+
         {/* Thêm trường ngày bắt đầu */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Ngày bắt đầu</Text>
@@ -397,7 +410,9 @@ const AddProjectScreen = ({ navigation }) => {
           >
             <Ionicons name="calendar-outline" size={20} color="#0066cc" />
             <Text style={styles.dateButtonText}>
-              {formData.startDate ? formatDate(formData.startDate) : 'Chọn ngày bắt đầu'}
+              {formData.startDate
+                ? formatDate(formData.startDate)
+                : 'Chọn ngày bắt đầu'}
             </Text>
           </TouchableOpacity>
           {showStartDatePicker && (
@@ -409,7 +424,7 @@ const AddProjectScreen = ({ navigation }) => {
             />
           )}
         </View>
-        
+
         {/* Thêm trường số ngày thi công */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Số ngày thi công</Text>
@@ -421,18 +436,20 @@ const AddProjectScreen = ({ navigation }) => {
             keyboardType="numeric"
           />
         </View>
-        
+
         {/* Hiển thị ngày kết thúc (chỉ đọc) */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Ngày kết thúc (tự động tính)</Text>
           <View style={styles.readOnlyField}>
             <Ionicons name="calendar-outline" size={20} color="#666" />
             <Text style={styles.readOnlyText}>
-              {formData.endDate ? formatDate(formData.endDate) : 'Chưa xác định'}
+              {formData.endDate
+                ? formatDate(formData.endDate)
+                : 'Chưa xác định'}
             </Text>
           </View>
         </View>
-        
+
         {/* Thêm trường vị trí */}
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Vị trí thi công</Text>
@@ -440,31 +457,34 @@ const AddProjectScreen = ({ navigation }) => {
             <TouchableOpacity
               style={[
                 styles.locationButton,
-                formData.location === 'workshop' && styles.selectedLocationButton
+                formData.location === 'workshop' &&
+                  styles.selectedLocationButton,
               ]}
               onPress={() => handleLocationChange('workshop')}
             >
               <Text
                 style={[
                   styles.locationButtonText,
-                  formData.location === 'workshop' && styles.selectedLocationButtonText
+                  formData.location === 'workshop' &&
+                    styles.selectedLocationButtonText,
                 ]}
               >
                 Tại xưởng
               </Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[
                 styles.locationButton,
-                formData.location === 'site' && styles.selectedLocationButton
+                formData.location === 'site' && styles.selectedLocationButton,
               ]}
               onPress={() => handleLocationChange('site')}
             >
               <Text
                 style={[
                   styles.locationButtonText,
-                  formData.location === 'site' && styles.selectedLocationButtonText
+                  formData.location === 'site' &&
+                    styles.selectedLocationButtonText,
                 ]}
               >
                 Tại công trình
@@ -472,7 +492,7 @@ const AddProjectScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Ngân sách</Text>
           <TextInput
@@ -483,7 +503,7 @@ const AddProjectScreen = ({ navigation }) => {
             keyboardType="numeric"
           />
         </View>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Ghi chú</Text>
           <TextInput
@@ -496,7 +516,7 @@ const AddProjectScreen = ({ navigation }) => {
           />
         </View>
       </ScrollView>
-      
+
       <View style={styles.footer}>
         <TouchableOpacity
           style={styles.saveButton}
@@ -513,7 +533,7 @@ const AddProjectScreen = ({ navigation }) => {
           )}
         </TouchableOpacity>
       </View>
-      
+
       {/* Modal chọn khách hàng */}
       <Modal
         visible={customerModalVisible}
@@ -532,9 +552,14 @@ const AddProjectScreen = ({ navigation }) => {
                 <Ionicons name="close" size={24} color="#333" />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.searchContainer}>
-              <Ionicons name="search" size={20} color="#999" style={styles.searchIcon} />
+              <Ionicons
+                name="search"
+                size={20}
+                color="#999"
+                style={styles.searchIcon}
+              />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Tìm kiếm khách hàng..."
@@ -550,11 +575,13 @@ const AddProjectScreen = ({ navigation }) => {
                 </TouchableOpacity>
               )}
             </View>
-            
+
             {loadingCustomers ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#0066cc" />
-                <Text style={styles.loadingText}>Đang tải danh sách khách hàng...</Text>
+                <Text style={styles.loadingText}>
+                  Đang tải danh sách khách hàng...
+                </Text>
               </View>
             ) : (
               <FlatList
@@ -860,4 +887,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AddProjectScreen; 
+export default AddProjectScreen;

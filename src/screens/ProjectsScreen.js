@@ -1,13 +1,14 @@
+//src/screens/ProjectsScreen.js
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  SafeAreaView, 
-  StatusBar, 
-  FlatList, 
-  TouchableOpacity, 
-  ActivityIndicator 
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  StatusBar,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getProjects } from '../api/projectService';
@@ -67,21 +68,31 @@ const ProjectsScreen = ({ navigation }) => {
   const renderProjectItem = ({ item }) => {
     const getStatusColor = (status) => {
       switch (status) {
-        case 'completed': return '#4CAF50';
-        case 'in-progress': return '#2196F3';
-        case 'pending': return '#FF9800';
-        case 'cancelled': return '#F44336';
-        default: return '#9E9E9E';
+        case 'completed':
+          return '#4CAF50';
+        case 'in-progress':
+          return '#2196F3';
+        case 'pending':
+          return '#FF9800';
+        case 'cancelled':
+          return '#F44336';
+        default:
+          return '#9E9E9E';
       }
     };
 
     const getStatusLabel = (status) => {
       switch (status) {
-        case 'completed': return 'Hoàn thành';
-        case 'in-progress': return 'Đang thực hiện';
-        case 'pending': return 'Chờ xử lý';
-        case 'cancelled': return 'Đã hủy';
-        default: return status || 'Không xác định';
+        case 'completed':
+          return 'Hoàn thành';
+        case 'in-progress':
+          return 'Đang thực hiện';
+        case 'pending':
+          return 'Chờ xử lý';
+        case 'cancelled':
+          return 'Đã hủy';
+        default:
+          return status || 'Không xác định';
       }
     };
 
@@ -92,11 +103,16 @@ const ProjectsScreen = ({ navigation }) => {
       >
         <View style={styles.projectHeader}>
           <Text style={styles.projectName}>{item.name || 'Chưa có tên'}</Text>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+          <View
+            style={[
+              styles.statusBadge,
+              { backgroundColor: getStatusColor(item.status) },
+            ]}
+          >
             <Text style={styles.statusText}>{getStatusLabel(item.status)}</Text>
           </View>
         </View>
-        
+
         {item.customerName && (
           <View style={styles.infoRow}>
             <Ionicons name="business-outline" size={14} color="#666" />
@@ -143,15 +159,18 @@ const ProjectsScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#f8f8f8" />
-      
+
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Dự Án</Text>
-        <TouchableOpacity style={styles.manageButton} onPress={handleManageProjects}>
+        <TouchableOpacity
+          style={styles.manageButton}
+          onPress={handleManageProjects}
+        >
           <Text style={styles.manageButtonText}>Quản lý</Text>
           <Ionicons name="settings-outline" size={16} color="#0066cc" />
         </TouchableOpacity>
       </View>
-      
+
       {projects.length > 0 ? (
         <FlatList
           data={projects.slice(0, 5)} // Chỉ hiển thị 5 dự án mới nhất
@@ -168,7 +187,10 @@ const ProjectsScreen = ({ navigation }) => {
           <Text style={styles.emptySubtitle}>
             Bạn chưa có dự án nào. Hãy tạo dự án mới trong mục quản lý dự án.
           </Text>
-          <TouchableOpacity style={styles.manageFullButton} onPress={handleManageProjects}>
+          <TouchableOpacity
+            style={styles.manageFullButton}
+            onPress={handleManageProjects}
+          >
             <Text style={styles.manageFullButtonText}>Quản lý dự án</Text>
           </TouchableOpacity>
         </View>
@@ -330,4 +352,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default ProjectsScreen; 
+export default ProjectsScreen;

@@ -1,3 +1,4 @@
+//App.js
 import React, { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { UIManager, Platform } from 'react-native';
@@ -21,10 +22,7 @@ if (!global.Blob || !global.fetch) {
   const Fetch = RNFetchBlob.polyfill.Fetch;
   global.fetch = new Fetch({
     auto: true,
-    binaryContentTypes: [
-      'application/pdf',
-      'application/octet-stream',
-    ],
+    binaryContentTypes: ['application/pdf', 'application/octet-stream'],
   }).build();
   global.Blob = RNFetchBlob.polyfill.Blob;
 }
@@ -33,18 +31,19 @@ export default function App() {
   useEffect(() => {
     // Log để xác nhận App component đã mount
     console.log('App component mounted');
-    
+
     // Cấu hình GoogleSignin
     GoogleSignin.configure({
       // Web application client ID từ Google Cloud Console
-      webClientId: '370615243912-fesvpqtf06r7ugj31ma1urmrii85m7at.apps.googleusercontent.com',
+      webClientId:
+        '370615243912-fesvpqtf06r7ugj31ma1urmrii85m7at.apps.googleusercontent.com',
       // Yêu cầu quyền truy cập offline để có thể lấy refresh token
       offlineAccess: true,
       scopes: [
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/userinfo.email',
-        'https://www.googleapis.com/auth/drive.readonly'
-      ]
+        'https://www.googleapis.com/auth/drive.readonly',
+      ],
     });
   }, []);
 
@@ -57,4 +56,4 @@ export default function App() {
       </AuthProvider>
     </SafeAreaProvider>
   );
-} 
+}

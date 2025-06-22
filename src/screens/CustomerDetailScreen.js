@@ -1,3 +1,4 @@
+//src/screens/CustomerDetailScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -7,7 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
-  Share
+  Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getCustomerById, deleteCustomer } from '../api/customerService';
@@ -19,14 +20,14 @@ const CustomerDetailScreen = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  
+
   // Hàm lấy dữ liệu khách hàng
   const fetchCustomerData = async () => {
     try {
       setLoading(true);
       setError(null);
       const data = await getCustomerById(customerId);
-      
+
       if (data) {
         setCustomer(data);
       } else {
@@ -39,19 +40,19 @@ const CustomerDetailScreen = ({ route, navigation }) => {
       setLoading(false);
     }
   };
-  
+
   // Lấy dữ liệu khách hàng khi màn hình được tải
   useEffect(() => {
     fetchCustomerData();
   }, [customerId]);
-  
+
   // Làm mới dữ liệu khi màn hình được focus (quay lại sau khi chỉnh sửa)
   useFocusEffect(
     useCallback(() => {
       fetchCustomerData();
     }, [customerId])
   );
-  
+
   // Lấy nhãn hiển thị cho loại khách hàng
   const getTypeLabel = (type) => {
     switch (type) {
@@ -65,7 +66,7 @@ const CustomerDetailScreen = ({ route, navigation }) => {
         return type || 'Chưa phân loại';
     }
   };
-  
+
   // Lấy màu cho loại khách hàng
   const getTypeColor = (type) => {
     switch (type) {
@@ -77,11 +78,11 @@ const CustomerDetailScreen = ({ route, navigation }) => {
         return '#9E9E9E'; // xám
     }
   };
-  
+
   // Xử lý chia sẻ thông tin khách hàng
   const handleShare = async () => {
     if (!customer) return;
-    
+
     try {
       const message = `
 Thông tin khách hàng:
@@ -92,7 +93,7 @@ Email: ${customer.email || 'Không có'}
 Địa chỉ: ${customer.address || 'Không có'}
 Loại khách hàng: ${getTypeLabel(customer.type)}
       `;
-      
+
       await Share.share({
         message,
         title: `Thông tin khách hàng: ${customer.name}`,
@@ -101,12 +102,12 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
       Alert.alert('Lỗi', 'Không thể chia sẻ thông tin khách hàng');
     }
   };
-  
+
   // Xử lý chỉnh sửa khách hàng
   const handleEdit = () => {
     navigation.navigate('EditCustomer', { customer });
   };
-  
+
   // Xử lý xóa khách hàng
   const handleDelete = () => {
     Alert.alert(
@@ -114,34 +115,40 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
       'Bạn có chắc chắn muốn xóa khách hàng này không?',
       [
         { text: 'Hủy', style: 'cancel' },
-        { 
-          text: 'Xóa', 
+        {
+          text: 'Xóa',
           style: 'destructive',
           onPress: async () => {
             try {
               setIsDeleting(true);
               await deleteCustomer(customer.id);
-              Alert.alert(
-                'Thành công',
-                'Đã xóa khách hàng thành công',
-                [
-                  { 
-                    text: 'OK', 
-                    onPress: () => navigation.goBack() 
-                  }
-                ]
-              );
+              Alert.alert('Thành công', 'Đã xóa khách hàng thành công', [
+                {
+                  text: 'OK',
+                  onPress: () => navigation.goBack(),
+                },
+              ]);
             } catch (error) {
-              console.error('Lỗi khi xóa khách hàng:', error);
-              Alert.alert('Lỗi', 'Không thể xóa khách hàng. Vui lòng thử lại sau.');
+              if (error.code === 'permission-denied') {
+                Alert.alert(
+                  'Lỗi quyền',
+                  'Bạn không có đủ quyền để thực hiện hành động này.'
+                );
+              } else {
+                console.error('Lỗi khi xóa khách hàng:', error);
+                Alert.alert(
+                  'Lỗi',
+                  'Không thể xóa khách hàng. Vui lòng thử lại sau.'
+                );
+              }
               setIsDeleting(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
-  
+
   // Hiển thị khi đang tải dữ liệu
   if (loading) {
     return (
@@ -151,47 +158,55 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
       </View>
     );
   }
-  
+
   // Hiển thị khi có lỗi
   if (error) {
     return (
       <View style={styles.centerContainer}>
         <Ionicons name="alert-circle-outline" size={50} color="#FF3B30" />
         <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => navigation.goBack()}
+        >
           <Text style={styles.retryButtonText}>Quay lại</Text>
         </TouchableOpacity>
       </View>
     );
   }
-  
+
   // Hiển thị khi không tìm thấy khách hàng
   if (!customer) {
     return (
       <View style={styles.centerContainer}>
         <Ionicons name="person-outline" size={50} color="#999" />
-        <Text style={styles.errorText}>Không tìm thấy thông tin khách hàng</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
+        <Text style={styles.errorText}>
+          Không tìm thấy thông tin khách hàng
+        </Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => navigation.goBack()}
+        >
           <Text style={styles.retryButtonText}>Quay lại</Text>
         </TouchableOpacity>
       </View>
     );
   }
-  
+
   // Định dạng ngày tháng
   const formatDate = (timestamp) => {
     if (!timestamp) return 'Không có';
-    
+
     const date = new Date(timestamp.seconds * 1000);
     return date.toLocaleDateString('vi-VN', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     });
   };
-  
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -202,28 +217,27 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết khách hàng</Text>
-        <TouchableOpacity
-          style={styles.shareButton}
-          onPress={handleShare}
-        >
+        <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
           <Ionicons name="share-outline" size={24} color="#333" />
         </TouchableOpacity>
       </View>
-      
+
       <ScrollView style={styles.contentContainer}>
         <View style={styles.customerHeader}>
           <View style={styles.customerNameContainer}>
-            <Text style={styles.customerName}>{customer.name || 'Chưa có tên'}</Text>
-            <View 
+            <Text style={styles.customerName}>
+              {customer.name || 'Chưa có tên'}
+            </Text>
+            <View
               style={[
-                styles.customerTypeTag, 
-                { borderColor: getTypeColor(customer.type) }
+                styles.customerTypeTag,
+                { borderColor: getTypeColor(customer.type) },
               ]}
             >
-              <Text 
+              <Text
                 style={[
-                  styles.customerTypeText, 
-                  { color: getTypeColor(customer.type) }
+                  styles.customerTypeText,
+                  { color: getTypeColor(customer.type) },
                 ]}
               >
                 {getTypeLabel(customer.type)}
@@ -231,17 +245,21 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
             </View>
           </View>
         </View>
-        
+
         <View style={styles.infoSection}>
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Người liên hệ</Text>
-            <Text style={styles.infoValue}>{customer.contactPerson || 'Chưa có thông tin'}</Text>
+            <Text style={styles.infoValue}>
+              {customer.contactPerson || 'Chưa có thông tin'}
+            </Text>
           </View>
-          
+
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Số điện thoại</Text>
             <View style={styles.infoValueWithIcon}>
-              <Text style={styles.infoValue}>{customer.phone || 'Chưa có thông tin'}</Text>
+              <Text style={styles.infoValue}>
+                {customer.phone || 'Chưa có thông tin'}
+              </Text>
               {customer.phone && (
                 <TouchableOpacity style={styles.actionIcon}>
                   <Ionicons name="call-outline" size={20} color="#0066cc" />
@@ -249,11 +267,13 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
               )}
             </View>
           </View>
-          
+
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Email</Text>
             <View style={styles.infoValueWithIcon}>
-              <Text style={styles.infoValue}>{customer.email || 'Chưa có thông tin'}</Text>
+              <Text style={styles.infoValue}>
+                {customer.email || 'Chưa có thông tin'}
+              </Text>
               {customer.email && (
                 <TouchableOpacity style={styles.actionIcon}>
                   <Ionicons name="mail-outline" size={20} color="#0066cc" />
@@ -261,33 +281,41 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
               )}
             </View>
           </View>
-          
+
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Địa chỉ</Text>
-            <Text style={styles.infoValue}>{customer.address || 'Chưa có thông tin'}</Text>
+            <Text style={styles.infoValue}>
+              {customer.address || 'Chưa có thông tin'}
+            </Text>
           </View>
-          
+
           <View style={styles.infoItem}>
             <Text style={styles.infoLabel}>Mã số thuế</Text>
-            <Text style={styles.infoValue}>{customer.taxCode || 'Chưa có thông tin'}</Text>
+            <Text style={styles.infoValue}>
+              {customer.taxCode || 'Chưa có thông tin'}
+            </Text>
           </View>
         </View>
-        
+
         <View style={styles.metaSection}>
           <Text style={styles.metaSectionTitle}>Thông tin bổ sung</Text>
-          
+
           <View style={styles.metaItem}>
             <Text style={styles.metaLabel}>Ngày tạo</Text>
-            <Text style={styles.metaValue}>{formatDate(customer.createdAt)}</Text>
+            <Text style={styles.metaValue}>
+              {formatDate(customer.createdAt)}
+            </Text>
           </View>
-          
+
           <View style={styles.metaItem}>
             <Text style={styles.metaLabel}>Cập nhật lần cuối</Text>
-            <Text style={styles.metaValue}>{formatDate(customer.updatedAt)}</Text>
+            <Text style={styles.metaValue}>
+              {formatDate(customer.updatedAt)}
+            </Text>
           </View>
         </View>
       </ScrollView>
-      
+
       <View style={styles.footer}>
         <View style={styles.buttonContainer}>
           <TouchableOpacity
@@ -304,11 +332,8 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
               </>
             )}
           </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={handleEdit}
-          >
+
+          <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
             <Ionicons name="create-outline" size={20} color="#fff" />
             <Text style={styles.editButtonText}>Chỉnh sửa</Text>
           </TouchableOpacity>
@@ -495,4 +520,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default CustomerDetailScreen; 
+export default CustomerDetailScreen;

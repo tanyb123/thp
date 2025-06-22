@@ -1,5 +1,14 @@
+//src/screens/HomeScreen.js
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, StatusBar, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../contexts/ThemeContext';
@@ -12,19 +21,19 @@ const HomeScreen = ({ navigation }) => {
   const [recentProjects, setRecentProjects] = useState([]);
   const [recentCustomers, setRecentCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Hàm tải dữ liệu trang chủ
   const loadHomeData = async () => {
     try {
       setLoading(true);
-      
+
       // Lấy danh sách dự án và khách hàng
       const projectsData = await getProjects();
       const customersData = await getCustomers();
-      
+
       // Lấy 3 dự án mới nhất
       setRecentProjects(projectsData.slice(0, 3));
-      
+
       // Lấy 3 khách hàng mới nhất
       setRecentCustomers(customersData.slice(0, 3));
     } catch (error) {
@@ -33,75 +42,80 @@ const HomeScreen = ({ navigation }) => {
       setLoading(false);
     }
   };
-  
+
   // Tải dữ liệu khi màn hình được mở
   useEffect(() => {
     loadHomeData();
   }, []);
-  
+
   // Làm mới dữ liệu khi màn hình được focus
   useFocusEffect(
     React.useCallback(() => {
       loadHomeData();
     }, [])
   );
-  
+
   // Xử lý khi người dùng nhấn vào dự án
   const handleProjectPress = (project) => {
     navigation.navigate('ProjectDetail', { projectId: project.id });
   };
-  
+
   // Xử lý khi người dùng nhấn vào khách hàng
   const handleCustomerPress = (customer) => {
     navigation.navigate('CustomerDetail', { customerId: customer.id });
   };
-  
+
   // Xử lý khi người dùng nhấn vào nút xem tất cả dự án
   const handleViewAllProjects = () => {
     navigation.navigate('Projects');
   };
-  
+
   // Xử lý khi người dùng nhấn vào nút xem tất cả khách hàng
   const handleViewAllCustomers = () => {
     navigation.navigate('Customers');
   };
-  
+
   // Hàm lấy màu trạng thái dự án
   const getStatusColor = (status) => {
     switch (status) {
-      case 'completed': return theme.statusCompleted;
-      case 'in-progress': return theme.statusInProgress;
-      case 'pending': return theme.statusPending;
-      case 'cancelled': return theme.statusCancelled;
-      default: return theme.textMuted;
+      case 'completed':
+        return theme.statusCompleted;
+      case 'in-progress':
+        return theme.statusInProgress;
+      case 'pending':
+        return theme.statusPending;
+      case 'cancelled':
+        return theme.statusCancelled;
+      default:
+        return theme.textMuted;
     }
   };
-  
+
   // Hàm lấy nhãn trạng thái dự án
   const getStatusLabel = (status) => {
     switch (status) {
-      case 'completed': return 'Hoàn thành';
-      case 'in-progress': return 'Đang thực hiện';
-      case 'pending': return 'Chờ xử lý';
-      case 'cancelled': return 'Đã hủy';
-      default: return status || 'Không xác định';
+      case 'completed':
+        return 'Hoàn thành';
+      case 'in-progress':
+        return 'Đang thực hiện';
+      case 'pending':
+        return 'Chờ xử lý';
+      case 'cancelled':
+        return 'Đã hủy';
+      default:
+        return status || 'Không xác định';
     }
   };
-  
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      <StatusBar 
-        barStyle={isDarkMode ? "light-content" : "dark-content"} 
-        backgroundColor={theme.background} 
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
       />
-      
-      <View style={[styles.header, { 
-        backgroundColor: theme.card,
-        borderBottomColor: theme.border,
-      }]}>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Trang Chủ</Text>
-      </View>
-      
+
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={theme.primary} />
@@ -110,7 +124,10 @@ const HomeScreen = ({ navigation }) => {
           </Text>
         </View>
       ) : (
-        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+        >
           {/* Phần dự án gần đây */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -123,12 +140,15 @@ const HomeScreen = ({ navigation }) => {
                 </Text>
               </TouchableOpacity>
             </View>
-            
+
             {recentProjects.length > 0 ? (
               recentProjects.map((project) => (
                 <TouchableOpacity
                   key={project.id}
-                  style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+                  style={[
+                    styles.card,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
                   onPress={() => handleProjectPress(project)}
                 >
                   <View style={styles.cardContent}>
@@ -138,14 +158,28 @@ const HomeScreen = ({ navigation }) => {
                       </Text>
                       {project.customerName && (
                         <View style={styles.cardRow}>
-                          <Ionicons name="business-outline" size={14} color={theme.textSecondary} />
-                          <Text style={[styles.cardText, { color: theme.textSecondary }]}>
+                          <Ionicons
+                            name="business-outline"
+                            size={14}
+                            color={theme.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.cardText,
+                              { color: theme.textSecondary },
+                            ]}
+                          >
                             {project.customerName}
                           </Text>
                         </View>
                       )}
                     </View>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(project.status) }]}>
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        { backgroundColor: getStatusColor(project.status) },
+                      ]}
+                    >
                       <Text style={styles.statusText}>
                         {getStatusLabel(project.status)}
                       </Text>
@@ -154,15 +188,24 @@ const HomeScreen = ({ navigation }) => {
                 </TouchableOpacity>
               ))
             ) : (
-              <View style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <Ionicons name="briefcase-outline" size={24} color={theme.textMuted} />
+              <View
+                style={[
+                  styles.emptyCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <Ionicons
+                  name="briefcase-outline"
+                  size={24}
+                  color={theme.textMuted}
+                />
                 <Text style={[styles.emptyText, { color: theme.textMuted }]}>
                   Chưa có dự án nào
                 </Text>
               </View>
             )}
           </View>
-          
+
           {/* Phần khách hàng gần đây */}
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -175,12 +218,15 @@ const HomeScreen = ({ navigation }) => {
                 </Text>
               </TouchableOpacity>
             </View>
-            
+
             {recentCustomers.length > 0 ? (
               recentCustomers.map((customer) => (
                 <TouchableOpacity
                   key={customer.id}
-                  style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+                  style={[
+                    styles.card,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
                   onPress={() => handleCustomerPress(customer)}
                 >
                   <View style={styles.cardContent}>
@@ -190,38 +236,75 @@ const HomeScreen = ({ navigation }) => {
                       </Text>
                       {customer.contactPerson && (
                         <View style={styles.cardRow}>
-                          <Ionicons name="person-outline" size={14} color={theme.textSecondary} />
-                          <Text style={[styles.cardText, { color: theme.textSecondary }]}>
+                          <Ionicons
+                            name="person-outline"
+                            size={14}
+                            color={theme.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.cardText,
+                              { color: theme.textSecondary },
+                            ]}
+                          >
                             {customer.contactPerson}
                           </Text>
                         </View>
                       )}
                       {customer.phone && (
                         <View style={styles.cardRow}>
-                          <Ionicons name="call-outline" size={14} color={theme.textSecondary} />
-                          <Text style={[styles.cardText, { color: theme.textSecondary }]}>
+                          <Ionicons
+                            name="call-outline"
+                            size={14}
+                            color={theme.textSecondary}
+                          />
+                          <Text
+                            style={[
+                              styles.cardText,
+                              { color: theme.textSecondary },
+                            ]}
+                          >
                             {customer.phone}
                           </Text>
                         </View>
                       )}
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+                    <Ionicons
+                      name="chevron-forward"
+                      size={20}
+                      color={theme.textMuted}
+                    />
                   </View>
                 </TouchableOpacity>
               ))
             ) : (
-              <View style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <Ionicons name="people-outline" size={24} color={theme.textMuted} />
+              <View
+                style={[
+                  styles.emptyCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <Ionicons
+                  name="people-outline"
+                  size={24}
+                  color={theme.textMuted}
+                />
                 <Text style={[styles.emptyText, { color: theme.textMuted }]}>
                   Chưa có khách hàng nào
                 </Text>
               </View>
             )}
           </View>
-          
+
           {/* Thông tin ứng dụng */}
-          <View style={[styles.infoCard, { backgroundColor: theme.primaryLight }]}>
-            <Ionicons name="information-circle-outline" size={24} color={theme.primary} />
+          <View
+            style={[styles.infoCard, { backgroundColor: theme.primaryLight }]}
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={24}
+              color={theme.primary}
+            />
             <Text style={[styles.infoText, { color: theme.text }]}>
               THP App - Phiên bản 1.0.0
             </Text>
@@ -236,31 +319,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
-    marginTop: 12,
-    fontSize: 16,
+    marginTop: 10,
   },
   scrollView: {
     flex: 1,
@@ -357,4 +422,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default HomeScreen; 
+export default HomeScreen;

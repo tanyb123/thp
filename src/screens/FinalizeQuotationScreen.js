@@ -1,3 +1,4 @@
+//src/screens/FinalizeQuotationScreen.js
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -10,7 +11,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
-  Linking
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
@@ -27,26 +28,67 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 // Hàm chuyển đổi số thành chữ tiếng Việt
 const convertNumberToWords = (number) => {
   // Mảng từ ngữ cho các số
-  const units = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
-  const teens = ['mười', 'mười một', 'mười hai', 'mười ba', 'mười bốn', 'mười lăm', 'mười sáu', 'mười bảy', 'mười tám', 'mười chín'];
-  const tens = ['', 'mười', 'hai mươi', 'ba mươi', 'bốn mươi', 'năm mươi', 'sáu mươi', 'bảy mươi', 'tám mươi', 'chín mươi'];
+  const units = [
+    'không',
+    'một',
+    'hai',
+    'ba',
+    'bốn',
+    'năm',
+    'sáu',
+    'bảy',
+    'tám',
+    'chín',
+  ];
+  const teens = [
+    'mười',
+    'mười một',
+    'mười hai',
+    'mười ba',
+    'mười bốn',
+    'mười lăm',
+    'mười sáu',
+    'mười bảy',
+    'mười tám',
+    'mười chín',
+  ];
+  const tens = [
+    '',
+    'mười',
+    'hai mươi',
+    'ba mươi',
+    'bốn mươi',
+    'năm mươi',
+    'sáu mươi',
+    'bảy mươi',
+    'tám mươi',
+    'chín mươi',
+  ];
   const scales = ['', 'nghìn', 'triệu', 'tỷ', 'nghìn tỷ', 'triệu tỷ'];
 
   // Hàm xử lý số có 3 chữ số
-  const handleHundreds = (num) => {
+  const handleHundreds = (num, isFirstGroup) => {
     let result = '';
-    
+    const originalNum = num;
+
     // Xử lý hàng trăm
     if (num >= 100) {
       result += units[Math.floor(num / 100)] + ' trăm ';
       num %= 100;
     }
-    
+
     // Xử lý hàng chục và đơn vị
     if (num > 0) {
-      if (num < 10) {
-        // Nếu số dư < 10, thêm "lẻ" và đơn vị
-        result += 'lẻ ' + units[num];
+      // Chỉ thêm "lẻ" nếu nó không phải là nhóm đầu tiên (nhóm đơn vị) và số có 1 chữ số
+      // hoặc nếu hàng trăm của nhóm đó > 0
+      if (num < 10 && !isFirstGroup && originalNum > 99) {
+        if (num === 1 && Math.floor(originalNum / 100) > 0) {
+          result += 'linh một'; // Sử dụng "linh một" thay vì "lẻ một"
+        } else {
+          result += 'lẻ ' + units[num];
+        }
+      } else if (num < 10) {
+        result += units[num];
       } else if (num < 20) {
         // Nếu số dư < 20, sử dụng mảng teens
         result += teens[num - 10];
@@ -67,103 +109,133 @@ const convertNumberToWords = (number) => {
         }
       }
     }
-    
+
     return result.trim();
   };
 
   // Hàm chính để chuyển đổi số thành chữ
   const convert = (num) => {
     if (num === 0) return 'không';
-    
+
     let result = '';
     let scaleIndex = 0;
-    
+
     // Xử lý số theo từng nhóm 3 chữ số
     while (num > 0) {
       const group = num % 1000;
       if (group !== 0) {
-        const groupText = handleHundreds(group);
-        result = groupText + (scaleIndex > 0 ? ' ' + scales[scaleIndex] + ' ' : '') + result;
+        const isFirstGroup = scaleIndex === 0;
+        const groupText = handleHundreds(group, isFirstGroup);
+        result =
+          groupText +
+          (scaleIndex > 0 ? ' ' + scales[scaleIndex] + ' ' : '') +
+          result;
       }
-      
+
       num = Math.floor(num / 1000);
       scaleIndex++;
     }
-    
-    return result.trim();
+
+    return result.trim().replace(/\s\s+/g, ' '); // Loại bỏ khoảng trắng thừa
   };
 
-  // Xử lý số tiền
+  // Xử lý số tiền (chỉ lấy phần nguyên)
   const integerPart = Math.floor(number);
-  const decimalPart = Math.round((number - integerPart) * 100);
-  
+
   let result = convert(integerPart) + ' đồng';
-  
-  if (decimalPart > 0) {
-    result += ' và ' + convert(decimalPart) + ' xu';
-  }
-  
+
   // Viết hoa chữ cái đầu
   return result.charAt(0).toUpperCase() + result.slice(1);
 };
 
 const FinalizeQuotationScreen = ({ route, navigation }) => {
-  const { materials, subTotal, projectId, projectName, customerData } = route.params;
-  
+  const {
+    materials: newMaterials,
+    subTotal: newSubTotal,
+    projectId,
+    projectName,
+    customerData,
+    initialData,
+  } = route.params;
+
+  // Determine if we are re-quoting and calculate subTotal accordingly
+  const isRequoting = !!initialData;
+  const materialsData = isRequoting ? initialData.materials : newMaterials;
+
+  const subTotalData = isRequoting
+    ? initialData.materials.reduce(
+        (acc, item) => acc + (item.totalPrice || 0),
+        0
+      )
+    : newSubTotal;
+
+  // Use initialData if it exists (for re-quoting), otherwise use new data
+  const sourceData = initialData || route.params;
+
   // State cho các trường nhập liệu
-  const [discountPercentage, setDiscountPercentage] = useState('0');
-  const [vatPercentage, setVatPercentage] = useState('10');
-  const [quoteValidity, setQuoteValidity] = useState('7 ngày');
-  const [deliveryTime, setDeliveryTime] = useState('15 ngày');
-  const [notes, setNotes] = useState('');
+  const [discountPercentage, setDiscountPercentage] = useState(
+    sourceData.discountPercentage?.toString() || '0'
+  );
+  const [vatPercentage, setVatPercentage] = useState(
+    sourceData.vatPercentage?.toString() || '10'
+  );
+  const [quoteValidity, setQuoteValidity] = useState(
+    sourceData.quoteValidity || '7 ngày'
+  );
+  const [deliveryTime, setDeliveryTime] = useState(
+    sourceData.deliveryTime || '15 ngày'
+  );
+  const [notes, setNotes] = useState(sourceData.notes || '');
   const [paymentTerms, setPaymentTerms] = useState(
-    'Đợt 1: Thanh toán 50% ngay sau khi ký hợp đồng.\nĐợt 2: Thanh toán 50% còn lại sau khi nghiệm thu và bàn giao.'
+    sourceData.paymentTerms ||
+      'Đợt 1: Thanh toán 50% ngay sau khi ký hợp đồng.\nĐợt 2: Thanh toán 50% còn lại sau khi nghiệm thu và bàn giao.'
   );
   const [warrantyTerms, setWarrantyTerms] = useState(
-    'Bảo hành 12 tháng cho toàn bộ công trình.'
+    sourceData.warrantyTerms || 'Bảo hành 12 tháng cho toàn bộ công trình.'
   );
-  const [otherTerms, setOtherTerms] = useState('');
+  const [otherTerms, setOtherTerms] = useState(sourceData.otherTerms || '');
   const [bankDetails, setBankDetails] = useState(
-    'Tên tài khoản: CÔNG TY TNHH ABC\nSố tài khoản: 123456789\nNgân hàng: Vietcombank - Chi nhánh XYZ'
+    sourceData.bankDetails ||
+      'Tên tài khoản: CÔNG TY TNHH ABC\nSố tài khoản: 123456789\nNgân hàng: Vietcombank - Chi nhánh XYZ'
   );
-  
+
   // State cho các giá trị tính toán
   const [discountAmount, setDiscountAmount] = useState(0);
-  const [afterDiscountTotal, setAfterDiscountTotal] = useState(subTotal);
+  const [afterDiscountTotal, setAfterDiscountTotal] = useState(subTotalData);
   const [vatAmount, setVatAmount] = useState(0);
-  const [grandTotal, setGrandTotal] = useState(subTotal);
+  const [grandTotal, setGrandTotal] = useState(subTotalData);
   const [amountInWords, setAmountInWords] = useState('');
-  
+
   // State cho quá trình tạo PDF
   const [isLoading, setIsLoading] = useState(false);
   const [pdfLocalUri, setPdfLocalUri] = useState(null);
-  
+  const [materials, setMaterials] = useState(materialsData || []);
+
   // Tính toán lại các giá trị khi người dùng thay đổi đầu vào
   useEffect(() => {
-    // Chuyển đổi phần trăm thành số
+    // Defensive calculations to prevent NaN issues
+    const safeSubTotal = Number(subTotalData) || 0;
     const discountPercent = parseFloat(discountPercentage) || 0;
     const vatPercent = parseFloat(vatPercentage) || 0;
-    
-    // Tính số tiền chiết khấu
-    const calculatedDiscountAmount = (subTotal * discountPercent) / 100;
+
+    // Calculate all financial values as local constants
+    const calculatedDiscountAmount = (safeSubTotal * discountPercent) / 100;
+    const calculatedAfterDiscountTotal =
+      safeSubTotal - calculatedDiscountAmount;
+    const calculatedVatAmount =
+      (calculatedAfterDiscountTotal * vatPercent) / 100;
+    const calculatedGrandTotal =
+      calculatedAfterDiscountTotal + calculatedVatAmount;
+    const calculatedAmountInWords = convertNumberToWords(calculatedGrandTotal);
+
+    // Update all states at once
     setDiscountAmount(calculatedDiscountAmount);
-    
-    // Tính tổng sau chiết khấu
-    const calculatedAfterDiscountTotal = subTotal - calculatedDiscountAmount;
     setAfterDiscountTotal(calculatedAfterDiscountTotal);
-    
-    // Tính tiền thuế VAT
-    const calculatedVatAmount = (calculatedAfterDiscountTotal * vatPercent) / 100;
     setVatAmount(calculatedVatAmount);
-    
-    // Tính tổng cộng cuối cùng
-    const calculatedGrandTotal = calculatedAfterDiscountTotal + calculatedVatAmount;
     setGrandTotal(calculatedGrandTotal);
-    
-    // Chuyển đổi thành chữ
-    setAmountInWords(convertNumberToWords(calculatedGrandTotal));
-  }, [subTotal, discountPercentage, vatPercentage]);
-  
+    setAmountInWords(calculatedAmountInWords);
+  }, [subTotalData, discountPercentage, vatPercentage]);
+
   const handleGenerateAndSave = async () => {
     setIsLoading(true);
     setPdfLocalUri(null); // Reset previous URI
@@ -174,10 +246,10 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
 
       if (!userId) {
         Alert.alert('Lỗi', 'Bạn cần đăng nhập để tạo báo giá.');
+        setIsLoading(false); // Stop loading on error
         return;
       }
 
-      // Kiểm tra projectId có tồn tại không
       const effectiveProjectId = projectId || route?.params?.projectId;
 
       if (!effectiveProjectId) {
@@ -187,51 +259,60 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
       }
 
       // 1. Chuẩn bị dữ liệu báo giá
-      const quotationNumber = `HK-${new Date().getFullYear()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
-      
-      const quotationData = {
-        projectId: effectiveProjectId,
-        projectName,
-        customerName: customerData?.name || 'Khách hàng',
-        customerAddress: customerData?.address || '',
-        customerPhone: customerData?.phone || '',
-        customerEmail: customerData?.email || '',
-        quotationDate: new Date().toLocaleDateString('vi-VN'),
-        validUntil: quoteValidity,
-        materials,
-        notes,
-        subtotal: subTotal,
-        discount: parseFloat(discountPercentage) || 0,
-        discountAmount,
-        vatRate: parseFloat(vatPercentage) || 0,
-        vatAmount,
-        totalWithVat: grandTotal,
-        totalInWords: amountInWords,
-        paymentTerms,
-        deliveryTerms: deliveryTime,
-        warrantyTerms,
-        otherTerms,
-        bankDetails,
-        quotationNumber: quotationNumber
+      const quotationNumber = `HK-${new Date().getFullYear()}-${Math.floor(
+        Math.random() * 1000
+      )
+        .toString()
+        .padStart(3, '0')}`;
+
+      // Assemble the complete, self-contained quotation object for versioning
+      // This is the complete snapshot sent to the Cloud Function and saved to Firestore.
+      const quotationDataForSaving = {
+        // Core Info
+        quotationNumber,
+        createdBy: userId,
+        projectName: projectName,
+        quotationDate: new Date().toISOString(),
+
+        // Customer Info
+        customerData: customerData,
+
+        // Financial Snapshot (Using state values)
+        subTotal: subTotalData,
+        discountPercentage: parseFloat(discountPercentage) || 0,
+        discountAmount: discountAmount,
+        afterDiscountTotal: afterDiscountTotal,
+        vatPercentage: parseFloat(vatPercentage) || 0,
+        vatAmount: vatAmount,
+        grandTotal: grandTotal,
+        amountInWords: amountInWords,
+
+        // Materials Snapshot
+        materials: materials,
+
+        // Terms Snapshot
+        quoteValidity: quoteValidity,
+        deliveryTime: deliveryTime,
+        paymentTerms: paymentTerms,
+        warrantyTerms: warrantyTerms,
+        otherTerms: otherTerms,
+        bankDetails: bankDetails,
+        notes: notes,
       };
 
-      // In ra thông tin để debug
-      console.log('ProjectId:', effectiveProjectId);
-      console.log('Quotation Data:', JSON.stringify({...quotationData, materials: 'Array of materials'}));
-
       // 2. Gọi Cloud Function để lấy URL của PDF
-      console.log('Calling Cloud Function to generate PDF...');
+      console.log('Calling Cloud Function with complete data payload...');
       const functions = getFunctions();
       const generateInvoicePDF = httpsCallable(functions, 'generateInvoicePDF');
-      const result = await generateInvoicePDF({ 
-        userId, 
-        quotationData,
-        projectId: effectiveProjectId
+      const result = await generateInvoicePDF({
+        userId,
+        quotationData: quotationDataForSaving, // Pass the self-contained data
+        projectId: effectiveProjectId,
       });
 
       const { pdfUrl } = result.data;
       if (!pdfUrl) {
-        throw new Error("Không nhận được URL của PDF từ server.");
+        throw new Error('Không nhận được URL của PDF từ server.');
       }
       console.log('Received PDF URL:', pdfUrl);
 
@@ -244,8 +325,11 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
       // Lưu local URI vào state để có thể chia sẻ sau
       setPdfLocalUri(uri);
 
-      // 4. Lưu thông tin báo giá vào Firestore
-      await saveQuotation(effectiveProjectId, quotationData, pdfUrl, userId);
+      // 4. Lưu thông tin báo giá vào Firestore, now including the pdfUrl
+      await saveQuotation(effectiveProjectId, {
+        ...quotationDataForSaving,
+        pdfUrl,
+      });
 
       // 5. Thông báo thành công
       Alert.alert(
@@ -254,13 +338,12 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
         [
           { text: 'Để sau', style: 'cancel' },
           { text: 'Chia sẻ', onPress: () => handleSharePdf(uri) },
-          { text: 'Xem PDF', onPress: () => Linking.openURL(uri) },
+          { text: 'Xem PDF', onPress: () => handleSharePdf(uri) },
         ]
       );
-
     } catch (error) {
-      console.error('Error generating PDF:', error);
-      const errorMessage = error.message || "Một lỗi không xác định đã xảy ra.";
+      console.error('Error generating PDF and saving quotation:', error);
+      const errorMessage = error.message || 'Một lỗi không xác định đã xảy ra.';
       Alert.alert('Lỗi', `Không thể tạo báo giá: ${errorMessage}`);
     } finally {
       setIsLoading(false);
@@ -270,33 +353,39 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   // Hàm chia sẻ file PDF đã được tải về
   const handleSharePdf = async (localUri) => {
     if (!localUri) {
-        Alert.alert("Lỗi", "Không tìm thấy file PDF để chia sẻ. Vui lòng tạo lại.");
-        return;
+      Alert.alert(
+        'Lỗi',
+        'Không tìm thấy file PDF để chia sẻ. Vui lòng tạo lại.'
+      );
+      return;
     }
     const isSharingAvailable = await Sharing.isAvailableAsync();
     if (!isSharingAvailable) {
-        Alert.alert('Lỗi', 'Chia sẻ không khả dụng trên thiết bị của bạn.');
-        return;
+      Alert.alert('Lỗi', 'Chia sẻ không khả dụng trên thiết bị của bạn.');
+      return;
     }
     try {
-        await Sharing.shareAsync(localUri, {
-            mimeType: 'application/pdf',
-            dialogTitle: 'Chia sẻ báo giá',
-        });
+      await Sharing.shareAsync(localUri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Chia sẻ báo giá',
+      });
     } catch (error) {
-        console.error('Error sharing PDF:', error);
-        Alert.alert('Lỗi', 'Không thể chia sẻ file PDF.');
+      console.error('Error sharing PDF:', error);
+      Alert.alert('Lỗi', 'Không thể chia sẻ file PDF.');
     }
   };
 
   // Format số tiền VND
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+    }).format(amount);
   };
-  
+
   return (
-    <KeyboardAvoidingView 
-      style={styles.container} 
+    <KeyboardAvoidingView
+      style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
     >
@@ -310,18 +399,20 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
         <Text style={styles.headerTitle}>Hoàn thiện báo giá</Text>
         <View style={styles.placeholder} />
       </View>
-      
+
       <ScrollView style={styles.content}>
         {/* Hiển thị tổng tiền vật tư */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Tổng cộng vật tư</Text>
-          <Text style={styles.subTotalValue}>{formatCurrency(subTotal)}</Text>
+          <Text style={styles.subTotalValue}>
+            {formatCurrency(subTotalData)}
+          </Text>
         </View>
-        
+
         {/* Phần nhập chiết khấu và VAT */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Điều chỉnh giá</Text>
-          
+
           <View style={styles.inputRow}>
             <Text style={styles.inputLabel}>Chiết khấu (%)</Text>
             <TextInput
@@ -333,7 +424,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               maxLength={5}
             />
           </View>
-          
+
           <View style={styles.inputRow}>
             <Text style={styles.inputLabel}>Thuế VAT (%)</Text>
             <TextInput
@@ -346,46 +437,56 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
             />
           </View>
         </View>
-        
+
         {/* Phần tóm tắt tính toán */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Tóm tắt</Text>
-          
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Tổng cộng vật tư:</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(subTotal)}</Text>
+            <Text style={styles.summaryValue}>
+              {formatCurrency(subTotalData)}
+            </Text>
           </View>
-          
+
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Chiết khấu ({discountPercentage}%):</Text>
-            <Text style={styles.summaryValue}>- {formatCurrency(discountAmount)}</Text>
+            <Text style={styles.summaryLabel}>
+              Chiết khấu ({discountPercentage}%):
+            </Text>
+            <Text style={styles.summaryValue}>
+              - {formatCurrency(discountAmount)}
+            </Text>
           </View>
-          
+
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Tổng cộng sau chiết khấu:</Text>
-            <Text style={styles.summaryValue}>{formatCurrency(afterDiscountTotal)}</Text>
+            <Text style={styles.summaryValue}>
+              {formatCurrency(afterDiscountTotal)}
+            </Text>
           </View>
-          
+
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Tiền thuế VAT ({vatPercentage}%):</Text>
+            <Text style={styles.summaryLabel}>
+              Tiền thuế VAT ({vatPercentage}%):
+            </Text>
             <Text style={styles.summaryValue}>{formatCurrency(vatAmount)}</Text>
           </View>
-          
+
           <View style={[styles.summaryRow, styles.totalRow]}>
             <Text style={styles.totalLabel}>TỔNG CỘNG ĐÃ BAO GỒM VAT:</Text>
             <Text style={styles.totalValue}>{formatCurrency(grandTotal)}</Text>
           </View>
-          
+
           <View style={styles.wordsContainer}>
             <Text style={styles.wordsLabel}>Bằng chữ:</Text>
             <Text style={styles.wordsValue}>{amountInWords}</Text>
           </View>
         </View>
-        
+
         {/* Phần điều khoản */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Điều khoản báo giá</Text>
-          
+
           <View style={styles.inputRow}>
             <Text style={styles.inputLabel}>Hiệu lực báo giá</Text>
             <TextInput
@@ -395,7 +496,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               placeholder="7 ngày"
             />
           </View>
-          
+
           <View style={styles.inputRow}>
             <Text style={styles.inputLabel}>Thời gian giao hàng</Text>
             <TextInput
@@ -405,7 +506,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               placeholder="15 ngày"
             />
           </View>
-          
+
           <View style={styles.notesContainer}>
             <Text style={styles.inputLabel}>Ghi chú</Text>
             <TextInput
@@ -418,7 +519,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               textAlignVertical="top"
             />
           </View>
-          
+
           <View style={styles.notesContainer}>
             <Text style={styles.inputLabel}>Phương thức thanh toán</Text>
             <TextInput
@@ -431,7 +532,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               textAlignVertical="top"
             />
           </View>
-          
+
           <View style={styles.notesContainer}>
             <Text style={styles.inputLabel}>Điều khoản bảo hành</Text>
             <TextInput
@@ -444,7 +545,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               textAlignVertical="top"
             />
           </View>
-          
+
           <View style={styles.notesContainer}>
             <Text style={styles.inputLabel}>Thông tin ngân hàng</Text>
             <TextInput
@@ -457,7 +558,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               textAlignVertical="top"
             />
           </View>
-          
+
           <View style={styles.notesContainer}>
             <Text style={styles.inputLabel}>Điều khoản khác</Text>
             <TextInput
@@ -472,12 +573,12 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
           </View>
         </View>
       </ScrollView>
-      
+
       {/* Nút tạo PDF */}
       <View style={styles.footer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.button, { backgroundColor: '#4CAF50' }]}
-          onPress={handleGenerateAndSave} 
+          onPress={handleGenerateAndSave}
           disabled={isLoading}
         >
           {isLoading ? (
@@ -486,13 +587,21 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
             <Text style={styles.buttonText}>Tạo & Lưu Báo Giá</Text>
           )}
         </TouchableOpacity>
-        
+
         {pdfLocalUri && (
-          <TouchableOpacity 
-            style={[styles.button, { backgroundColor: '#2196F3', marginTop: 10 }]}
+          <TouchableOpacity
+            style={[
+              styles.button,
+              { backgroundColor: '#2196F3', marginTop: 10 },
+            ]}
             onPress={() => handleSharePdf(pdfLocalUri)}
           >
-            <Ionicons name="share-social" size={20} color="white" style={{ marginRight: 10 }} />
+            <Ionicons
+              name="share-social"
+              size={20}
+              color="white"
+              style={{ marginRight: 10 }}
+            />
             <Text style={styles.buttonText}>Chia Sẻ PDF</Text>
           </TouchableOpacity>
         )}
@@ -659,4 +768,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default FinalizeQuotationScreen; 
+export default FinalizeQuotationScreen;

@@ -1,3 +1,4 @@
+//src/screens/AddCustomerScreen.js
 import React, { useState, useRef } from 'react';
 import {
   View,
@@ -9,7 +10,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Keyboard
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { createCustomer } from '../api/customerService';
@@ -27,80 +28,83 @@ const AddCustomerScreen = ({ navigation }) => {
     email: '',
     address: '',
     type: 'regular', // mặc định là khách hàng thường xuyên
-    taxCode: ''
+    taxCode: '',
   });
-  
+
   // Refs cho các input để điều hướng focus
   const contactPersonRef = useRef(null);
   const phoneRef = useRef(null);
   const emailRef = useRef(null);
   const addressRef = useRef(null);
   const taxCodeRef = useRef(null);
-  
+
   // Cập nhật giá trị form
   const handleChange = (field, value) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }));
   };
-  
+
   // Kiểm tra form hợp lệ
   const validateForm = () => {
     if (!formData.name.trim()) {
       Alert.alert('Lỗi', 'Vui lòng nhập tên khách hàng');
       return false;
     }
-    
+
     if (!formData.contactPerson.trim()) {
       Alert.alert('Lỗi', 'Vui lòng nhập tên người liên hệ');
       return false;
     }
-    
+
     if (formData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       Alert.alert('Lỗi', 'Email không hợp lệ');
       return false;
     }
-    
+
     return true;
   };
-  
+
   // Xử lý lưu khách hàng
   const handleSave = async () => {
     if (!validateForm()) {
       return;
     }
-    
+
     Keyboard.dismiss();
     setIsLoading(true);
-    
+
     try {
       // Gọi API tạo khách hàng mới
       await createCustomer(formData, currentUser?.uid);
-      
-      Alert.alert(
-        'Thành công',
-        'Đã thêm khách hàng mới thành công',
-        [
-          { 
-            text: 'OK', 
-            onPress: () => navigation.goBack() 
-          }
-        ]
-      );
+
+      Alert.alert('Thành công', 'Đã thêm khách hàng mới thành công', [
+        {
+          text: 'OK',
+          onPress: () => navigation.goBack(),
+        },
+      ]);
     } catch (error) {
-      console.error('Lỗi khi thêm khách hàng:', error);
-      Alert.alert('Lỗi', 'Không thể thêm khách hàng. Vui lòng thử lại sau.');
+      if (error.code === 'permission-denied') {
+        Alert.alert(
+          'Lỗi quyền',
+          'Bạn không có đủ quyền để thực hiện hành động này.'
+        );
+      } else {
+        console.error('Lỗi khi thêm khách hàng:', error);
+        Alert.alert('Lỗi', 'Không thể thêm khách hàng. Vui lòng thử lại sau.');
+      }
     } finally {
       setIsLoading(false);
     }
   };
-  
+
   // Xử lý thay đổi loại khách hàng
   const handleSelectType = (type) => {
     handleChange('type', type);
   };
-  
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
@@ -118,8 +122,8 @@ const AddCustomerScreen = ({ navigation }) => {
           <Text style={styles.headerTitle}>Thêm khách hàng mới</Text>
           <View style={styles.placeholder} />
         </View>
-        
-        <ScrollView 
+
+        <ScrollView
           style={styles.formContainer}
           contentContainerStyle={styles.formContent}
           keyboardShouldPersistTaps="handled"
@@ -135,7 +139,7 @@ const AddCustomerScreen = ({ navigation }) => {
             blurOnSubmit={false}
             onSubmitEditing={() => contactPersonRef.current.focus()}
           />
-          
+
           <StyledTextInput
             ref={contactPersonRef}
             label="Người liên hệ"
@@ -147,7 +151,7 @@ const AddCustomerScreen = ({ navigation }) => {
             blurOnSubmit={false}
             onSubmitEditing={() => phoneRef.current.focus()}
           />
-          
+
           <StyledTextInput
             ref={phoneRef}
             label="Số điện thoại"
@@ -159,7 +163,7 @@ const AddCustomerScreen = ({ navigation }) => {
             blurOnSubmit={false}
             onSubmitEditing={() => emailRef.current.focus()}
           />
-          
+
           <StyledTextInput
             ref={emailRef}
             label="Email"
@@ -172,7 +176,7 @@ const AddCustomerScreen = ({ navigation }) => {
             blurOnSubmit={false}
             onSubmitEditing={() => addressRef.current.focus()}
           />
-          
+
           <StyledTextInput
             ref={addressRef}
             label="Địa chỉ"
@@ -186,7 +190,7 @@ const AddCustomerScreen = ({ navigation }) => {
             blurOnSubmit={false}
             onSubmitEditing={() => taxCodeRef.current.focus()}
           />
-          
+
           <StyledTextInput
             ref={taxCodeRef}
             label="Mã số thuế"
@@ -195,55 +199,57 @@ const AddCustomerScreen = ({ navigation }) => {
             placeholder="Nhập mã số thuế"
             returnKeyType="done"
           />
-          
+
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Loại khách hàng</Text>
             <View style={styles.typeButtonsContainer}>
               <TouchableOpacity
                 style={[
                   styles.typeButton,
-                  formData.type === 'potential' && styles.selectedTypeButton
+                  formData.type === 'potential' && styles.selectedTypeButton,
                 ]}
                 onPress={() => handleSelectType('potential')}
               >
                 <Text
                   style={[
                     styles.typeButtonText,
-                    formData.type === 'potential' && styles.selectedTypeButtonText
+                    formData.type === 'potential' &&
+                      styles.selectedTypeButtonText,
                   ]}
                 >
                   Tiềm năng
                 </Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={[
                   styles.typeButton,
-                  formData.type === 'regular' && styles.selectedTypeButton
+                  formData.type === 'regular' && styles.selectedTypeButton,
                 ]}
                 onPress={() => handleSelectType('regular')}
               >
                 <Text
                   style={[
                     styles.typeButtonText,
-                    formData.type === 'regular' && styles.selectedTypeButtonText
+                    formData.type === 'regular' &&
+                      styles.selectedTypeButtonText,
                   ]}
                 >
                   Thường xuyên
                 </Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={[
                   styles.typeButton,
-                  formData.type === 'vip' && styles.selectedTypeButton
+                  formData.type === 'vip' && styles.selectedTypeButton,
                 ]}
                 onPress={() => handleSelectType('vip')}
               >
                 <Text
                   style={[
                     styles.typeButtonText,
-                    formData.type === 'vip' && styles.selectedTypeButtonText
+                    formData.type === 'vip' && styles.selectedTypeButtonText,
                   ]}
                 >
                   VIP
@@ -251,7 +257,7 @@ const AddCustomerScreen = ({ navigation }) => {
               </TouchableOpacity>
             </View>
           </View>
-          
+
           <TouchableOpacity
             style={styles.saveButton}
             onPress={handleSave}
@@ -261,7 +267,12 @@ const AddCustomerScreen = ({ navigation }) => {
               <ActivityIndicator color="#fff" size="small" />
             ) : (
               <>
-                <Ionicons name="save-outline" size={20} color="#fff" style={styles.saveIcon} />
+                <Ionicons
+                  name="save-outline"
+                  size={20}
+                  color="#fff"
+                  style={styles.saveIcon}
+                />
                 <Text style={styles.saveButtonText}>Lưu khách hàng</Text>
               </>
             )}
@@ -368,4 +379,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AddCustomerScreen; 
+export default AddCustomerScreen;

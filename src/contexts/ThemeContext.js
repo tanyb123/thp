@@ -13,10 +13,10 @@ export const useTheme = () => useContext(ThemeContext);
 export const ThemeProvider = ({ children }) => {
   // Lấy theme hệ thống
   const systemColorScheme = useColorScheme();
-  
+
   // State để lưu trạng thái dark mode
   const [isDarkMode, setIsDarkMode] = useState(false);
-  
+
   // State để lưu trạng thái theo dõi hệ thống
   const [followSystem, setFollowSystem] = useState(true);
 
@@ -26,11 +26,11 @@ export const ThemeProvider = ({ children }) => {
       try {
         const storedIsDarkMode = await AsyncStorage.getItem('isDarkMode');
         const storedFollowSystem = await AsyncStorage.getItem('followSystem');
-        
+
         if (storedFollowSystem !== null) {
           setFollowSystem(storedFollowSystem === 'true');
         }
-        
+
         if (storedIsDarkMode !== null && !followSystem) {
           setIsDarkMode(storedIsDarkMode === 'true');
         } else if (followSystem) {
@@ -40,7 +40,7 @@ export const ThemeProvider = ({ children }) => {
         console.log('Error loading theme preference:', error);
       }
     };
-    
+
     loadThemePreference();
   }, [systemColorScheme]);
 
@@ -57,7 +57,7 @@ export const ThemeProvider = ({ children }) => {
       const newValue = !isDarkMode;
       setIsDarkMode(newValue);
       await AsyncStorage.setItem('isDarkMode', String(newValue));
-      
+
       // Khi người dùng chủ động thay đổi theme, tắt chế độ theo dõi hệ thống
       if (followSystem) {
         setFollowSystem(false);
@@ -74,7 +74,7 @@ export const ThemeProvider = ({ children }) => {
       const newValue = !followSystem;
       setFollowSystem(newValue);
       await AsyncStorage.setItem('followSystem', String(newValue));
-      
+
       // Nếu bật chế độ theo dõi hệ thống, cập nhật theme theo hệ thống
       if (newValue) {
         const systemIsDark = systemColorScheme === 'dark';
@@ -95,14 +95,12 @@ export const ThemeProvider = ({ children }) => {
     theme,
     toggleTheme,
     followSystem,
-    toggleFollowSystem
+    toggleFollowSystem,
   };
 
   return (
-    <ThemeContext.Provider value={value}>
-      {children}
-    </ThemeContext.Provider>
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
   );
 };
 
-export default ThemeContext; 
+export default ThemeContext;

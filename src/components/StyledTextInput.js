@@ -13,50 +13,60 @@ import { Ionicons } from '@expo/vector-icons';
  * @param {boolean} props.required - Đánh dấu trường bắt buộc (tùy chọn)
  * @returns {React.Component} StyledTextInput component
  */
-const StyledTextInput = forwardRef(({
-  label,
-  iconName,
-  error,
-  containerStyle,
-  inputStyle,
-  required = false,
-  ...props
-}, ref) => {
-  return (
-    <View style={[styles.container, containerStyle]}>
-      {label && (
-        <Text style={styles.label}>
-          {label}
-          {required && <Text style={styles.requiredMark}>*</Text>}
-        </Text>
-      )}
-      
-      <View style={[
-        styles.inputContainer,
-        error ? styles.inputContainerError : null
-      ]}>
-        {iconName && (
-          <Ionicons name={iconName} size={20} color="#666" style={styles.icon} />
+const StyledTextInput = forwardRef(
+  (
+    {
+      label,
+      iconName,
+      error,
+      containerStyle,
+      inputStyle,
+      required = false,
+      ...props
+    },
+    ref
+  ) => {
+    return (
+      <View style={[styles.container, containerStyle]}>
+        {label && (
+          <Text style={styles.label}>
+            {label}
+            {required && <Text style={styles.requiredMark}>*</Text>}
+          </Text>
         )}
-        
-        <TextInput
-          ref={ref}
-          style={[styles.input, inputStyle]}
-          placeholderTextColor="#999"
-          {...props}
-        />
-        
-        {props.secureTextEntry !== undefined && (
-          <View style={styles.rightIconContainer}>
-            {props.rightIcon}
-          </View>
-        )}
+
+        <View
+          style={[
+            styles.inputContainer,
+            error ? styles.inputContainerError : null,
+          ]}
+        >
+          {iconName && (
+            <Ionicons
+              name={iconName}
+              size={20}
+              color="#666"
+              style={styles.icon}
+            />
+          )}
+
+          <TextInput
+            ref={ref}
+            style={[styles.input, inputStyle]}
+            placeholderTextColor="#999"
+            {...props}
+          />
+
+          {props.secureTextEntry !== undefined && (
+            <View style={styles.rightIconContainer}>{props.rightIcon}</View>
+          )}
+        </View>
+
+        {error && <Text style={styles.errorText}>{error}</Text>}
       </View>
-      
-      {error && <Text style={styles.errorText}>{error}</Text>}
-    </View>
-  );
-});
+    );
+  }
+);
 
 const styles = StyleSheet.create({
   container: {
@@ -105,4 +115,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default StyledTextInput; 
+export default StyledTextInput;
