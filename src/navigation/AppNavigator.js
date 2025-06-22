@@ -25,6 +25,7 @@ import ProjectDetailScreen from '../screens/ProjectDetailScreen';
 import AddProjectScreen from '../screens/AddProjectScreen';
 import EditProjectScreen from '../screens/EditProjectScreen';
 import FinalizeQuotationScreen from '../screens/FinalizeQuotationScreen';
+import QuotationScreen from '../screens/QuotationScreen';
 
 // Import màn hình tài khoản
 import AccountScreen from '../screens/AccountScreen';
@@ -90,6 +91,11 @@ const ProjectStackNavigator = () => {
         name="EditProject"
         component={EditProjectScreen}
         options={{ title: 'Chỉnh sửa Dự án', headerRight: null }}
+      />
+      <ProjectStack.Screen
+        name="Quotation"
+        component={QuotationScreen}
+        options={{ headerShown: false }}
       />
       <ProjectStack.Screen
         name="FinalizeQuotation"

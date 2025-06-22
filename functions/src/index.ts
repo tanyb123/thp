@@ -11,13 +11,19 @@
 
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+
+// Initialize Firebase Admin FIRST
+admin.initializeApp();
+
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { CallableContext } from 'firebase-functions/v1/https';
 
-// Initialize Firebase Admin
-admin.initializeApp();
+// Export functions from other files
+export * from './materialImporter';
+export * from './projectTriggers';
+export * from './taskTriggers';
 
 // Get references to services
 const storage = admin.storage();

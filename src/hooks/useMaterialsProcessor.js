@@ -5,7 +5,9 @@ import {
   GoogleSignin,
   statusCodes,
 } from '@react-native-google-signin/google-signin';
-import * as XLSX from 'xlsx';
+import { functions } from '../config/firebaseConfig'; // Import functions instance
+import { httpsCallable } from 'firebase/functions'; // Import httpsCallable
+import { getAuth } from 'firebase/auth'; // Thêm import getAuth
 
 export const useMaterialsProcessor = () => {
   // State for materials data and table visibility
@@ -17,8 +19,8 @@ export const useMaterialsProcessor = () => {
   const [isPickerVisible, setIsPickerVisible] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [isGoogleDriveLoading, setIsGoogleDriveLoading] = useState(false);
+  const [isProcessingFile, setIsProcessingFile] = useState(false); // State for processing
 
-  // Hàm lấy danh sách file Excel từ Google Drive
   const fetchGoogleDriveFiles = useCallback(async (token) => {
     setIsLoadingFiles(true);
     const baseUrl = 'https://www.googleapis.com/drive/v3/files';
@@ -49,83 +51,67 @@ export const useMaterialsProcessor = () => {
     }
   }, []);
 
-  // Hàm xử lý và hiển thị dữ liệu từ file Excel
-  const parseAndDisplayData = useCallback((base64Data, fileName) => {
-    try {
-      const workbook = XLSX.read(base64Data, { type: 'base64' });
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-      const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+  const handleFileSelect = useCallback(async (driveFile, fileName) => {
+    setIsPickerVisible(false);
+    setIsProcessingFile(true);
+    Alert.alert(
+      'Đang xử lý...',
+      `Hệ thống đang xử lý file "${fileName}". Vui lòng chờ.`
+    );
 
-      const parsedMaterials = [];
-      for (let i = 4; i < rawData.length; i++) {
-        const row = rawData[i];
-        if (!row || !row[1] || typeof row[8] !== 'number') {
-          continue;
-        }
-        const materialItem = {
-          stt: row[0],
-          name: row[1] || '',
-          material: row[2] || '',
-          quyCach: row[3] && row[4] ? `${row[3]}x${row[4]}` : '',
-          unit: row[6] || '',
-          quantity: parseFloat(row[7]) || 0,
-          weight: parseFloat(row[8]) || 0,
-          unitPrice: 0,
-          totalPrice: 0,
-        };
-        parsedMaterials.push(materialItem);
+    try {
+      // 1. Lấy accessToken từ GoogleSignin
+      const tokens = await GoogleSignin.getTokens();
+      const { accessToken } = tokens;
+
+      if (!accessToken) {
+        throw new Error(
+          'Không thể lấy được access token của Google. Vui lòng đăng nhập lại.'
+        );
       }
-      setMaterials(parsedMaterials);
-      setShowMaterialsTable(true);
-      Alert.alert(
-        'Nhập dữ liệu thành công',
-        `Đã nhập ${parsedMaterials.length} dòng dữ liệu từ file "${fileName}".`
+
+      // 2. Gọi Cloud Function `importMaterialsFromDrive`
+      const importMaterials = httpsCallable(
+        functions,
+        'importMaterialsFromDrive'
       );
+      const result = await importMaterials({
+        driveFileId: driveFile.id,
+        accessToken,
+      });
+
+      // 3. Xử lý kết quả trả về
+      const { materials: importedMaterials } = result.data;
+
+      if (importedMaterials && importedMaterials.length > 0) {
+        setMaterials(importedMaterials);
+        setShowMaterialsTable(true);
+        Alert.alert(
+          'Nhập dữ liệu thành công',
+          `Đã nhập ${importedMaterials.length} dòng dữ liệu từ file "${fileName}".`
+        );
+      } else {
+        Alert.alert(
+          'Không có dữ liệu',
+          `Không tìm thấy dữ liệu vật tư hợp lệ trong file "${fileName}".`
+        );
+      }
     } catch (error) {
-      console.error('Error processing Excel data:', error);
-      Alert.alert('Lỗi', 'Không thể xử lý dữ liệu Excel.');
+      console.error('Lỗi khi gọi importMaterialsFromDrive:', error);
+      let errorMessage = error.message;
+      if (error.code === 'functions/unauthenticated') {
+        errorMessage =
+          'Xác thực thất bại. Vui lòng đăng xuất và đăng nhập lại.';
+      } else if (error.code === 'functions/permission-denied') {
+        errorMessage =
+          'Token truy cập Google Drive đã hết hạn. Vui lòng thử lại.';
+      }
+      Alert.alert('Lỗi xử lý file', `Chi tiết: ${errorMessage}`);
+    } finally {
+      setIsProcessingFile(false);
     }
   }, []);
 
-  // Hàm xử lý khi người dùng chọn một file
-  const handleFileSelect = useCallback(
-    async (fileId, fileName) => {
-      try {
-        Alert.alert('Đang tải xuống', `Đang tải file "${fileName}"...`);
-        const tokens = await GoogleSignin.getTokens();
-        const freshAccessToken = tokens.accessToken;
-        if (!freshAccessToken) {
-          Alert.alert('Lỗi', 'Phiên đăng nhập đã hết hạn.');
-          return;
-        }
-        const response = await fetch(
-          `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-          { headers: { Authorization: `Bearer ${freshAccessToken}` } }
-        );
-        if (!response.ok) {
-          throw new Error(`Download error: ${response.status}`);
-        }
-        const blob = await response.blob();
-        const reader = new FileReader();
-        reader.onload = () => {
-          const base64 = reader.result.split(',')[1];
-          parseAndDisplayData(base64, fileName);
-          setIsPickerVisible(false);
-        };
-        reader.onerror = () => {
-          Alert.alert('Lỗi', 'Không thể đọc file.');
-        };
-        reader.readAsDataURL(blob);
-      } catch (error) {
-        console.error('Error downloading file:', error);
-        Alert.alert('Lỗi', 'Không thể tải xuống file từ Google Drive.');
-      }
-    },
-    [parseAndDisplayData]
-  );
-
-  // Hàm xử lý khi nhấn nút import
   const handleImportFromGoogleDrive = useCallback(async () => {
     setIsGoogleDriveLoading(true);
     try {
@@ -158,7 +144,6 @@ export const useMaterialsProcessor = () => {
     }
   }, [fetchGoogleDriveFiles]);
 
-  // Hàm xử lý khi người dùng nhập đơn giá
   const handlePriceChange = useCallback((text, index) => {
     // Sử dụng callback form của setState để đảm bảo truy cập vào state mới nhất
     setMaterials((currentMaterials) => {
@@ -171,7 +156,6 @@ export const useMaterialsProcessor = () => {
     });
   }, []); // Dependency rỗng vì chúng ta dùng callback form của setState
 
-  // Hàm xử lý khi báo giá lại
   const handleRequote = useCallback((quotation) => {
     if (quotation.materials && Array.isArray(quotation.materials)) {
       setMaterials(JSON.parse(JSON.stringify(quotation.materials)));
@@ -192,6 +176,7 @@ export const useMaterialsProcessor = () => {
     isPickerVisible,
     isLoadingFiles,
     isGoogleDriveLoading,
+    isProcessingFile,
     handleImportFromGoogleDrive,
     handleFileSelect,
     handlePriceChange,

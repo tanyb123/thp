@@ -1,9 +1,14 @@
 //src/config/firebaseConfig.js
 // Import the required Firebase modules
-import { initializeApp } from 'firebase/app';
-import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import {
+  initializeAuth,
+  getReactNativePersistence,
+  getAuth,
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Firebase configuration object
@@ -17,26 +22,35 @@ const firebaseConfig = {
   measurementId: 'G-DY64DPJJVQ',
 };
 
-// Khởi tạo Firebase App (chỉ khởi tạo một lần duy nhất)
-const app = initializeApp(firebaseConfig);
+let app;
+let auth;
 
-// QUAN TRỌNG: Khởi tạo Auth với Persistence cho React Native
-// Bằng cách này, Firebase sẽ dùng AsyncStorage để lưu session đăng nhập
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+// Singleton pattern to avoid re-initialization
+if (getApps().length < 1) {
+  app = initializeApp(firebaseConfig);
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage),
+  });
+} else {
+  app = getApp();
+  auth = getAuth(app);
+}
 
-// Khởi tạo Firestore
 const db = getFirestore(app);
-
-// Khởi tạo Storage
 const storage = getStorage(app);
+const functions = getFunctions(app, 'asia-southeast1');
 
-console.log('Firebase initialized successfully');
-console.log('Auth instance:', auth ? 'OK' : 'NOT OK');
-console.log('Firestore instance:', db ? 'OK' : 'NOT OK');
-console.log('Storage instance:', storage ? 'OK' : 'NOT OK');
+// (Tùy chọn) Nếu bạn dùng emulator để test local, hãy bỏ comment dòng dưới
+// if (__DEV__) {
+//   try {
+//     connectFunctionsEmulator(functions, 'localhost', 5001);
+//   } catch (e) {
+//     console.warn('Functions emulator already connected?');
+//   }
+// }
+
+console.log('Firebase services handled.');
 
 // Export the initialized services
-export { auth, db, storage };
+export { auth, db, storage, functions };
 export default app;
