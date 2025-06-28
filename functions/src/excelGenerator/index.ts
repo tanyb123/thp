@@ -33,9 +33,9 @@ interface ExcelQuotationData {
 // ----- CẤU HÌNH -----
 const TEMPLATE_FILE_ID = '18CYrE8IHHbqNBc-FWrQw5kGnyLW31VDJOA4a1tusu4M';
 const DESTINATION_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX';
-const START_ROW_MATERIALS = 15; // Dựa theo ảnh, có vẻ là dòng 15
+const START_ROW_MATERIALS = 10; // Dựa theo ảnh, có vẻ là dòng 10
 const SIGNATURE_IMAGE_URL =
-  'https://firebasestorage.googleapis.com/v0/b/tanyb-fe4bf.appspot.com/o/signature.png?alt=media&token=8e61d307-a5bd-49bd-a8f1-a30de5e51ec8';
+  'https://firebasestorage.googleapis.com/v0/b/tanyb-fe4bf.firebasestorage.app/o/signature.png?alt=media&token=8e61d307-a5bd-49bd-a8f1-a30de5e51ec8';
 
 // ----- HÀM CHÍNH -----
 export const generateExcelQuotation = functions
@@ -411,8 +411,7 @@ export const generateExcelQuotation = functions
           },
         });
 
-        // Phần điều khoản (dùng RichText)
-        const redColor = { red: 1, green: 0, blue: 0 };
+        // Phần điều khoản
         const termsTextPart1 =
           `1. Báo giá có hiệu lực trong ${
             formattedData.metadata.quoteValidity || '7 ngày'
@@ -425,7 +424,7 @@ export const generateExcelQuotation = functions
           `5. Phương thức thanh toán: Thanh toán bằng chuyển khoản\n` +
           `    Tài khoản số: 27888866\n` +
           `    Tên tài khoản: Công ty TNHH SX cơ khí TM-DV Tân Hòa Phát\n` +
-          `    Ngân hàng TMCP Á Châu - Chi nhánh: Tam Hà, Thủ Đức\n`;
+          `    Ngân hàng TMCP Á Châu - Chi nhánh Bình Tây\n`;
         const termsTextPart2 = `    Tạm ứng 50%, Thanh toán 50% trước khi nhận hàng`;
         const fullTermsText = termsTextPart1 + termsTextPart2;
         requests.push({
@@ -446,20 +445,7 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      richTextValue: {
-                        text: fullTermsText,
-                        runs: [
-                          {
-                            startIndex: termsTextPart1.length,
-                            format: {
-                              textFormat: {
-                                foregroundColor: redColor,
-                                bold: true,
-                              },
-                            },
-                          },
-                        ],
-                      },
+                      stringValue: fullTermsText,
                     },
                     userEnteredFormat: {
                       wrapStrategy: 'WRAP',
@@ -472,30 +458,6 @@ export const generateExcelQuotation = functions
             ],
             fields: '*',
             start: { sheetId, rowIndex: footerStartRow - 1, columnIndex: 0 },
-          },
-        });
-
-        // Thêm dòng riêng cho phần tạm ứng với màu đỏ
-        requests.push({
-          updateCells: {
-            rows: [
-              {
-                values: [
-                  {
-                    userEnteredValue: {
-                      stringValue: termsTextPart2,
-                    },
-                    userEnteredFormat: {
-                      wrapStrategy: 'WRAP',
-                      textFormat: { bold: true, foregroundColor: redColor },
-                      padding: { left: 20 },
-                    },
-                  },
-                ],
-              },
-            ],
-            fields: '*',
-            start: { sheetId, rowIndex: footerStartRow + 2, columnIndex: 0 },
           },
         });
 
@@ -593,17 +555,19 @@ export const generateExcelQuotation = functions
         requests.push({
           updateCells: {
             rows: [
-              [
-                {
-                  userEnteredValue: {
-                    formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}", 2)`,
-                  }, // Dùng formulaValue để chèn công thức
-                  userEnteredFormat: {
-                    horizontalAlignment: 'CENTER',
-                    verticalAlignment: 'MIDDLE',
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}", 2)`,
+                    }, // Dùng formulaValue để chèn công thức
+                    userEnteredFormat: {
+                      horizontalAlignment: 'CENTER',
+                      verticalAlignment: 'MIDDLE',
+                    },
                   },
-                },
-              ],
+                ],
+              },
             ],
             fields: '*',
             start: {
