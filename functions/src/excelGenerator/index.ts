@@ -33,7 +33,7 @@ interface ExcelQuotationData {
 // ----- CẤU HÌNH -----
 const TEMPLATE_FILE_ID = '18CYrE8IHHbqNBc-FWrQw5kGnyLW31VDJOA4a1tusu4M';
 const DESTINATION_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX';
-const START_ROW_MATERIALS = 15; // Dựa theo ảnh, có vẻ là dòng 15
+const START_ROW_MATERIALS = 10; // Dựa theo ảnh, có vẻ là dòng 10
 const SIGNATURE_IMAGE_URL =
   'https://drive.google.com/uc?export=view&id=1OM7JVgPl8V16-N6r-jsWyp360lZ_lhEz';
 
@@ -162,8 +162,8 @@ export const generateExcelQuotation = functions
               values: [
                 { userEnteredValue: { numberValue: index + 1 } },
                 { userEnteredValue: { stringValue: material.name } },
-                { userEnteredValue: { stringValue: 'cái' } },
-                { userEnteredValue: { stringValue: 'tấm' } },
+                { userEnteredValue: { stringValue: material.unit || 'cái' } },
+                { userEnteredValue: { stringValue: '' } },
                 { userEnteredValue: { numberValue: material.quantity } },
                 {
                   userEnteredValue: { numberValue: material.unitPrice },
