@@ -18,7 +18,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { getAuth } from 'firebase/auth';
 import { saveQuotation } from '../api/quotationService';
-// import * as Print from 'expo-print';
+import useQuotationGenerator from '../hooks/useQuotationGenerator';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 // HTML2PDF API key
@@ -169,6 +169,18 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
       )
     : newSubTotal;
 
+  // Initialize the quotation generator hook
+  const {
+    generateExcelQuotation,
+    shareExcelQuotation,
+    isLoading: isExcelLoading,
+    excelUrl,
+  } = useQuotationGenerator({
+    projectId,
+    customerData,
+    materials: materialsData,
+  });
+
   // Use initialData if it exists (for re-quoting), otherwise use new data
   const sourceData = initialData || route.params;
 
@@ -206,7 +218,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   const [grandTotal, setGrandTotal] = useState(subTotalData);
   const [amountInWords, setAmountInWords] = useState('');
 
-  // State cho quá trình tạo PDF
+  // State cho quá trình tạo PDF và Excel
   const [isLoading, setIsLoading] = useState(false);
   const [pdfLocalUri, setPdfLocalUri] = useState(null);
   const [materials, setMaterials] = useState(materialsData || []);
@@ -372,6 +384,61 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
     } catch (error) {
       console.error('Error sharing PDF:', error);
       Alert.alert('Lỗi', 'Không thể chia sẻ file PDF.');
+    }
+  };
+
+  // Hàm tạo báo giá Excel
+  const handleGenerateExcel = async () => {
+    try {
+      const formattedData = {
+        metadata: {
+          projectName,
+          customerName: customerData.name,
+          customerAddress: customerData.address,
+          quoteValidity,
+          deliveryTime,
+        },
+        materials: materials.map((item, index) => ({
+          no: index + 1,
+          name: item.name,
+          unit: item.unit,
+          material: item.material,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          total: item.totalPrice,
+        })),
+        summary: {
+          subTotal: afterDiscountTotal,
+          vatPercentage: parseFloat(vatPercentage),
+          vatAmount,
+          grandTotal,
+        },
+      };
+
+      const url = await generateExcelQuotation(formattedData);
+
+      if (url) {
+        Alert.alert(
+          'Thành công',
+          'Đã tạo báo giá Excel. Bạn có muốn mở không?',
+          [
+            { text: 'Để sau' },
+            {
+              text: 'Mở ngay',
+              onPress: async () => {
+                const supported = await Linking.canOpenURL(url);
+                if (supported) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Lỗi', `Không thể mở URL: ${url}`);
+                }
+              },
+            },
+          ]
+        );
+      }
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể tạo báo giá Excel. Vui lòng thử lại.');
     }
   };
 
@@ -574,7 +641,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
         </View>
       </ScrollView>
 
-      {/* Nút tạo PDF */}
+      {/* Nút tạo PDF và Excel */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[styles.button, { backgroundColor: '#4CAF50' }]}
@@ -584,16 +651,33 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
           {isLoading ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>Tạo & Lưu Báo Giá</Text>
+            <Text style={styles.buttonText}>Tạo & Lưu Báo Giá PDF</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: '#FF9800' }]}
+          onPress={handleGenerateExcel}
+          disabled={isExcelLoading}
+        >
+          {isExcelLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Ionicons
+                name="document-text"
+                size={20}
+                color="white"
+                style={{ marginRight: 10 }}
+              />
+              <Text style={styles.buttonText}>Tạo Báo Giá Excel</Text>
+            </>
           )}
         </TouchableOpacity>
 
         {pdfLocalUri && (
           <TouchableOpacity
-            style={[
-              styles.button,
-              { backgroundColor: '#2196F3', marginTop: 10 },
-            ]}
+            style={[styles.button, { backgroundColor: '#2196F3' }]}
             onPress={() => handleSharePdf(pdfLocalUri)}
           >
             <Ionicons
@@ -603,6 +687,21 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               style={{ marginRight: 10 }}
             />
             <Text style={styles.buttonText}>Chia Sẻ PDF</Text>
+          </TouchableOpacity>
+        )}
+
+        {excelUrl && (
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: '#009688' }]}
+            onPress={shareExcelQuotation}
+          >
+            <Ionicons
+              name="share-social"
+              size={20}
+              color="white"
+              style={{ marginRight: 10 }}
+            />
+            <Text style={styles.buttonText}>Chia Sẻ Excel</Text>
           </TouchableOpacity>
         )}
       </View>
