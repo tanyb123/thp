@@ -475,6 +475,30 @@ export const generateExcelQuotation = functions
           },
         });
 
+        // Thêm dòng riêng cho phần tạm ứng với màu đỏ
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: termsTextPart2,
+                    },
+                    userEnteredFormat: {
+                      wrapStrategy: 'WRAP',
+                      textFormat: { bold: true, foregroundColor: redColor },
+                      padding: { left: 20 },
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: '*',
+            start: { sheetId, rowIndex: footerStartRow + 2, columnIndex: 0 },
+          },
+        });
+
         // Vùng chữ ký
         const buyerSignatureEndCol = 4; // Cột D
         requests.push({
