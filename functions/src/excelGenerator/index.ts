@@ -33,9 +33,9 @@ interface ExcelQuotationData {
 // ----- CẤU HÌNH -----
 const TEMPLATE_FILE_ID = '18CYrE8IHHbqNBc-FWrQw5kGnyLW31VDJOA4a1tusu4M';
 const DESTINATION_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX';
-const START_ROW_MATERIALS = 10; // Dựa theo ảnh, có vẻ là dòng 10
+const START_ROW_MATERIALS = 15; // Dựa theo ảnh, có vẻ là dòng 15
 const SIGNATURE_IMAGE_URL =
-  'https://firebasestorage.googleapis.com/v0/b/tanyb-fe4bf.firebasestorage.app/o/signature.png?alt=media&token=8e61d307-a5bd-49bd-a8f1-a30de5e51ec8';
+  'https://drive.google.com/uc?export=view&id=1OM7JVgPl8V16-N6r-jsWyp360lZ_lhEz';
 
 // ----- HÀM CHÍNH -----
 export const generateExcelQuotation = functions
@@ -595,7 +595,7 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}",2)`,
+                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}")`,
                     },
                     userEnteredFormat: {
                       horizontalAlignment: 'CENTER',
