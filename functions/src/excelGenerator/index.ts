@@ -35,8 +35,9 @@ interface ExcelQuotationData {
 const TEMPLATE_FILE_ID = '18CYrE8IHHbqNBc-FWrQw5kGnyLW31VDJOA4a1tusu4M';
 const DESTINATION_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX';
 const START_ROW_MATERIALS = 10; // Dựa theo ảnh, có vẻ là dòng 10
-const SIGNATURE_IMAGE_URL =
-  'https://drive.google.com/uc?export=view&id=1OM7JVgPl8V16-N6r-jsWyp360lZ_lhEz';
+// Sử dụng ảnh đã được nhúng sẵn trong template thay vì chèn từ URL bên ngoài
+// const SIGNATURE_IMAGE_URL =
+//   'https://drive.google.com/uc?export=view&id=1OM7JVgPl8V16-N6r-jsWyp360lZ_lhEz';
 
 // ----- HÀM CHÍNH -----
 export const generateExcelQuotation = functions
@@ -588,7 +589,7 @@ export const generateExcelQuotation = functions
           },
         });
 
-        // Chèn ảnh chữ ký sử dụng IMAGE function
+        // Thay vì chèn ảnh từ URL bên ngoài, sử dụng ảnh có sẵn trong template
         requests.push({
           updateCells: {
             rows: [
@@ -596,11 +597,12 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}")`,
+                      stringValue: 'THP',
                     },
                     userEnteredFormat: {
                       horizontalAlignment: 'CENTER',
                       verticalAlignment: 'MIDDLE',
+                      textFormat: { bold: true, fontSize: 18 },
                     },
                   },
                 ],
@@ -612,6 +614,28 @@ export const generateExcelQuotation = functions
               rowIndex: signatureRow,
               columnIndex: buyerSignatureEndCol,
             },
+          },
+        });
+
+        // Thêm ngày tháng tự động vào báo giá
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      formulaValue: '=TODAY()',
+                    },
+                    userEnteredFormat: {
+                      numberFormat: { type: 'DATE', pattern: 'dd/MM/yyyy' },
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: '*',
+            start: { sheetId, rowIndex: 6, columnIndex: 5 },
           },
         });
 
