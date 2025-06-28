@@ -21,6 +21,7 @@ interface ExcelQuotationData {
     quantity: number;
     unitPrice: number;
     total: number;
+    material?: string;
   }[];
   summary: {
     subTotal: number;
@@ -161,9 +162,9 @@ export const generateExcelQuotation = functions
             (material, index) => ({
               values: [
                 { userEnteredValue: { numberValue: index + 1 } },
-                { userEnteredValue: { stringValue: material.name } },
+                { userEnteredValue: { stringValue: material.name || '' } },
                 { userEnteredValue: { stringValue: material.unit || 'cái' } },
-                { userEnteredValue: { stringValue: '' } },
+                { userEnteredValue: { stringValue: material.material || '' } },
                 { userEnteredValue: { numberValue: material.quantity } },
                 {
                   userEnteredValue: { numberValue: material.unitPrice },
