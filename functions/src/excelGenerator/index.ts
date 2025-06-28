@@ -238,6 +238,7 @@ export const generateExcelQuotation = functions
                   {},
                   {},
                   {},
+                  {},
                   {
                     userEnteredValue: {
                       numberValue: formattedData.summary.subTotal,
@@ -277,6 +278,7 @@ export const generateExcelQuotation = functions
                   {},
                   {},
                   {},
+                  {},
                   {
                     userEnteredValue: {
                       numberValue: formattedData.summary.vatAmount,
@@ -308,10 +310,11 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      stringValue: `Tổng cộng đã bao gồm VAT ${formattedData.summary.vatPercentage}%`,
+                      stringValue: 'Tổng cộng đã bao gồm VAT 10%',
                     },
                     userEnteredFormat: boldRight,
                   },
+                  {},
                   {},
                   {},
                   {},
@@ -426,18 +429,21 @@ export const generateExcelQuotation = functions
           `    Tên tài khoản: Công ty TNHH SX cơ khí TM-DV Tân Hòa Phát\n` +
           `    Ngân hàng TMCP Á Châu - Chi nhánh Bình Tây\n`;
         const termsTextPart2 = `    Tạm ứng 50%, Thanh toán 50% trước khi nhận hàng`;
-        const fullTermsText = termsTextPart1 + termsTextPart2;
+
+        // Mở rộng merge cell cho điều khoản
         requests.push({
           mergeCells: {
             range: {
               sheetId,
               startRowIndex: footerStartRow - 1,
-              endRowIndex: footerStartRow + 4,
+              endRowIndex: footerStartRow + 5,
               startColumnIndex: 0,
               endColumnIndex: summaryEndColumn,
             },
           },
         });
+
+        // Phần điều khoản thông thường
         requests.push({
           updateCells: {
             rows: [
@@ -445,7 +451,7 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      stringValue: fullTermsText,
+                      stringValue: termsTextPart1,
                     },
                     userEnteredFormat: {
                       wrapStrategy: 'WRAP',
@@ -458,6 +464,34 @@ export const generateExcelQuotation = functions
             ],
             fields: '*',
             start: { sheetId, rowIndex: footerStartRow - 1, columnIndex: 0 },
+          },
+        });
+
+        // Phần điều khoản màu đỏ (tạm ứng)
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: termsTextPart2,
+                    },
+                    userEnteredFormat: {
+                      wrapStrategy: 'WRAP',
+                      verticalAlignment: 'TOP',
+                      padding: { left: 20 },
+                      textFormat: {
+                        foregroundColor: { red: 1, green: 0, blue: 0 },
+                        bold: true,
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: '*',
+            start: { sheetId, rowIndex: footerStartRow + 4, columnIndex: 0 },
           },
         });
 
@@ -552,6 +586,8 @@ export const generateExcelQuotation = functions
             },
           },
         });
+
+        // Chèn ảnh chữ ký sử dụng IMAGE function
         requests.push({
           updateCells: {
             rows: [
@@ -559,8 +595,8 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}", 2)`,
-                    }, // Dùng formulaValue để chèn công thức
+                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}",2)`,
+                    },
                     userEnteredFormat: {
                       horizontalAlignment: 'CENTER',
                       verticalAlignment: 'MIDDLE',
