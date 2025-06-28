@@ -163,8 +163,8 @@ export const generateExcelQuotation = functions
               values: [
                 { userEnteredValue: { numberValue: index + 1 } },
                 { userEnteredValue: { stringValue: material.name || '' } },
-                { userEnteredValue: { stringValue: material.unit || 'cái' } },
                 { userEnteredValue: { stringValue: material.material || '' } },
+                { userEnteredValue: { stringValue: material.unit || '' } },
                 { userEnteredValue: { numberValue: material.quantity } },
                 {
                   userEnteredValue: { numberValue: material.unitPrice },
