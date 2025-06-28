@@ -65,9 +65,11 @@ export const getProjectById = async (projectId) => {
             return {
               ...projectData,
               customerName: customerData.name || 'Không xác định',
-              customerContact: customerData.contactPerson || '',
+              customerContactPerson: customerData.contactPerson || '',
               customerEmail: customerData.email || '',
               customerPhone: customerData.phone || '',
+              customerAddress: customerData.address || '',
+              customerTaxCode: customerData.taxCode || '',
               customer: {
                 id: projectData.customerId,
                 ...customerData,
@@ -86,9 +88,11 @@ export const getProjectById = async (projectId) => {
       return {
         ...projectData,
         customerName: 'Không xác định',
-        customerContact: '',
+        customerContactPerson: '',
         customerEmail: '',
         customerPhone: '',
+        customerAddress: '',
+        customerTaxCode: '',
       };
     } else {
       return null;

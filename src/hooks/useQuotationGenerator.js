@@ -25,6 +25,7 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       quotationDate,
       projectName,
       customerData = {},
+      metadata = {},
       materials = [],
       subTotal,
       discountPercentage,
@@ -34,6 +35,7 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       grandTotal,
       amountInWords,
       quoteValidity,
+      deliveryTime,
     } = quotationData;
 
     // Build data structure matching the Excel template
@@ -48,30 +50,43 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
         companyEmail: 'chomcauinoxtanhoaphat.com.vn',
         taxCode: '0315155409',
 
-        // Customer info
-        customerName: customerData.name || 'N/A',
-        customerAddress: customerData.address || 'N/A',
+        // Customer info - Sử dụng metadata nếu có, không thì dùng customerData, không hiển thị N/A
+        customerName: metadata?.customerName || customerData?.name || '',
+        customerAddress:
+          metadata?.customerAddress || customerData?.address || '',
+        customerPhone: metadata?.customerPhone || customerData?.phone || '',
+        customerEmail: metadata?.customerEmail || customerData?.email || '',
+        customerTaxCode:
+          metadata?.customerTaxCode || customerData?.taxCode || '',
+        customerContactPerson:
+          metadata?.customerContactPerson || customerData?.contactPerson || '',
 
         // Quotation info
         quotationNumber,
         quotationDate: new Date(quotationDate).toLocaleDateString('vi-VN'),
         projectName,
         quoteValidity,
+        deliveryTime,
       },
 
       // Materials will be added from row 8 onwards
       materials: materials.map((item, index) => {
-        const displayUnitPrice = (item.weight || 0) * (item.unitPrice || 0);
-        const totalPrice = (item.quantity || 0) * displayUnitPrice;
+        // Tính đơn giá bằng cách nhân đơn giá/kg với khối lượng
+        const weight = item.weight || 0;
+        const unitPricePerKg = item.unitPrice || item.price || 0;
+        const calculatedUnitPrice = weight * unitPricePerKg;
+        const quantity = item.quantity || 0;
+        const totalPrice = quantity * calculatedUnitPrice;
 
         return {
-          no: index + 1,
+          no: item.no || index + 1,
           name: item.name || '',
-          material: item.material || '',
+          material: item.material || item.type || '',
           unit: item.unit || '',
-          quantity: item.quantity || 0,
-          unitPrice: displayUnitPrice || 0,
-          total: totalPrice || 0,
+          quantity: quantity,
+          unitPrice: calculatedUnitPrice, // Đơn giá đã được tính = đơn giá/kg * khối lượng
+          total: totalPrice || item.totalPrice || item.total || 0,
+          weight: weight, // Thêm trường weight để Cloud Function có thể sử dụng nếu cần
         };
       }),
 

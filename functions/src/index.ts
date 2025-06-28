@@ -24,6 +24,8 @@ import { CallableContext } from 'firebase-functions/v1/https';
 export * from './materialImporter';
 export * from './projectTriggers';
 export * from './taskTriggers';
+export * from './excelGenerator';
+// Do not export from quotationExcelGenerator.ts since it's already exported from excelGenerator
 
 // Get references to services
 const storage = admin.storage();
@@ -499,6 +501,16 @@ export const generateInvoicePDF = functions
 // Export functions from separate files
 export { projectWorkflowManager } from './taskTriggers';
 export { onProjectDeleted } from './projectTriggers';
+
+// Add a test function for Excel generation that doesn't use the Callable API
+export const testExcelGeneration = functions.https.onRequest((req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Excel generator module is available',
+    info: 'To generate an Excel file, please use the client SDK with httpsCallable("generateExcelQuotation")',
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // You can add more exports here as you create more function files
 // export * from "./userTriggers";

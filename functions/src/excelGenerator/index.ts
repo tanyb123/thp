@@ -10,6 +10,10 @@ interface ExcelQuotationData {
     projectName?: string;
     customerName?: string;
     customerAddress?: string;
+    customerPhone?: string;
+    customerEmail?: string;
+    customerTaxCode?: string;
+    customerContactPerson?: string;
     quotationNumber?: string;
     quoteValidity?: string;
     deliveryTime?: string;
@@ -22,6 +26,7 @@ interface ExcelQuotationData {
     unitPrice: number;
     total: number;
     material?: string;
+    weight?: number; // Thêm trường weight để lưu khối lượng vật tư
   }[];
   summary: {
     subTotal: number;
@@ -35,9 +40,9 @@ interface ExcelQuotationData {
 const TEMPLATE_FILE_ID = '18CYrE8IHHbqNBc-FWrQw5kGnyLW31VDJOA4a1tusu4M';
 const DESTINATION_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX';
 const START_ROW_MATERIALS = 10; // Dựa theo ảnh, có vẻ là dòng 10
-// Sử dụng ảnh đã được nhúng sẵn trong template thay vì chèn từ URL bên ngoài
-// const SIGNATURE_IMAGE_URL =
-//   'https://drive.google.com/uc?export=view&id=1OM7JVgPl8V16-N6r-jsWyp360lZ_lhEz';
+// URL ảnh chữ ký từ Firebase Storage
+const SIGNATURE_IMAGE_URL =
+  'https://storage.googleapis.com/tanyb-fe4bf.firebasestorage.app/signature.png';
 
 // ----- HÀM CHÍNH -----
 export const generateExcelQuotation = functions
@@ -115,31 +120,54 @@ export const generateExcelQuotation = functions
             range: {
               sheetId,
               startRowIndex: START_ROW_MATERIALS - 1,
-              endRowIndex: START_ROW_MATERIALS + 50,
+              endRowIndex: START_ROW_MATERIALS + 150, // Mở rộng vùng làm việc
               startColumnIndex: 0,
               endColumnIndex: 7,
             },
           },
         });
 
-        // Header & Materials Data (giữ nguyên, chỉ chỉnh rowIndex cho đúng)
+        // Xóa nội dung cũ trong vùng làm việc động để tránh dữ liệu thừa từ template
         requests.push({
           updateCells: {
-            rows: [
-              {
-                values: [
-                  {
-                    userEnteredValue: {
-                      stringValue: `KÍNH GỬI: ${formattedData.metadata.customerName}`,
-                    },
-                  },
-                ],
-              },
-            ],
-            fields: 'userEnteredValue',
-            start: { sheetId, rowIndex: 11, columnIndex: 0 },
+            range: {
+              sheetId,
+              startRowIndex: START_ROW_MATERIALS - 1,
+              endRowIndex: START_ROW_MATERIALS + 150, // Phải khớp với vùng unmerge
+              startColumnIndex: 0,
+              endColumnIndex: 7,
+            },
+            fields: 'userEnteredValue', // Chỉ xóa giá trị, giữ định dạng
           },
         });
+
+        // Unmerge header rows 4-6 to avoid partial merge errors
+        requests.push({
+          unmergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 3, // rows A4, A5, A6 index
+              endRowIndex: 6,
+              startColumnIndex: 0,
+              endColumnIndex: 7,
+            },
+          },
+        });
+
+        // Cập nhật tên khách hàng vào ô A4
+        // Merge cells A4-G4 for company name
+        requests.push({
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 4,
+              startColumnIndex: 0,
+              endColumnIndex: 7,
+            },
+          },
+        });
+
         requests.push({
           updateCells: {
             rows: [
@@ -147,14 +175,236 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      stringValue: `Địa chỉ: ${formattedData.metadata.customerAddress}`,
+                      stringValue: `KÍNH GỬI: ${
+                        formattedData.metadata.customerName || ''
+                      }`,
+                    },
+                    userEnteredFormat: {
+                      textFormat: { bold: true },
+                      verticalAlignment: 'MIDDLE',
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue,userEnteredFormat',
+            start: { sheetId, rowIndex: 3, columnIndex: 0 }, // A4 (0-indexed)
+          },
+        });
+
+        // Add border to company name
+        requests.push({
+          updateBorders: {
+            range: {
+              sheetId,
+              startRowIndex: 3,
+              endRowIndex: 4,
+              startColumnIndex: 0,
+              endColumnIndex: 7,
+            },
+            top: { style: 'SOLID' },
+            bottom: { style: 'SOLID' },
+            left: { style: 'SOLID' },
+            right: { style: 'SOLID' },
+          },
+        });
+
+        // KHÔNG MERGE cells A5-G5 cho địa chỉ nữa
+        // Thêm label "Địa chỉ:" vào A5
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: { stringValue: 'Địa chỉ:' },
+                    userEnteredFormat: {
+                      verticalAlignment: 'MIDDLE',
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue,userEnteredFormat',
+            start: { sheetId, rowIndex: 4, columnIndex: 0 }, // A5
+          },
+        });
+
+        // Ghi địa chỉ vào ô B5 (không merge)
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: formattedData.metadata.customerAddress || '',
+                    },
+                    userEnteredFormat: {
+                      wrapStrategy: 'WRAP',
+                      verticalAlignment: 'MIDDLE',
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue,userEnteredFormat',
+            start: { sheetId, rowIndex: 4, columnIndex: 1 }, // B5
+          },
+        });
+
+        // Merge cells B5:G5 sau khi đã thiết lập giá trị thành công
+        requests.push({
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 4,
+              endRowIndex: 5,
+              startColumnIndex: 1,
+              endColumnIndex: 7,
+            },
+          },
+        });
+
+        // Add border to address row
+        requests.push({
+          updateBorders: {
+            range: {
+              sheetId,
+              startRowIndex: 4,
+              endRowIndex: 5,
+              startColumnIndex: 0,
+              endColumnIndex: 7,
+            },
+            top: { style: 'SOLID' },
+            bottom: { style: 'SOLID' },
+            left: { style: 'SOLID' },
+            right: { style: 'SOLID' },
+          },
+        });
+
+        // Cập nhật thông tin liên hệ khách hàng vào các ô tương ứng
+        // Số điện thoại vào ô B6
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: formattedData.metadata.customerPhone || '',
                     },
                   },
                 ],
               },
             ],
             fields: 'userEnteredValue',
-            start: { sheetId, rowIndex: 12, columnIndex: 0 },
+            start: { sheetId, rowIndex: 5, columnIndex: 1 }, // B6 (0-indexed)
+          },
+        });
+
+        // Email vào ô B7 (với định dạng màu đen)
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: formattedData.metadata.customerEmail || '',
+                    },
+                    userEnteredFormat: {
+                      textFormat: {
+                        foregroundColor: { red: 0, green: 0, blue: 0 }, // Màu đen
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue,userEnteredFormat',
+            start: { sheetId, rowIndex: 6, columnIndex: 1 }, // B7 (0-indexed)
+          },
+        });
+
+        // Mã số thuế vào ô C6
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: 'MST',
+                    },
+                    userEnteredFormat: {
+                      textFormat: { bold: true },
+                      horizontalAlignment: 'LEFT',
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue,userEnteredFormat',
+            start: { sheetId, rowIndex: 5, columnIndex: 2 }, // C6
+          },
+        });
+
+        // Tax code vào ô D6
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: formattedData.metadata.customerTaxCode || '',
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue',
+            start: { sheetId, rowIndex: 5, columnIndex: 3 }, // D6 (0-indexed)
+          },
+        });
+
+        // Người liên hệ vào ô C7
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue: 'Attn:',
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue',
+            start: { sheetId, rowIndex: 6, columnIndex: 2 }, // C7 (0-indexed)
+          },
+        });
+
+        // Thêm tên người liên hệ vào ô D7
+        requests.push({
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: {
+                      stringValue:
+                        formattedData.metadata.customerContactPerson || '',
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: 'userEnteredValue',
+            start: { sheetId, rowIndex: 6, columnIndex: 3 }, // D7 (0-indexed)
           },
         });
 
@@ -162,21 +412,59 @@ export const generateExcelQuotation = functions
           const materialsRows = formattedData.materials.map(
             (material, index) => ({
               values: [
-                { userEnteredValue: { numberValue: index + 1 } },
-                { userEnteredValue: { stringValue: material.name || '' } },
-                { userEnteredValue: { stringValue: material.material || '' } },
-                { userEnteredValue: { stringValue: material.unit || '' } },
-                { userEnteredValue: { numberValue: material.quantity } },
                 {
-                  userEnteredValue: { numberValue: material.unitPrice },
+                  userEnteredValue: { numberValue: index + 1 },
                   userEnteredFormat: {
-                    numberFormat: { type: 'NUMBER', pattern: '#,##0' },
+                    horizontalAlignment: 'CENTER',
+                    verticalAlignment: 'MIDDLE',
                   },
                 },
                 {
-                  userEnteredValue: { numberValue: material.total },
+                  userEnteredValue: { stringValue: material.name || '' },
+                  userEnteredFormat: {
+                    horizontalAlignment: 'LEFT',
+                    verticalAlignment: 'MIDDLE',
+                  },
+                },
+                {
+                  userEnteredValue: { stringValue: material.material || '' },
+                  userEnteredFormat: {
+                    horizontalAlignment: 'CENTER',
+                    verticalAlignment: 'MIDDLE',
+                  },
+                },
+                {
+                  userEnteredValue: { stringValue: material.unit || '' },
+                  userEnteredFormat: {
+                    horizontalAlignment: 'CENTER',
+                    verticalAlignment: 'MIDDLE',
+                  },
+                },
+                {
+                  userEnteredValue: { numberValue: material.quantity },
+                  userEnteredFormat: {
+                    horizontalAlignment: 'CENTER',
+                    verticalAlignment: 'MIDDLE',
+                  },
+                },
+                {
+                  userEnteredValue: material.unitPrice
+                    ? { numberValue: material.unitPrice }
+                    : { stringValue: '' }, // Đơn giá đã được tính = weight * unitPricePerKg
                   userEnteredFormat: {
                     numberFormat: { type: 'NUMBER', pattern: '#,##0' },
+                    textFormat: { bold: material.unitPrice ? true : false },
+                    verticalAlignment: 'MIDDLE',
+                  },
+                },
+                {
+                  userEnteredValue: material.total
+                    ? { numberValue: material.total }
+                    : { stringValue: '' },
+                  userEnteredFormat: {
+                    numberFormat: { type: 'NUMBER', pattern: '#,##0' },
+                    textFormat: { bold: material.total ? true : false },
+                    verticalAlignment: 'MIDDLE',
                   },
                 },
               ],
@@ -196,7 +484,7 @@ export const generateExcelQuotation = functions
         }
 
         // --- Bắt đầu phần định dạng Footer ---
-        const blueBg = { red: 217 / 255, green: 234 / 255, blue: 250 / 255 };
+        const blueBg = { red: 200 / 255, green: 204 / 255, blue: 228 / 255 }; // #c8cce4
         const yellowBg = { red: 255 / 255, green: 255 / 255, blue: 204 / 255 };
         const boldRight = {
           horizontalAlignment: 'RIGHT',
@@ -499,6 +787,22 @@ export const generateExcelQuotation = functions
 
         // Vùng chữ ký
         const buyerSignatureEndCol = 4; // Cột D
+
+        // Đầu tiên xóa nội dung đang có ở vùng chữ ký để tránh lặp lại
+        requests.push({
+          updateCells: {
+            range: {
+              sheetId,
+              startRowIndex: signatureRow - 1,
+              endRowIndex: signatureRow + 5,
+              startColumnIndex: 0,
+              endColumnIndex: summaryEndColumn,
+            },
+            fields: 'userEnteredValue',
+          },
+        });
+
+        // Thiết lập lại "Xác Nhận Bên Mua"
         requests.push({
           mergeCells: {
             range: {
@@ -510,6 +814,7 @@ export const generateExcelQuotation = functions
             },
           },
         });
+
         requests.push({
           updateCells: {
             rows: [
@@ -529,6 +834,8 @@ export const generateExcelQuotation = functions
             start: { sheetId, rowIndex: signatureRow - 1, columnIndex: 0 },
           },
         });
+
+        // Vùng để ký bên mua
         requests.push({
           mergeCells: {
             range: {
@@ -541,6 +848,7 @@ export const generateExcelQuotation = functions
           },
         });
 
+        // Thiết lập "Xác Nhận Bên Bán"
         requests.push({
           mergeCells: {
             range: {
@@ -551,7 +859,8 @@ export const generateExcelQuotation = functions
               endColumnIndex: summaryEndColumn,
             },
           },
-        }); // Cột E-G
+        });
+
         requests.push({
           updateCells: {
             rows: [
@@ -576,7 +885,7 @@ export const generateExcelQuotation = functions
           },
         });
 
-        // **FIX 1: Chèn ảnh vào ô đã merge**
+        // Vùng chữ ký bên bán và hình ảnh chữ ký
         requests.push({
           mergeCells: {
             range: {
@@ -589,7 +898,20 @@ export const generateExcelQuotation = functions
           },
         });
 
-        // Thay vì chèn ảnh từ URL bên ngoài, sử dụng ảnh có sẵn trong template
+        // **FIX 1: Chèn ảnh chữ ký từ Firebase Storage**
+        requests.push({
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: signatureRow,
+              endRowIndex: signatureRow + 5,
+              startColumnIndex: buyerSignatureEndCol,
+              endColumnIndex: summaryEndColumn,
+            },
+          },
+        });
+
+        // Chèn ảnh chữ ký từ Firebase Storage URL - Sửa cú pháp dấu phẩy thành dấu chấm phẩy
         requests.push({
           updateCells: {
             rows: [
@@ -597,12 +919,11 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      stringValue: 'THP',
+                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}";1)`,
                     },
                     userEnteredFormat: {
                       horizontalAlignment: 'CENTER',
                       verticalAlignment: 'MIDDLE',
-                      textFormat: { bold: true, fontSize: 18 },
                     },
                   },
                 ],
@@ -617,7 +938,7 @@ export const generateExcelQuotation = functions
           },
         });
 
-        // Thêm ngày tháng tự động vào báo giá
+        // Thêm ngày tháng tự động vào báo giá ở ô G2 với căn giữa ngang và dọc
         requests.push({
           updateCells: {
             rows: [
@@ -628,6 +949,8 @@ export const generateExcelQuotation = functions
                       formulaValue: '=TODAY()',
                     },
                     userEnteredFormat: {
+                      horizontalAlignment: 'CENTER',
+                      verticalAlignment: 'MIDDLE',
                       numberFormat: { type: 'DATE', pattern: 'dd/MM/yyyy' },
                     },
                   },
@@ -635,7 +958,24 @@ export const generateExcelQuotation = functions
               },
             ],
             fields: '*',
-            start: { sheetId, rowIndex: 6, columnIndex: 5 },
+            start: { sheetId, rowIndex: 1, columnIndex: 6 }, // Cell G2
+          },
+        });
+
+        // Thêm border cho ô G2
+        requests.push({
+          updateBorders: {
+            range: {
+              sheetId,
+              startRowIndex: 1,
+              endRowIndex: 2,
+              startColumnIndex: 6,
+              endColumnIndex: 7,
+            },
+            top: { style: 'SOLID' },
+            bottom: { style: 'SOLID' },
+            left: { style: 'SOLID' },
+            right: { style: 'SOLID' },
           },
         });
 
@@ -706,6 +1046,20 @@ export const generateExcelQuotation = functions
             left: { style: 'SOLID' },
             right: { style: 'SOLID' },
             innerHorizontal: { style: 'SOLID' },
+          },
+        });
+
+        // Xóa nội dung ở các dòng phía dưới để tránh hiển thị văn bản dư thừa từ template
+        requests.push({
+          updateCells: {
+            range: {
+              sheetId,
+              startRowIndex: signatureRow + 6,
+              endRowIndex: signatureRow + 20, // Xóa đến dòng +20 để đảm bảo xóa hết
+              startColumnIndex: 0,
+              endColumnIndex: summaryEndColumn,
+            },
+            fields: 'userEnteredValue',
           },
         });
 

@@ -152,7 +152,8 @@ const QuotationScreen = ({ route, navigation }) => {
       address: project.customerAddress || '',
       phone: project.customerPhone || '',
       email: project.customerEmail || '',
-      contact: project.customerContact || '',
+      contactPerson: project.customerContactPerson || '',
+      taxCode: project.customerTaxCode || '',
     };
     navigation.navigate('FinalizeQuotation', {
       materials,
