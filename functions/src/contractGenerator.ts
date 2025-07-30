@@ -302,7 +302,16 @@ export const generateContract = functions
         );
 
         // 5. ========= CREATE AND INSERT TABLE =========
-        const materialsArray = materials || [];
+        // === MATERIALS PRE-PROCESS (moved earlier) ===
+        const rawMaterials = materials || [];
+        const filteredMaterials = rawMaterials.filter((item) => {
+          const upperName = (item.name || '').trim().toUpperCase();
+          if (upperName.includes('GHI CHÚ')) return false;
+          if (upperName.startsWith('+')) return false;
+          return true;
+        });
+        const materialsArray = filteredMaterials;
+
         // +1 cho hàng header
         const numRows = materialsArray.length + 1;
         const numColumns = 7; // STT, Vật Tư/Hàng Hóa, VL, ĐVT, SL, Đơn giá, Thành Tiền
@@ -414,27 +423,43 @@ export const generateContract = functions
         ];
         const tableData: string[][] = [headers];
 
-        materialsArray.forEach((material, index) => {
-          // Tính đơn giá dựa trên khối lượng và đơn giá/kg
-          const weight = Number(material.weight || 0);
-          const unitPricePerKg = Number(material.unitPrice || 0);
-          const calculatedUnitPrice = weight * unitPricePerKg;
-          const quantity = Number(material.quantity || 0);
-          const totalPrice = quantity * calculatedUnitPrice;
+        materialsArray.forEach((material) => {
+          const stt = material.no ? String(material.no) : '';
+          const upperName = (material.name || '').trim().toUpperCase();
 
-          // Sử dụng toán tử ba ngôi để kiểm tra giá trị bằng 0
+          const isAccessory = upperName.startsWith('PHỤ KIỆN ĐI KÈM');
+          const isGroupHeader = /^[IVXLCDM]+$/i.test(stt);
+
+          let quantity = '';
+          let unitPriceStr = '';
+          let totalStr = '';
+
+          if (!isAccessory && !isGroupHeader) {
+            const qtyNum = Number(material.quantity || 0);
+            const weight = Number(material.weight || 0);
+            const unitPricePerKg = Number(material.unitPrice || 0);
+            const calculatedUnitPrice = weight * unitPricePerKg;
+            const totalPrice = qtyNum * calculatedUnitPrice;
+
+            quantity = qtyNum > 0 ? String(qtyNum) : '';
+            unitPriceStr =
+              calculatedUnitPrice > 0
+                ? Math.floor(calculatedUnitPrice).toLocaleString('vi-VN')
+                : '';
+            totalStr =
+              totalPrice > 0
+                ? Math.floor(totalPrice).toLocaleString('vi-VN')
+                : '';
+          }
+
           tableData.push([
-            (index + 1).toString(),
+            stt,
             material.name || '',
-            material.material || '',
-            material.unit || 'cái',
-            quantity > 0 ? String(quantity) : '', // Để trống nếu SL = 0
-            calculatedUnitPrice > 0
-              ? Math.floor(calculatedUnitPrice).toLocaleString('vi-VN')
-              : '', // Để trống nếu Đơn giá = 0
-            totalPrice > 0
-              ? Math.floor(totalPrice).toLocaleString('vi-VN')
-              : '', // Để trống nếu Thành tiền = 0
+            isAccessory || isGroupHeader ? '' : material.material || '',
+            isAccessory || isGroupHeader ? '' : material.unit || 'cái',
+            quantity,
+            unitPriceStr,
+            totalStr,
           ]);
         });
 
@@ -455,6 +480,11 @@ export const generateContract = functions
         // *** LỖI ĐƯỢC SỬA TẠI ĐÂY: LẶP NGƯỢC TỪ CUỐI LÊN ĐẦU ***
         for (let r = tableData.length - 1; r >= 0; r--) {
           const rowData = tableData[r];
+          const isHeaderRow = r === 0;
+          const sttVal = rowData[0];
+          const upperNameRow = (rowData[1] || '').toUpperCase();
+          const isAccessoryRow = upperNameRow.startsWith('PHỤ KIỆN ĐI KÈM');
+          const isGroupHeaderRow = /^[IVXLCDM]+$/i.test(sttVal);
           for (let c = rowData.length - 1; c >= 0; c--) {
             const cellData = rowData[c];
             if (!cellData) continue; // Bỏ qua ô trống
@@ -541,6 +571,29 @@ export const generateContract = functions
                   contentAlignment: 'MIDDLE',
                 },
                 fields: 'contentAlignment',
+              },
+            });
+          }
+
+          // Sau khi điền xong một hàng, tô màu nền nếu cần
+          if (isAccessoryRow || isGroupHeaderRow) {
+            dataFillRequests.push({
+              updateTableCellStyle: {
+                tableRange: {
+                  tableCellLocation: {
+                    tableStartLocation: { index: tableStartLocation || 0 },
+                    rowIndex: r,
+                    columnIndex: 0,
+                  },
+                  rowSpan: 1,
+                  columnSpan: numColumns,
+                },
+                tableCellStyle: {
+                  backgroundColor: {
+                    color: { rgbColor: { red: 0.9, green: 0.9, blue: 0.9 } },
+                  },
+                },
+                fields: 'backgroundColor',
               },
             });
           }
