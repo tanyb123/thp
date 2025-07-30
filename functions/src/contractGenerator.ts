@@ -496,65 +496,66 @@ export const generateContract = functions
 
             const cellStartIndex =
               cell.content[0].paragraph.elements[0].startIndex;
-            functions.logger.info(
-              `Điền "${cellData}" vào ô [${r}, ${c}] tại vị trí ${cellStartIndex}`
-            );
 
-            // 1. Thêm yêu cầu chèn văn bản
-            dataFillRequests.push({
-              insertText: {
-                location: { index: cellStartIndex },
-                text: cellData,
-              },
-            });
+            // FIX: Only insert text if cellData is not an empty string
+            if (cellData.length > 0) {
+              functions.logger.info(
+                `Điền "${cellData}" vào ô [${r}, ${c}] tại vị trí ${cellStartIndex}`
+              );
 
-            // 2. Thêm yêu cầu định dạng
-            const textRange = {
-              startIndex: cellStartIndex,
-              endIndex: cellStartIndex + cellData.length,
-            };
-
-            // Thiết lập font chữ Times New Roman, màu đen, cỡ 12 cho từng ô
-            dataFillRequests.push({
-              updateTextStyle: {
-                range: textRange,
-                textStyle: {
-                  weightedFontFamily: { fontFamily: 'Times New Roman' },
-                  fontSize: { magnitude: 12, unit: 'PT' },
-                  foregroundColor: {
-                    color: {
-                      rgbColor: { red: 0, green: 0, blue: 0 },
-                    },
-                  },
+              // 1. Thêm yêu cầu chèn văn bản
+              dataFillRequests.push({
+                insertText: {
+                  location: { index: cellStartIndex },
+                  text: cellData,
                 },
-                fields: 'weightedFontFamily,fontSize,foregroundColor',
-              },
-            });
+              });
 
-            // In đậm cho hàng tiêu đề và các hàng tổng cộng
-            // In đậm cho hàng tiêu đề và các hàng tổng cộng
-            // Chỉ in đậm cho hàng tiêu đề
-            if (r === 0) {
-              // <--- ĐÃ SỬA
+              // 2. Thêm yêu cầu định dạng
+              const textRange = {
+                startIndex: cellStartIndex,
+                endIndex: cellStartIndex + cellData.length,
+              };
+
+              // Thiết lập font chữ Times New Roman, màu đen, cỡ 12 cho từng ô
               dataFillRequests.push({
                 updateTextStyle: {
                   range: textRange,
-                  textStyle: { bold: true },
-                  fields: 'bold',
+                  textStyle: {
+                    weightedFontFamily: { fontFamily: 'Times New Roman' },
+                    fontSize: { magnitude: 12, unit: 'PT' },
+                    foregroundColor: {
+                      color: {
+                        rgbColor: { red: 0, green: 0, blue: 0 },
+                      },
+                    },
+                  },
+                  fields: 'weightedFontFamily,fontSize,foregroundColor',
+                },
+              });
+
+              // In đậm cho hàng tiêu đề
+              if (r === 0) {
+                dataFillRequests.push({
+                  updateTextStyle: {
+                    range: textRange,
+                    textStyle: { bold: true },
+                    fields: 'bold',
+                  },
+                });
+              }
+
+              // Căn giữa cho tất cả các ô (theo yêu cầu)
+              dataFillRequests.push({
+                updateParagraphStyle: {
+                  range: textRange,
+                  paragraphStyle: { alignment: 'CENTER' },
+                  fields: 'alignment',
                 },
               });
             }
 
-            // Căn giữa cho tất cả các ô (theo yêu cầu)
-            dataFillRequests.push({
-              updateParagraphStyle: {
-                range: textRange,
-                paragraphStyle: { alignment: 'CENTER' },
-                fields: 'alignment',
-              },
-            });
-
-            // Căn giữa theo chiều dọc
+            // Căn giữa theo chiều dọc (áp dụng cho tất cả các ô, kể cả ô trống)
             dataFillRequests.push({
               updateTableCellStyle: {
                 tableRange: {
