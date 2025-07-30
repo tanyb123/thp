@@ -302,18 +302,15 @@ export const generateContract = functions
         );
 
         // 5. ========= CREATE AND INSERT TABLE =========
-        // === MATERIALS PRE-PROCESS (moved earlier) ===
-        const rawMaterials = materials || [];
-        const filteredMaterials = rawMaterials.filter((item) => {
-          const upperName = (item.name || '').trim().toUpperCase();
-          if (upperName.includes('GHI CHÚ')) return false;
-          if (upperName.startsWith('+')) return false;
-          return true;
+        const materialsArray = materials || [];
+        // Lọc mảng materials để loại bỏ các dòng không cần thiết.
+        const filteredMaterials = materialsArray.filter((material) => {
+          const upperName = (material.name || '').trim().toUpperCase();
+          return !upperName.startsWith('GHI CHÚ') && !upperName.startsWith('+');
         });
-        const materialsArray = filteredMaterials;
 
-        // +1 cho hàng header
-        const numRows = materialsArray.length + 1;
+        // +1 cho hàng header, dựa trên mảng đã lọc
+        const numRows = filteredMaterials.length + 1;
         const numColumns = 7; // STT, Vật Tư/Hàng Hóa, VL, ĐVT, SL, Đơn giá, Thành Tiền
 
         functions.logger.info(
@@ -423,44 +420,51 @@ export const generateContract = functions
         ];
         const tableData: string[][] = [headers];
 
-        materialsArray.forEach((material) => {
-          const stt = material.no ? String(material.no) : '';
+        filteredMaterials.forEach((material) => {
           const upperName = (material.name || '').trim().toUpperCase();
-
           const isAccessory = upperName.startsWith('PHỤ KIỆN ĐI KÈM');
-          const isGroupHeader = /^[IVXLCDM]+$/i.test(stt);
+          const isRomanHeader = /^[IVXLCDM]+$/i.test(
+            String(material.no || '').trim()
+          );
 
-          let quantity = '';
-          let unitPriceStr = '';
-          let totalStr = '';
+          let row: string[];
 
-          if (!isAccessory && !isGroupHeader) {
-            const qtyNum = Number(material.quantity || 0);
-            const weight = Number(material.weight || 0);
-            const unitPricePerKg = Number(material.unitPrice || 0);
-            const calculatedUnitPrice = weight * unitPricePerKg;
-            const totalPrice = qtyNum * calculatedUnitPrice;
-
-            quantity = qtyNum > 0 ? String(qtyNum) : '';
-            unitPriceStr =
-              calculatedUnitPrice > 0
-                ? Math.floor(calculatedUnitPrice).toLocaleString('vi-VN')
-                : '';
-            totalStr =
-              totalPrice > 0
-                ? Math.floor(totalPrice).toLocaleString('vi-VN')
-                : '';
+          if (isAccessory) {
+            row = [
+              '', // STT trống
+              material.name || '',
+              material.material || '',
+              '', // ĐVT trống
+              '', // SL trống
+              '', // Đơn giá trống
+              '', // Thành tiền trống
+            ];
+          } else if (isRomanHeader) {
+            row = [
+              String(material.no || ''),
+              material.name || '',
+              material.material || '',
+              material.unit || '',
+              '', // SL trống
+              '', // Đơn giá trống
+              '', // Thành tiền trống
+            ];
+          } else {
+            // Hàng vật tư thông thường
+            const quantity = Number(material.quantity || 0);
+            const unitPrice = Number(material.unitPrice || 0);
+            const totalPrice = Number(material.totalPrice || 0);
+            row = [
+              String(material.no || ''),
+              material.name || '',
+              material.material || '',
+              material.unit || '',
+              quantity > 0 ? String(quantity) : '',
+              unitPrice > 0 ? unitPrice.toLocaleString('vi-VN') : '',
+              totalPrice > 0 ? totalPrice.toLocaleString('vi-VN') : '',
+            ];
           }
-
-          tableData.push([
-            stt,
-            material.name || '',
-            isAccessory || isGroupHeader ? '' : material.material || '',
-            isAccessory || isGroupHeader ? '' : material.unit || 'cái',
-            quantity,
-            unitPriceStr,
-            totalStr,
-          ]);
+          tableData.push(row);
         });
 
         functions.logger.info(
@@ -480,14 +484,9 @@ export const generateContract = functions
         // *** LỖI ĐƯỢC SỬA TẠI ĐÂY: LẶP NGƯỢC TỪ CUỐI LÊN ĐẦU ***
         for (let r = tableData.length - 1; r >= 0; r--) {
           const rowData = tableData[r];
-          const isHeaderRow = r === 0;
-          const sttVal = rowData[0];
-          const upperNameRow = (rowData[1] || '').toUpperCase();
-          const isAccessoryRow = upperNameRow.startsWith('PHỤ KIỆN ĐI KÈM');
-          const isGroupHeaderRow = /^[IVXLCDM]+$/i.test(sttVal);
           for (let c = rowData.length - 1; c >= 0; c--) {
             const cellData = rowData[c];
-            if (!cellData) continue; // Bỏ qua ô trống
+            if (cellData === null || cellData === undefined) continue; // Allow empty strings, skip only null/undefined
 
             const cell = tableElement.tableRows[r]?.tableCells?.[c];
             if (!cell?.content?.[0]?.paragraph?.elements?.[0]?.startIndex) {
@@ -574,29 +573,6 @@ export const generateContract = functions
               },
             });
           }
-
-          // Sau khi điền xong một hàng, tô màu nền nếu cần
-          if (isAccessoryRow || isGroupHeaderRow) {
-            dataFillRequests.push({
-              updateTableCellStyle: {
-                tableRange: {
-                  tableCellLocation: {
-                    tableStartLocation: { index: tableStartLocation || 0 },
-                    rowIndex: r,
-                    columnIndex: 0,
-                  },
-                  rowSpan: 1,
-                  columnSpan: numColumns,
-                },
-                tableCellStyle: {
-                  backgroundColor: {
-                    color: { rgbColor: { red: 0.9, green: 0.9, blue: 0.9 } },
-                  },
-                },
-                fields: 'backgroundColor',
-              },
-            });
-          }
         }
 
         // Định dạng màu nền và viền cho bảng
@@ -675,6 +651,52 @@ export const generateContract = functions
           );
         }
 
+        // ========= APPLY SPECIAL ROW FORMATTING (BACKGROUND COLOR) =========
+        const formatRequests: docs_v1.Schema$Request[] = [];
+        if (tableStartLocation) {
+          filteredMaterials.forEach((material, index) => {
+            const upperName = (material.name || '').trim().toUpperCase();
+            const isAccessory = upperName.startsWith('PHỤ KIỆN ĐI KÈM');
+            const isRomanHeader = /^[IVXLCDM]+$/i.test(
+              String(material.no || '').trim()
+            );
+
+            if (isAccessory || isRomanHeader) {
+              formatRequests.push({
+                updateTableCellStyle: {
+                  tableRange: {
+                    tableCellLocation: {
+                      tableStartLocation: { index: tableStartLocation },
+                      rowIndex: index + 1, // +1 to skip header
+                      columnIndex: 0,
+                    },
+                    rowSpan: 1,
+                    columnSpan: numColumns,
+                  },
+                  tableCellStyle: {
+                    backgroundColor: {
+                      color: {
+                        rgbColor: { red: 0.9, green: 0.9, blue: 0.9 },
+                      }, // light grey
+                    },
+                  },
+                  fields: 'backgroundColor',
+                },
+              });
+            }
+          });
+        }
+
+        if (formatRequests.length > 0) {
+          await docs.documents.batchUpdate({
+            documentId: newDocId,
+            requestBody: { requests: formatRequests },
+          });
+          functions.logger.info(
+            `Đã áp dụng định dạng nền cho ${formatRequests.length} hàng đặc biệt.`
+          );
+        }
+
         // 7. ========= INSERT SUMMARY SECTION (BẢNG TỔNG KẾT) =========
         // Lấy lại tài liệu để xác định vị trí cuối của bảng vật tư
         const docWithTableFilled = await docs.documents.get({
@@ -709,7 +731,7 @@ export const generateContract = functions
 
         // Tính tổng tiền hàng từ danh sách vật tư
         let subTotal = 0;
-        materialsArray.forEach((material) => {
+        filteredMaterials.forEach((material) => {
           // Tính lại đơn giá và thành tiền để đảm bảo tính đúng
           const weight = Number(material.weight || 0);
           const unitPricePerKg = Number(material.unitPrice || 0);
