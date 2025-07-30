@@ -11,8 +11,11 @@ import {
   getDoc,
   where,
   serverTimestamp,
+  arrayUnion,
+  runTransaction,
 } from 'firebase/firestore';
-import { db } from '../config/firebaseConfig';
+import { db, functions } from '../config/firebaseConfig';
+import { httpsCallable } from 'firebase/functions';
 import { getCustomerById } from './customerService'; // Import getCustomerById
 
 /**
@@ -106,7 +109,7 @@ export const getProjectById = async (projectId) => {
  * Tạo dự án mới
  * @param {Object} projectData - Dữ liệu dự án
  * @param {string} userId - ID của người dùng tạo dự án
- * @returns {Promise<Object>} - Dự án đã tạo kèm ID
+ * @returns {Promise<string>} - ID của dự án đã tạo
  */
 export const createProject = async (projectData, userId) => {
   try {
@@ -143,11 +146,8 @@ export const createProject = async (projectData, userId) => {
       updatedAt: serverTimestamp(),
     });
 
-    return {
-      id: docRef.id,
-      ...projectToSave,
-      tasks: defaultTasks,
-    };
+    // Trả về ID của dự án vừa tạo
+    return docRef.id;
   } catch (error) {
     throw error;
   }
@@ -325,3 +325,154 @@ export const updateCustomTask = async (projectId, taskName, userId) => {
     throw error;
   }
 };
+
+/**
+ * Updates the status of a specific workflow stage within a project.
+ * This is a targeted update to ensure it passes security rules for non-admin users.
+ * @param {string} projectId The ID of the project to update.
+ * @param {string} stageId The ID of the stage to update.
+ * @param {string} newStatus The new status for the stage.
+ * @param {string} assignedToId The ID of the user assigned to the stage.
+ */
+export const updateWorkflowStageStatus = async (
+  projectId,
+  stageId,
+  newStatus,
+  assignedToId = null
+) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    await updateDoc(projectRef, {
+      workflowStages: arrayUnion(), // placeholder to trigger merge; we'll overwrite in transaction
+    });
+  } catch (e) {
+    console.error('Direct update failed, fallback to transaction', e);
+    await runTransaction(db, async (transaction) => {
+      const ref = doc(db, 'projects', projectId);
+      const snap = await transaction.get(ref);
+      if (!snap.exists()) throw new Error('Project not found');
+      const stages = snap.data().workflowStages || [];
+      const idx = stages.findIndex((s) => s.stageId === stageId);
+      if (idx === -1) throw new Error('Stage not found');
+      stages[idx] = {
+        ...stages[idx],
+        status: newStatus,
+        ...(assignedToId ? { assignedToId } : {}),
+      };
+      transaction.update(ref, { workflowStages: stages });
+    });
+  }
+};
+
+/**
+ * Cập nhật chi tiết (status, notes, files) cho một công đoạn cụ thể
+ * @param {string} projectId
+ * @param {string} stageId
+ * @param {Object} data - {status?, notes?, files?}
+ */
+export const updateStageDetails = async (projectId, stageId, data) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(projectRef);
+      if (!snap.exists()) throw new Error('Project not found');
+      const project = snap.data();
+      const stages = project.workflowStages || [];
+      const idx = stages.findIndex((s) => s.stageId === stageId);
+      if (idx === -1) throw new Error('Stage not found');
+
+      stages[idx] = {
+        ...stages[idx],
+        ...data, // status, notes, files
+      };
+
+      tx.update(projectRef, {
+        workflowStages: stages,
+        updatedAt: serverTimestamp(),
+      });
+    });
+  } catch (error) {
+    console.error('Error updating stage details:', error);
+    throw new Error('Không thể cập nhật chi tiết công đoạn.');
+  }
+};
+
+const ProjectService = {
+  /**
+   * Calls a cloud function to create folders for a project in Google Drive.
+   * @param {string} projectId - The ID of the project.
+   * @param {string} accessToken - The Google access token.
+   * @returns {Promise<any>} The result from the cloud function.
+   */
+  async createProjectFolders(projectId, accessToken) {
+    try {
+      const createFolders = httpsCallable(functions, 'createProjectFolders');
+      const result = await createFolders({ projectId, accessToken });
+      return result.data;
+    } catch (error) {
+      console.error('Error creating project folders:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Imports materials from a Google Sheet file in Drive.
+   * @param {string} fileId - The ID of the Google Sheet file.
+   * @param {string} projectId - The ID of the project to associate materials with.
+   * @param {string} accessToken - The user's Google access token.
+   * @returns {Promise<any>} The result from the cloud function.
+   */
+  async importMaterialsFromDrive(fileId, projectId, accessToken) {
+    try {
+      const importMaterials = httpsCallable(
+        functions,
+        'importMaterialsFromDrive'
+      );
+      const result = await importMaterials({ fileId, projectId, accessToken });
+      return result.data;
+    } catch (error) {
+      console.error('Error importing materials from drive:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Deletes a file from Google Drive using a cloud function.
+   * @param {string} fileId - The ID of the file to delete.
+   * @param {string} accessToken - The user's Google access token.
+   * @returns {Promise<any>}
+   */
+  async deleteFileFromDrive(fileId, accessToken) {
+    try {
+      const deleteFile = httpsCallable(functions, 'deleteFileFromDrive');
+      const result = await deleteFile({ fileId, accessToken });
+      return result.data;
+    } catch (error) {
+      console.error('Error deleting file from drive:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Triggers processing of a payable ledger from a Google Sheet.
+   * @param {string} fileId - The ID of the Google Sheet.
+   * @param {string} accessToken - The Google access token.
+   * @returns {Promise<any>}
+   */
+  async processPayableLedgerFromDrive(fileId, accessToken) {
+    try {
+      const processLedger = httpsCallable(
+        functions,
+        'processPayableLedgerFromDrive'
+      );
+      const result = await processLedger({ fileId, accessToken });
+      return result.data;
+    } catch (error) {
+      console.error('Error processing payable ledger:', error);
+      throw error;
+    }
+  },
+};
+
+export default ProjectService;

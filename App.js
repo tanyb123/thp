@@ -1,8 +1,10 @@
 //App.js
+import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { UIManager, Platform } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { Provider as PaperProvider } from 'react-native-paper';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import AppNavigator from './src/navigation/AppNavigator';
@@ -43,17 +45,22 @@ export default function App() {
         'https://www.googleapis.com/auth/userinfo.profile',
         'https://www.googleapis.com/auth/userinfo.email',
         'https://www.googleapis.com/auth/drive.readonly',
+        'https://www.googleapis.com/auth/drive.metadata.readonly',
+        'https://www.googleapis.com/auth/drive.file',
+        'https://www.googleapis.com/auth/spreadsheets.readonly',
       ],
     });
   }, []);
 
   return (
     <SafeAreaProvider>
-      <AuthProvider>
-        <ThemeProvider>
-          <AppNavigator />
-        </ThemeProvider>
-      </AuthProvider>
+      <PaperProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <AppNavigator />
+          </ThemeProvider>
+        </AuthProvider>
+      </PaperProvider>
     </SafeAreaProvider>
   );
 }

@@ -19,6 +19,7 @@ import * as Sharing from 'expo-sharing';
 import { getAuth } from 'firebase/auth';
 import { saveQuotation } from '../api/quotationService';
 import useQuotationGenerator from '../hooks/useQuotationGenerator';
+import useContractGenerator from '../hooks/useContractGenerator';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 
 // HTML2PDF API key
@@ -179,6 +180,23 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
     projectId,
     customerData,
     materials: materialsData,
+  });
+
+  // Initialize the contract generator hook
+  const {
+    generateContract,
+    shareContractDoc,
+    isLoading: isContractLoading,
+    contractDocUrl,
+  } = useContractGenerator({
+    projectId,
+    customerData,
+    materials: materialsData,
+    quotationData: {
+      deliveryTime,
+      paymentTerms,
+      warrantyTerms,
+    },
   });
 
   // Use initialData if it exists (for re-quoting), otherwise use new data
@@ -390,55 +408,119 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   // Hàm tạo báo giá Excel
   const handleGenerateExcel = async () => {
     try {
-      const formattedData = {
+      const auth = getAuth();
+      const userId = auth.currentUser?.uid;
+
+      if (!userId) {
+        Alert.alert('Lỗi', 'Bạn cần đăng nhập để tạo báo giá Excel.');
+        return;
+      }
+
+      const effectiveProjectId = projectId || route?.params?.projectId;
+
+      if (!effectiveProjectId) {
+        Alert.alert('Lỗi', 'Không tìm thấy thông tin dự án. Vui lòng thử lại.');
+        return;
+      }
+
+      // 1. Chuẩn bị dữ liệu báo giá
+      const quotationNumber = `THP-${new Date().getFullYear()}-${Math.floor(
+        Math.random() * 1000
+      )
+        .toString()
+        .padStart(3, '0')}`;
+
+      // Assemble the complete quotation data
+      const quotationData = {
+        // Core Info
+        quotationNumber,
+        createdBy: userId,
+        projectName: projectName,
+        quotationDate: new Date().toISOString(),
+
+        // Customer Info - Đảm bảo dữ liệu khách hàng được gửi đúng định dạng
         metadata: {
-          projectName,
-          customerName: customerData.name,
-          customerAddress: customerData.address,
-          quoteValidity,
-          deliveryTime,
+          projectName: projectName,
+          customerName: customerData?.name || '',
+          customerAddress: customerData?.address || '',
+          customerPhone: customerData?.phone || '',
+          customerEmail: customerData?.email || '',
+          customerTaxCode: customerData?.taxCode || '',
+          customerContactPerson: customerData?.contactPerson || '',
+          quotationNumber: quotationNumber,
+          quoteValidity: quoteValidity,
+          deliveryTime: deliveryTime,
         },
-        materials: materials.map((item, index) => ({
-          no: index + 1,
-          name: item.name,
-          unit: item.unit,
-          material: item.material,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: item.totalPrice,
+
+        // Financial Snapshot
+        subTotal: subTotalData,
+        discountPercentage: parseFloat(discountPercentage) || 0,
+        discountAmount: discountAmount,
+        afterDiscountTotal: afterDiscountTotal,
+        vatPercentage: parseFloat(vatPercentage) || 0,
+        vatAmount: vatAmount,
+        grandTotal: grandTotal,
+        amountInWords: amountInWords,
+
+        // Materials Snapshot
+        materials: materials.map((material) => ({
+          no: material.stt || material.no || material.id || 0,
+          name: material.name || material.description || '',
+          material: material.material || material.type || '',
+          unit: material.unit || 'cái',
+          quantity: material.quantity || 0,
+          unitPrice: material.unitPrice || material.price || 0,
+          total: material.totalPrice || material.total || 0,
+          weight: material.weight || 0,
         })),
+
+        // Terms Snapshot
+        quoteValidity: quoteValidity,
+        deliveryTime: deliveryTime,
+        paymentTerms: paymentTerms,
+        warrantyTerms: warrantyTerms,
+        otherTerms: otherTerms,
+        bankDetails: bankDetails,
+        notes: notes,
+
+        // Tổng hợp thông tin tài chính
         summary: {
-          subTotal: afterDiscountTotal,
-          vatPercentage: parseFloat(vatPercentage),
-          vatAmount,
-          grandTotal,
+          subTotal: subTotalData,
+          vatPercentage: parseFloat(vatPercentage) || 0,
+          vatAmount: vatAmount,
+          grandTotal: grandTotal,
         },
       };
 
-      const url = await generateExcelQuotation(formattedData);
+      // Gọi function tạo báo giá Excel
+      const url = await generateExcelQuotation(quotationData);
 
       if (url) {
         Alert.alert(
           'Thành công',
-          'Đã tạo báo giá Excel. Bạn có muốn mở không?',
+          'Đã tạo báo giá Excel thành công. Bạn có muốn chia sẻ file Excel không?',
           [
-            { text: 'Để sau' },
-            {
-              text: 'Mở ngay',
-              onPress: async () => {
-                const supported = await Linking.canOpenURL(url);
-                if (supported) {
-                  await Linking.openURL(url);
-                } else {
-                  Alert.alert('Lỗi', `Không thể mở URL: ${url}`);
-                }
-              },
-            },
+            { text: 'Để sau', style: 'cancel' },
+            { text: 'Chia sẻ', onPress: () => shareExcelQuotation() },
           ]
         );
       }
     } catch (error) {
-      Alert.alert('Lỗi', 'Không thể tạo báo giá Excel. Vui lòng thử lại.');
+      console.error('Error generating Excel:', error);
+      Alert.alert(
+        'Lỗi',
+        `Không thể tạo báo giá Excel: ${error.message || 'Unknown error'}`
+      );
+    }
+  };
+
+  // Function to handle contract generation
+  const handleGenerateContract = async () => {
+    try {
+      await generateContract();
+    } catch (error) {
+      console.error('Error generating contract:', error);
+      Alert.alert('Lỗi', 'Không thể tạo hợp đồng: ' + error.message);
     }
   };
 
@@ -675,6 +757,27 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
           )}
         </TouchableOpacity>
 
+        {/* Contract generation button */}
+        <TouchableOpacity
+          style={[styles.button, { backgroundColor: '#9C27B0' }]}
+          onPress={handleGenerateContract}
+          disabled={isContractLoading}
+        >
+          {isContractLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Ionicons
+                name="document-text"
+                size={20}
+                color="white"
+                style={{ marginRight: 10 }}
+              />
+              <Text style={styles.buttonText}>Tạo Hợp Đồng</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
         {pdfLocalUri && (
           <TouchableOpacity
             style={[styles.button, { backgroundColor: '#2196F3' }]}
@@ -687,6 +790,22 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               style={{ marginRight: 10 }}
             />
             <Text style={styles.buttonText}>Chia Sẻ PDF</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Nút Chia Sẻ Hợp Đồng (chỉ hiển thị khi có link) */}
+        {contractDocUrl && !isContractLoading && (
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: '#673AB7' }]}
+            onPress={() => shareContractDoc()}
+          >
+            <Ionicons
+              name="share-social"
+              size={20}
+              color="white"
+              style={{ marginRight: 10 }}
+            />
+            <Text style={styles.buttonText}>Chia Sẻ Hợp Đồng</Text>
           </TouchableOpacity>
         )}
 
@@ -854,7 +973,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#007BFF',
     padding: 15,
     borderRadius: 8,
     marginVertical: 10,

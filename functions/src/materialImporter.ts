@@ -3,6 +3,13 @@ import { google } from 'googleapis';
 import * as XLSX from 'xlsx';
 import { CallableContext } from 'firebase-functions/v1/https';
 
+// Kiểm tra xem một chuỗi có phải là số La Mã không
+function isRomanNumeral(str: string): boolean {
+  if (!str) return false;
+  const romanPattern = /^[IVXLCDM]+$/i;
+  return romanPattern.test(str.toString().trim());
+}
+
 // admin đã được khởi tạo ở file index.ts chính
 
 export const importMaterialsFromDrive = functions
@@ -50,17 +57,49 @@ export const importMaterialsFromDrive = functions
       const parsedMaterials: any[] = [];
       for (let i = 4; i < rawData.length; i++) {
         const row: any[] = rawData[i];
-        if (!row || !row[1] || typeof row[8] !== 'number') {
+
+        // Bỏ qua hàng trống hoàn toàn
+        if (!row || row.length === 0) {
           continue;
         }
+
+        // Kiểm tra STT (cột đầu tiên) và tên vật tư (cột thứ hai)
+        const hasSTT = row[0] !== undefined && row[0] !== null && row[0] !== '';
+        const hasName =
+          row[1] !== undefined && row[1] !== null && row[1] !== '';
+        const isRoman =
+          hasSTT && typeof row[0] === 'string' && isRomanNumeral(row[0]);
+
+        // Điều kiện lọc: có tên vật tư HOẶC là hàng có số La Mã
+        if (!hasName && !isRoman) {
+          console.log(
+            `Bỏ qua hàng ${i}: Không có tên vật tư hoặc không phải số La Mã`
+          );
+          continue;
+        }
+
+        // Debug log để kiểm tra
+        console.log(
+          `Row ${i}, STT value: ${
+            row[0]
+          }, Is Roman: ${isRoman}, Type: ${typeof row[0]}`
+        );
+
+        // Đảm bảo STT được lưu dưới dạng chuỗi
+        let sttValue = '';
+        if (hasSTT) {
+          sttValue = String(row[0]).trim();
+        }
+
+        // Xử lý thông tin vật tư, mặc định giá trị là 0 hoặc chuỗi rỗng nếu không có dữ liệu
         const materialItem = {
-          stt: row[0],
+          stt: sttValue,
           name: row[1] || '',
           material: row[2] || '',
           quyCach: row[3] && row[4] ? `${row[3]}x${row[4]}` : '',
           unit: row[6] || '',
-          quantity: parseFloat(String(row[7])) || 0,
-          weight: parseFloat(String(row[8])) || 0,
+          quantity: parseFloat(String(row[7] || '0')) || 0,
+          weight: parseFloat(String(row[8] || '0')) || 0,
           unitPrice: 0,
           totalPrice: 0,
         };

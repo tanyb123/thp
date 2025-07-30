@@ -1,5 +1,5 @@
 //src/screens/ProjectsScreen.js
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,21 +11,55 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getProjects } from '../api/projectService';
+import { getProjectsByStatus } from '../api/projectService';
 import { useFocusEffect } from '@react-navigation/native';
 
 const ProjectsScreen = ({ navigation }) => {
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState([]); // projects hiển thị theo bộ lọc hiện hành
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Lọc theo trạng thái dự án
+  const FILTERS = [
+    {
+      key: 'pending',
+      label: 'Chờ xử lý',
+      color: 'transparent',
+      textColor: '#333',
+    },
+    {
+      key: 'in-progress',
+      label: 'Đang thực hiện',
+      color: '#FFF9C4',
+      textColor: '#333',
+    }, // vàng nhạt
+    {
+      key: 'completed',
+      label: 'Hoàn thành',
+      color: '#4CAF50',
+      textColor: '#fff',
+    },
+  ];
+
+  const [activeFilter, setActiveFilter] = useState('pending');
+  // Cache dự án theo trạng thái để không phải gọi lại
+  const [cacheByStatus, setCacheByStatus] = useState({});
+
   // Hàm tải danh sách dự án
-  const loadProjects = async () => {
+  const loadProjectsByStatus = async (statusKey) => {
+    // Nếu đã có trong cache thì dùng luôn
+    if (cacheByStatus[statusKey]) {
+      setProjects(cacheByStatus[statusKey]);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
-      const data = await getProjects();
+      const data = await getProjectsByStatus(statusKey);
+      // Lưu cache
+      setCacheByStatus((prev) => ({ ...prev, [statusKey]: data }));
       setProjects(data);
     } catch (err) {
       console.error('Lỗi khi tải danh sách dự án:', err);
@@ -38,20 +72,24 @@ const ProjectsScreen = ({ navigation }) => {
 
   // Tải dữ liệu khi màn hình được mở
   useEffect(() => {
-    loadProjects();
-  }, []);
+    loadProjectsByStatus(activeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFilter]);
 
   // Làm mới dữ liệu khi màn hình được focus
   useFocusEffect(
     React.useCallback(() => {
-      loadProjects();
-    }, [])
+      loadProjectsByStatus(activeFilter);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeFilter])
   );
 
   // Xử lý khi người dùng kéo để làm mới
   const handleRefresh = () => {
     setRefreshing(true);
-    loadProjects();
+    // Xóa cache của bộ lọc hiện hành để buộc refetch
+    setCacheByStatus((prev) => ({ ...prev, [activeFilter]: undefined }));
+    loadProjectsByStatus(activeFilter);
   };
 
   // Xử lý khi người dùng nhấn vào nút quản lý dự án
@@ -64,6 +102,40 @@ const ProjectsScreen = ({ navigation }) => {
     navigation.navigate('ProjectDetail', { projectId: project.id });
   };
 
+  // Nút lọc trạng thái
+  const renderFilterButtons = () => (
+    <View style={styles.filterContainer}>
+      {FILTERS.map((f) => (
+        <TouchableOpacity
+          key={f.key}
+          style={[
+            styles.filterButton,
+            {
+              backgroundColor: activeFilter === f.key ? f.color : '#fff',
+              borderWidth: 1,
+              borderColor:
+                activeFilter === f.key
+                  ? f.color === 'transparent'
+                    ? '#ccc'
+                    : f.color
+                  : '#ccc',
+            },
+          ]}
+          onPress={() => setActiveFilter(f.key)}
+        >
+          <Text
+            style={[
+              styles.filterText,
+              { color: activeFilter === f.key ? f.textColor : '#333' },
+            ]}
+          >
+            {f.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+
   // Hiển thị từng dự án trong danh sách
   const renderProjectItem = ({ item }) => {
     const getStatusColor = (status) => {
@@ -71,9 +143,9 @@ const ProjectsScreen = ({ navigation }) => {
         case 'completed':
           return '#4CAF50';
         case 'in-progress':
-          return '#2196F3';
+          return '#FFD54F'; // vàng nhạt
         case 'pending':
-          return '#FF9800';
+          return '#9E9E9E';
         case 'cancelled':
           return '#F44336';
         default:
@@ -148,7 +220,10 @@ const ProjectsScreen = ({ navigation }) => {
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle-outline" size={50} color="#FF3B30" />
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadProjects}>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => loadProjectsByStatus(activeFilter)}
+          >
             <Text style={styles.retryButtonText}>Thử lại</Text>
           </TouchableOpacity>
         </View>
@@ -171,9 +246,11 @@ const ProjectsScreen = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
+      {renderFilterButtons()}
+
       {projects.length > 0 ? (
         <FlatList
-          data={projects.slice(0, 5)} // Chỉ hiển thị 5 dự án mới nhất
+          data={projects}
           keyExtractor={(item) => item.id}
           renderItem={renderProjectItem}
           contentContainerStyle={styles.listContent}
@@ -349,6 +426,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: 'white',
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+  },
+  filterButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 

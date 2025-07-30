@@ -11,7 +11,7 @@ import * as FileSystem from 'expo-file-system';
  */
 export const listFiles = async (accessToken, folderId = null) => {
   try {
-    let url = 'tahttps://www.googleapis.com/drive/v3/files';
+    let url = 'https://www.googleapis.com/drive/v3/files';
     let params = {
       fields: 'files(id, name, mimeType, modifiedTime, size)',
       orderBy: 'modifiedTime desc',
@@ -273,4 +273,279 @@ export const createFolder = async (
     console.error('Lỗi khi tạo thư mục trên Google Drive:', error);
     throw error;
   }
+};
+
+/**
+ * Lấy file Excel mới nhất từ thư mục cụ thể và xử lý dữ liệu
+ * @param {string} accessToken - Token xác thực Google
+ * @param {string} folderId - ID thư mục cần lấy
+ * @returns {Promise<Object>} - Dữ liệu đã xử lý từ file Excel mới nhất
+ */
+export const getLatestExcelFromFolder = async (accessToken, folderId) => {
+  try {
+    // Lấy danh sách các file trong thư mục, sắp xếp theo thời gian sửa đổi mới nhất
+    const files = await listFiles(accessToken, folderId);
+
+    // Lọc chỉ lấy các file Excel
+    const excelFiles = files.filter(
+      (file) =>
+        file.mimeType.includes('spreadsheet') ||
+        file.mimeType.includes('excel') ||
+        file.name.endsWith('.xlsx') ||
+        file.name.endsWith('.xls')
+    );
+
+    if (excelFiles.length === 0) {
+      throw new Error('Không tìm thấy file Excel nào trong thư mục');
+    }
+
+    // Lấy file mới nhất (đã sắp xếp theo modifiedTime desc)
+    const latestExcelFile = excelFiles[0];
+    console.log('Đã tìm thấy file Excel mới nhất:', latestExcelFile.name);
+
+    // Đọc và xử lý file Excel
+    const excelData = await readExcelFile(accessToken, latestExcelFile.id);
+
+    return {
+      fileInfo: latestExcelFile,
+      data: excelData,
+    };
+  } catch (error) {
+    console.error('Lỗi khi lấy file Excel mới nhất:', error);
+    throw error;
+  }
+};
+
+/**
+ * Phân tích dữ liệu từ file Excel công nợ
+ * @param {Object} excelData - Dữ liệu Excel đã đọc
+ * @returns {Object} - Dữ liệu công nợ đã phân tích
+ */
+export const processDebtExcelData = (excelData) => {
+  try {
+    const sheets = excelData.allSheets;
+    const result = {
+      totalAccountsPayable: 0,
+      totalAccountsReceivable: 0,
+      top5Payable: [],
+      top5Receivable: [],
+      lastUpdated: new Date(),
+    };
+
+    // Tìm sheet công nợ phải trả
+    const payableSheet = findSheetByName(sheets, [
+      'Phải Trả',
+      'Phai Tra',
+      'Accounts Payable',
+      'Công Nợ Phải Trả',
+    ]);
+    if (payableSheet) {
+      const payableData = processPayableSheet(payableSheet);
+      result.totalAccountsPayable = payableData.total;
+      result.top5Payable = payableData.top5;
+    }
+
+    // Tìm sheet công nợ phải thu
+    const receivableSheet = findSheetByName(sheets, [
+      'Phải Thu',
+      'Phai Thu',
+      'Accounts Receivable',
+      'Công Nợ Phải Thu',
+    ]);
+    if (receivableSheet) {
+      const receivableData = processReceivableSheet(receivableSheet);
+      result.totalAccountsReceivable = receivableData.total;
+      result.top5Receivable = receivableData.top5;
+    }
+
+    // Tính vị thế công nợ ròng
+    result.netDebtPosition =
+      result.totalAccountsReceivable - result.totalAccountsPayable;
+
+    // Định dạng số tiền
+    result.formattedTotals = {
+      totalAccountsPayable: formatCurrency(result.totalAccountsPayable),
+      totalAccountsReceivable: formatCurrency(result.totalAccountsReceivable),
+      netDebtPosition: formatCurrency(result.netDebtPosition),
+    };
+
+    return result;
+  } catch (error) {
+    console.error('Lỗi khi phân tích dữ liệu Excel công nợ:', error);
+    throw error;
+  }
+};
+
+// Hàm trợ giúp tìm sheet theo tên
+const findSheetByName = (sheets, possibleNames) => {
+  for (const sheetName in sheets) {
+    if (
+      possibleNames.some((name) =>
+        sheetName.toLowerCase().includes(name.toLowerCase())
+      )
+    ) {
+      return sheets[sheetName];
+    }
+  }
+  return null;
+};
+
+// Xử lý sheet công nợ phải trả
+const processPayableSheet = (sheetData) => {
+  // Tìm các cột chứa thông tin nhà cung cấp và số tiền
+  const headerRow = sheetData.find((row) =>
+    row.some(
+      (cell) =>
+        typeof cell === 'string' &&
+        (cell.toLowerCase().includes('nhà cung cấp') ||
+          cell.toLowerCase().includes('supplier') ||
+          cell.toLowerCase().includes('tên'))
+    )
+  );
+
+  if (!headerRow) return { total: 0, top5: [] };
+
+  const supplierColIndex = headerRow.findIndex(
+    (cell) =>
+      typeof cell === 'string' &&
+      (cell.toLowerCase().includes('nhà cung cấp') ||
+        cell.toLowerCase().includes('supplier') ||
+        cell.toLowerCase().includes('tên'))
+  );
+
+  const amountColIndex = headerRow.findIndex(
+    (cell) =>
+      typeof cell === 'string' &&
+      (cell.toLowerCase().includes('số tiền') ||
+        cell.toLowerCase().includes('amount') ||
+        cell.toLowerCase().includes('còn nợ') ||
+        cell.toLowerCase().includes('tổng'))
+  );
+
+  if (supplierColIndex === -1 || amountColIndex === -1) {
+    return { total: 0, top5: [] };
+  }
+
+  // Lấy dữ liệu từ các hàng sau header
+  const dataRows = sheetData.slice(sheetData.indexOf(headerRow) + 1);
+
+  // Lọc các hàng có dữ liệu hợp lệ
+  const validRows = dataRows.filter(
+    (row) =>
+      row[supplierColIndex] &&
+      row[amountColIndex] &&
+      !isNaN(parseFloat(row[amountColIndex]))
+  );
+
+  // Tính tổng
+  const total = validRows.reduce(
+    (sum, row) => sum + parseFloat(row[amountColIndex]),
+    0
+  );
+
+  // Sắp xếp theo số tiền giảm dần và lấy top 5
+  const sortedRows = [...validRows].sort(
+    (a, b) => parseFloat(b[amountColIndex]) - parseFloat(a[amountColIndex])
+  );
+
+  const top5 = sortedRows.slice(0, 5).map((row) => ({
+    supplier: row[supplierColIndex].toString(),
+    amount: parseFloat(row[amountColIndex]),
+    amountInMillions: parseFloat(
+      (parseFloat(row[amountColIndex]) / 1000000).toFixed(1)
+    ),
+  }));
+
+  return { total, top5 };
+};
+
+// Xử lý sheet công nợ phải thu (tương tự như phải trả)
+const processReceivableSheet = (sheetData) => {
+  // Tìm các cột chứa thông tin khách hàng và số tiền
+  const headerRow = sheetData.find((row) =>
+    row.some(
+      (cell) =>
+        typeof cell === 'string' &&
+        (cell.toLowerCase().includes('khách hàng') ||
+          cell.toLowerCase().includes('customer') ||
+          cell.toLowerCase().includes('tên'))
+    )
+  );
+
+  if (!headerRow) return { total: 0, top5: [] };
+
+  const customerColIndex = headerRow.findIndex(
+    (cell) =>
+      typeof cell === 'string' &&
+      (cell.toLowerCase().includes('khách hàng') ||
+        cell.toLowerCase().includes('customer') ||
+        cell.toLowerCase().includes('tên'))
+  );
+
+  const amountColIndex = headerRow.findIndex(
+    (cell) =>
+      typeof cell === 'string' &&
+      (cell.toLowerCase().includes('số tiền') ||
+        cell.toLowerCase().includes('amount') ||
+        cell.toLowerCase().includes('còn nợ') ||
+        cell.toLowerCase().includes('tổng'))
+  );
+
+  if (customerColIndex === -1 || amountColIndex === -1) {
+    return { total: 0, top5: [] };
+  }
+
+  // Lấy dữ liệu từ các hàng sau header
+  const dataRows = sheetData.slice(sheetData.indexOf(headerRow) + 1);
+
+  // Lọc các hàng có dữ liệu hợp lệ
+  const validRows = dataRows.filter(
+    (row) =>
+      row[customerColIndex] &&
+      row[amountColIndex] &&
+      !isNaN(parseFloat(row[amountColIndex]))
+  );
+
+  // Tính tổng
+  const total = validRows.reduce(
+    (sum, row) => sum + parseFloat(row[amountColIndex]),
+    0
+  );
+
+  // Sắp xếp theo số tiền giảm dần và lấy top 5
+  const sortedRows = [...validRows].sort(
+    (a, b) => parseFloat(b[amountColIndex]) - parseFloat(a[amountColIndex])
+  );
+
+  const top5 = sortedRows.slice(0, 5).map((row) => ({
+    customer: row[customerColIndex].toString(),
+    amount: parseFloat(row[amountColIndex]),
+    amountInMillions: parseFloat(
+      (parseFloat(row[amountColIndex]) / 1000000).toFixed(1)
+    ),
+  }));
+
+  return { total, top5 };
+};
+
+// Hàm định dạng tiền tệ
+const formatCurrency = (amount) => {
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(amount);
+};
+
+export default {
+  listFiles,
+  searchFiles,
+  downloadFile,
+  uploadFile,
+  readExcelFile,
+  saveExcelFileLocally,
+  createFolder,
+  getLatestExcelFromFolder,
+  processDebtExcelData,
 };

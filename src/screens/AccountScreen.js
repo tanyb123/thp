@@ -139,8 +139,8 @@ const getRoleStyle = (role) => {
   }
 };
 
-const AccountScreen = () => {
-  const { logout, currentUser } = useAuth();
+const AccountScreen = ({ navigation }) => {
+  const { logout, currentUser, userRole } = useAuth();
   const { theme, isDarkMode, toggleTheme, followSystem, toggleFollowSystem } =
     useTheme();
 
@@ -275,12 +275,12 @@ const AccountScreen = () => {
           <SettingItem
             icon="person-outline"
             title="Thông tin cá nhân"
-            onPress={() => {}}
+            onPress={() => Alert.alert('Tính năng đang phát triển')}
           />
           <SettingItem
             icon="key-outline"
             title="Đổi mật khẩu"
-            onPress={() => {}}
+            onPress={() => Alert.alert('Tính năng đang phát triển')}
           />
           <SettingItem
             icon="swap-horizontal-outline"
@@ -288,6 +288,14 @@ const AccountScreen = () => {
             onPress={switchGoogleAccount}
             color="#4285F4"
           />
+          {(userRole === 'giam_doc' || userRole === 'admin') && (
+            <SettingItem
+              icon="people-outline"
+              title="Quản lý nhân viên"
+              onPress={() => navigation.navigate('UserManagement')}
+              color={theme.primary}
+            />
+          )}
         </View>
 
         <View style={[styles.settingsGroup, { backgroundColor: theme.card }]}>

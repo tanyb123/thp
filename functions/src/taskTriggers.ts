@@ -162,25 +162,49 @@ export const projectWorkflowManager = onDocumentWritten(
       }
     }
 
-    // Trigger 2: Material Separation Completed -> Assign Quotation
-    if (
-      beforeData?.tasks.material_separation?.status !== 'completed' &&
-      afterData.tasks.material_separation?.status === 'completed'
-    ) {
-      const usersToNotify = await getUsersByRole(['thuong_mai', 'giam_doc']);
-      const salesUser = usersToNotify.find((u) => u.role === 'thuong_mai');
+    // ---- NEW WORKFLOW LOGIC ----
+    const beforeStages: any[] = beforeData?.workflowStages || [];
+    const afterStages: any[] = afterData.workflowStages || [];
 
-      if (salesUser) {
-        updates['tasks.quotation.assignedTo'] = salesUser.id;
-      }
-
-      notificationPromises.push(
-        sendNotificationToUsers(
-          usersToNotify,
-          'Yêu cầu báo giá',
-          `Kỹ sư đã hoàn thành bóc tách vật liệu cho dự án ${projectName}. Vui lòng tiến hành báo giá.`
-        )
+    // Detect status change to completed for material_separation
+    const justCompleted = afterStages.find((stageAfter) => {
+      if (stageAfter.processKey !== 'material_separation') return false;
+      const beforeStage = beforeStages.find(
+        (s) => s.stageId === stageAfter.stageId
       );
+      return (
+        beforeStage?.status !== 'completed' && stageAfter.status === 'completed'
+      );
+    });
+
+    if (justCompleted) {
+      // Find next stage by order
+      const nextStage = afterStages
+        .filter((s) => s.order > justCompleted.order)
+        .sort((a, b) => a.order - b.order)[0];
+
+      if (nextStage && nextStage.processKey === 'quotation') {
+        const usersToNotify = await getUsersByRole(['thuong_mai', 'giam_doc']);
+        const salesUser = usersToNotify.find((u) => u.role === 'thuong_mai');
+
+        if (salesUser) {
+          // update array element
+          const newStages = afterStages.map((s) =>
+            s.stageId === nextStage.stageId
+              ? { ...s, assignedToId: salesUser.id }
+              : s
+          );
+          updates['workflowStages'] = newStages;
+        }
+
+        notificationPromises.push(
+          sendNotificationToUsers(
+            usersToNotify,
+            'Yêu cầu báo giá',
+            `Kỹ sư đã hoàn thành bóc tách vật liệu cho dự án ${projectName}. Vui lòng tiến hành báo giá.`
+          )
+        );
+      }
     }
 
     // Trigger 3: Project Approved -> Assign Purchasing & Cutting

@@ -1,8 +1,7 @@
-// functions/src/index.ts
-
 import * as functions from 'firebase-functions/v1';
 import { google, sheets_v4 } from 'googleapis';
 import { CallableContext } from 'firebase-functions/v1/https';
+import * as admin from 'firebase-admin';
 
 // Giả sử bạn đã định nghĩa kiểu này trong file types.ts
 interface ExcelQuotationData {
@@ -19,6 +18,7 @@ interface ExcelQuotationData {
     deliveryTime?: string;
   };
   materials: {
+    isNote?: boolean; // Flag to identify note rows
     no: number;
     name: string;
     unit: string;
@@ -38,11 +38,12 @@ interface ExcelQuotationData {
 
 // ----- CẤU HÌNH -----
 const TEMPLATE_FILE_ID = '18CYrE8IHHbqNBc-FWrQw5kGnyLW31VDJOA4a1tusu4M';
+// @ts-ignore - Keep for backward compatibility
 const DESTINATION_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX';
 const START_ROW_MATERIALS = 10; // Dựa theo ảnh, có vẻ là dòng 10
-// URL ảnh chữ ký từ Firebase Storage
-const SIGNATURE_IMAGE_URL =
-  'https://storage.googleapis.com/tanyb-fe4bf.firebasestorage.app/signature.png';
+// URL ảnh chữ ký từ Firebase Storage - đã xóa bỏ
+// const SIGNATURE_IMAGE_URL =
+//   'https://storage.googleapis.com/tanyb-fe4bf.firebasestorage.app/signature.png';
 
 // ----- HÀM CHÍNH -----
 export const generateExcelQuotation = functions
@@ -50,7 +51,11 @@ export const generateExcelQuotation = functions
   .runWith({ timeoutSeconds: 300, memory: '512MB' })
   .https.onCall(
     async (
-      data: { formattedData: ExcelQuotationData },
+      data: {
+        formattedData: ExcelQuotationData;
+        projectId: string;
+        accessToken: string;
+      },
       context: CallableContext
     ) => {
       // ... (Phần xác thực và kiểm tra data giữ nguyên)
@@ -60,7 +65,7 @@ export const generateExcelQuotation = functions
           'Bạn cần đăng nhập.'
         );
       }
-      const { formattedData } = data;
+      const { formattedData, projectId, accessToken } = data;
       if (!formattedData) {
         throw new functions.https.HttpsError(
           'invalid-argument',
@@ -68,23 +73,72 @@ export const generateExcelQuotation = functions
         );
       }
 
-      const auth = new google.auth.GoogleAuth({
-        scopes: [
-          'https://www.googleapis.com/auth/drive',
-          'https://www.googleapis.com/auth/spreadsheets',
-        ],
-        keyFile: './tanyb-fe4bf-4fbd5c01b6c7.json',
-      });
+      if (!projectId) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Thiếu ID dự án.'
+        );
+      }
+
+      if (!accessToken) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'Thiếu accessToken Google của người dùng.'
+        );
+      }
+
+      // Sử dụng OAuth2 client của googleapis với accessToken người dùng
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: accessToken });
+
       const drive = google.drive({ version: 'v3', auth });
       const sheets = google.sheets({ version: 'v4', auth });
 
+      // Lấy thông tin dự án từ Firestore để tìm thư mục Drive
+      const db = admin.firestore();
+      const projectDoc = await db.collection('projects').doc(projectId).get();
+      const projectData = projectDoc.data();
+
+      if (!projectData || !projectData.driveFolderId) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'Không tìm thấy thông tin thư mục Drive của dự án.'
+        );
+      }
+
       try {
+        // Tìm thư mục con 'baogia' trong thư mục dự án
+        const baogiaFolderResponse = await drive.files.list({
+          q: `name='baogia' and '${projectData.driveFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+          fields: 'files(id)',
+        });
+
+        // Nếu không tìm thấy thư mục baogia, tạo mới
+        let baogiaFolderId;
+        if (
+          baogiaFolderResponse.data.files &&
+          baogiaFolderResponse.data.files.length > 0
+        ) {
+          baogiaFolderId = baogiaFolderResponse.data.files[0].id;
+        } else {
+          // Tạo thư mục baogia nếu chưa có
+          const folderResponse = await drive.files.create({
+            requestBody: {
+              name: 'baogia',
+              mimeType: 'application/vnd.google-apps.folder',
+              parents: [projectData.driveFolderId],
+            },
+            fields: 'id',
+          });
+          baogiaFolderId = folderResponse.data.id;
+        }
+
         const newFileName = `Báo giá - ${
           formattedData.metadata.projectName || 'Dự án'
         } - ${new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')}`;
         const copiedFileResponse = await drive.files.copy({
           fileId: TEMPLATE_FILE_ID,
-          requestBody: { name: newFileName, parents: [DESTINATION_FOLDER_ID] },
+          requestBody: { name: newFileName, parents: [baogiaFolderId] },
         });
 
         const newFileId = copiedFileResponse.data.id;
@@ -335,10 +389,10 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      stringValue: 'MST',
+                      stringValue: 'MST:',
                     },
                     userEnteredFormat: {
-                      textFormat: { bold: true },
+                      textFormat: { bold: false }, // Bỏ bôi đậm
                       horizontalAlignment: 'LEFT',
                     },
                   },
@@ -409,67 +463,285 @@ export const generateExcelQuotation = functions
         });
 
         if (formattedData.materials.length > 0) {
-          const materialsRows = formattedData.materials.map(
-            (material, index) => ({
-              values: [
-                {
-                  userEnteredValue: { numberValue: index + 1 },
-                  userEnteredFormat: {
-                    horizontalAlignment: 'CENTER',
-                    verticalAlignment: 'MIDDLE',
-                  },
-                },
-                {
-                  userEnteredValue: { stringValue: material.name || '' },
-                  userEnteredFormat: {
-                    horizontalAlignment: 'LEFT',
-                    verticalAlignment: 'MIDDLE',
-                  },
-                },
-                {
-                  userEnteredValue: { stringValue: material.material || '' },
-                  userEnteredFormat: {
-                    horizontalAlignment: 'CENTER',
-                    verticalAlignment: 'MIDDLE',
-                  },
-                },
-                {
-                  userEnteredValue: { stringValue: material.unit || '' },
-                  userEnteredFormat: {
-                    horizontalAlignment: 'CENTER',
-                    verticalAlignment: 'MIDDLE',
-                  },
-                },
-                {
-                  userEnteredValue: { numberValue: material.quantity },
-                  userEnteredFormat: {
-                    horizontalAlignment: 'CENTER',
-                    verticalAlignment: 'MIDDLE',
-                  },
-                },
-                {
-                  userEnteredValue: material.unitPrice
-                    ? { numberValue: material.unitPrice }
-                    : { stringValue: '' }, // Đơn giá đã được tính = weight * unitPricePerKg
-                  userEnteredFormat: {
-                    numberFormat: { type: 'NUMBER', pattern: '#,##0' },
-                    textFormat: { bold: material.unitPrice ? true : false },
-                    verticalAlignment: 'MIDDLE',
-                  },
-                },
-                {
-                  userEnteredValue: material.total
-                    ? { numberValue: material.total }
-                    : { stringValue: '' },
-                  userEnteredFormat: {
-                    numberFormat: { type: 'NUMBER', pattern: '#,##0' },
-                    textFormat: { bold: material.total ? true : false },
-                    verticalAlignment: 'MIDDLE',
-                  },
-                },
-              ],
-            })
-          );
+          const materialsRows: sheets_v4.Schema$RowData[] = [];
+
+          formattedData.materials.forEach((material) => {
+            // --- New classification logic ---
+            const upperName = (material.name || '').trim().toUpperCase();
+
+            const nameIsNoteMerge = upperName.includes('GHI CHÚ');
+            const startsWithPlus = upperName.startsWith('+');
+
+            const isAccessoryRow = upperName.startsWith('PHỤ KIỆN ĐI KÈM');
+
+            const isGroupHeader = /^[IVXLCDM]+$/i.test(
+              String(material.no || '').trim()
+            );
+
+            const isNoteRow =
+              !isAccessoryRow &&
+              !isGroupHeader &&
+              (material.isNote ||
+                nameIsNoteMerge ||
+                startsWithPlus ||
+                ((!material.unit || material.unit === '') &&
+                  (material.quantity === null ||
+                    material.quantity === undefined ||
+                    material.quantity === 0) &&
+                  (!material.material || material.material === '')));
+
+            // 额外检查其他特殊行格式
+            const isSpecialRow =
+              (material.name && material.name.includes('-----')) ||
+              (material.name &&
+                material.name.toLowerCase().includes('tổng phụ')) ||
+              (material.name &&
+                material.name.toLowerCase().includes('tạm tính'));
+
+            // 所有需要特殊处理的行
+            const shouldFormatAsNote = isNoteRow || isSpecialRow;
+
+            if (shouldFormatAsNote) {
+              // 根据行类型调整格式
+              if (isSpecialRow) {
+                // 对于特殊行（如总计小计等），使用特殊格式
+                let bgColor = { red: 1, green: 1, blue: 0.9 }; // 默认浅黄色
+                let fontStyle = { bold: true, italic: false };
+                let alignment = 'CENTER';
+
+                // 可以根据不同类型的特殊行设置不同的样式
+                if (
+                  material.name &&
+                  material.name.toLowerCase().includes('tổng phụ')
+                ) {
+                  bgColor = { red: 0.9, green: 0.9, blue: 1 }; // 浅蓝色
+                  alignment = 'RIGHT';
+                } else if (
+                  material.name &&
+                  material.name.toLowerCase().includes('tạm tính')
+                ) {
+                  bgColor = { red: 0.9, green: 1, blue: 0.9 }; // 浅绿色
+                  alignment = 'RIGHT';
+                }
+
+                materialsRows.push({
+                  values: [
+                    {
+                      userEnteredValue: { stringValue: material.name || '' },
+                      userEnteredFormat: {
+                        textFormat: fontStyle,
+                        horizontalAlignment: alignment,
+                        verticalAlignment: 'MIDDLE',
+                        backgroundColor: bgColor,
+                      },
+                    },
+                    {},
+                    {},
+                    {},
+                    {},
+                    {},
+                  ],
+                });
+              } else {
+                // 原始备注行格式保持不变
+                materialsRows.push({
+                  values: [
+                    {
+                      userEnteredValue: { stringValue: material.name || '' },
+                      userEnteredFormat: {
+                        textFormat: { italic: true },
+                        horizontalAlignment: 'LEFT',
+                        verticalAlignment: 'MIDDLE',
+                        backgroundColor: { red: 1, green: 1, blue: 0.9 },
+                      },
+                    },
+                    {},
+                    {},
+                    {},
+                    {},
+                    {},
+                  ],
+                });
+              }
+            } else {
+              if (isAccessoryRow) {
+                // Accessory rows: blank numeric columns, distinct background color
+                const accessoryBg = { red: 1, green: 0.93, blue: 0.8 }; // light peach
+                materialsRows.push({
+                  values: [
+                    {
+                      userEnteredValue: { stringValue: '' }, // Blank STT
+                      userEnteredFormat: {
+                        backgroundColor: accessoryBg,
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: material.name || '' },
+                      userEnteredFormat: {
+                        backgroundColor: accessoryBg,
+                        horizontalAlignment: 'LEFT',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: {
+                        stringValue: material.material || '',
+                      },
+                      userEnteredFormat: {
+                        backgroundColor: accessoryBg,
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: material.unit || '' },
+                      userEnteredFormat: {
+                        backgroundColor: accessoryBg,
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: '' },
+                      userEnteredFormat: { backgroundColor: accessoryBg },
+                    }, // SL blank
+                    {
+                      userEnteredValue: { stringValue: '' },
+                      userEnteredFormat: { backgroundColor: accessoryBg },
+                    }, // Đơn giá blank
+                    {
+                      userEnteredValue: { stringValue: '' },
+                      userEnteredFormat: { backgroundColor: accessoryBg },
+                    }, // Thành tiền blank
+                  ],
+                });
+              } else if (isGroupHeader) {
+                // Roman numeral header rows: only STT shown, blank numeric columns, grey background
+                const headerBg = { red: 0.9, green: 0.9, blue: 0.9 };
+                materialsRows.push({
+                  values: [
+                    {
+                      userEnteredValue: { stringValue: String(material.no) },
+                      userEnteredFormat: {
+                        backgroundColor: headerBg,
+                        textFormat: { bold: true },
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: material.name || '' },
+                      userEnteredFormat: {
+                        backgroundColor: headerBg,
+                        textFormat: { bold: true },
+                        horizontalAlignment: 'LEFT',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: {
+                        stringValue: material.material || '',
+                      },
+                      userEnteredFormat: {
+                        backgroundColor: headerBg,
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: material.unit || '' },
+                      userEnteredFormat: {
+                        backgroundColor: headerBg,
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: '' },
+                      userEnteredFormat: { backgroundColor: headerBg },
+                    },
+                    {
+                      userEnteredValue: { stringValue: '' },
+                      userEnteredFormat: { backgroundColor: headerBg },
+                    },
+                    {
+                      userEnteredValue: { stringValue: '' },
+                      userEnteredFormat: { backgroundColor: headerBg },
+                    },
+                  ],
+                });
+              } else {
+                // Regular rows (unchanged logic)
+                materialsRows.push({
+                  values: [
+                    {
+                      userEnteredValue: {
+                        stringValue: material.no ? String(material.no) : '',
+                      },
+                      userEnteredFormat: {
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: material.name || '' },
+                      userEnteredFormat: {
+                        horizontalAlignment: 'LEFT',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: {
+                        stringValue: material.material || '',
+                      },
+                      userEnteredFormat: {
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: { stringValue: material.unit || '' },
+                      userEnteredFormat: {
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: {
+                        numberValue: material.quantity ?? 0,
+                      },
+                      userEnteredFormat: {
+                        horizontalAlignment: 'CENTER',
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: material.unitPrice
+                        ? { numberValue: material.unitPrice }
+                        : { stringValue: '' },
+                      userEnteredFormat: {
+                        numberFormat: { type: 'NUMBER', pattern: '#,##0' },
+                        textFormat: { bold: material.unitPrice ? true : false },
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                    {
+                      userEnteredValue: material.total
+                        ? { numberValue: material.total }
+                        : { stringValue: '' },
+                      userEnteredFormat: {
+                        numberFormat: { type: 'NUMBER', pattern: '#,##0' },
+                        textFormat: { bold: material.total ? true : false },
+                        verticalAlignment: 'MIDDLE',
+                      },
+                    },
+                  ],
+                });
+              }
+            }
+          });
           requests.push({
             updateCells: {
               rows: materialsRows,
@@ -480,6 +752,61 @@ export const generateExcelQuotation = functions
                 columnIndex: 0,
               },
             },
+          });
+
+          // Add merge requests for note rows and special rows between notes and total
+          formattedData.materials.forEach((material, index) => {
+            const nameIsNoteMerge = (material.name || '')
+              .toUpperCase()
+              .includes('GHI CHÚ');
+            const startsWithPlusMerge = (material.name || '')
+              .trim()
+              .startsWith('+');
+
+            // 新增逻辑： xác định phụ kiện & header
+            const upperNameMerge = (material.name || '').trim().toUpperCase();
+            const isAccessoryRowMerge =
+              upperNameMerge.startsWith('PHỤ KIỆN ĐI KÈM');
+            const isGroupHeaderMerge = /^[IVXLCDM]+$/i.test(
+              String(material.no || '').trim()
+            );
+
+            // 扩展合并条件，包括备注行和需要合并的特殊行，但 bỏ qua phụ kiện 和 header
+            const isNoteRowMerge =
+              material.isNote ||
+              nameIsNoteMerge ||
+              startsWithPlusMerge ||
+              ((!material.unit || material.unit === '') &&
+                (material.quantity === null ||
+                  material.quantity === undefined ||
+                  material.quantity === 0) &&
+                (!material.material || material.material === ''));
+
+            const shouldMergeFullRow =
+              (isNoteRowMerge ||
+                (material.name && material.name.includes('-----')) ||
+                (material.name &&
+                  material.name.toLowerCase().includes('tổng phụ')) ||
+                (material.name &&
+                  material.name.toLowerCase().includes('tạm tính'))) &&
+              !isAccessoryRowMerge &&
+              !isGroupHeaderMerge;
+
+            if (shouldMergeFullRow) {
+              const noteRowIndex = START_ROW_MATERIALS - 1 + index;
+              requests.push({
+                mergeCells: {
+                  range: {
+                    sheetId,
+                    startRowIndex: noteRowIndex,
+                    endRowIndex: noteRowIndex + 1,
+                    startColumnIndex: 0, // Column A
+                    endColumnIndex: 7, // Up to column G (7 columns total)
+                  },
+                  mergeType: 'MERGE_ALL',
+                },
+              });
+            }
           });
         }
 
@@ -848,6 +1175,25 @@ export const generateExcelQuotation = functions
           },
         });
 
+        // Thêm border cho khu vực ký của Bên Mua
+        requests.push({
+          updateBorders: {
+            range: {
+              sheetId,
+              startRowIndex: signatureRow - 1, // Bắt đầu từ header "Xác Nhận Bên Mua"
+              endRowIndex: signatureRow + 5, // Kết thúc sau khu vực để chữ ký
+              startColumnIndex: 0,
+              endColumnIndex: buyerSignatureEndCol,
+            },
+            top: { style: 'SOLID' },
+            bottom: { style: 'SOLID' },
+            left: { style: 'SOLID' },
+            right: { style: 'SOLID' },
+            innerHorizontal: { style: 'SOLID' },
+            innerVertical: { style: 'SOLID' },
+          },
+        });
+
         // Thiết lập "Xác Nhận Bên Bán"
         requests.push({
           mergeCells: {
@@ -919,7 +1265,7 @@ export const generateExcelQuotation = functions
                 values: [
                   {
                     userEnteredValue: {
-                      formulaValue: `=IMAGE("${SIGNATURE_IMAGE_URL}";1)`,
+                      formulaValue: `=A1`, // Xóa ảnh chữ ký và sử dụng reference trống A1
                     },
                     userEnteredFormat: {
                       horizontalAlignment: 'CENTER',
@@ -980,24 +1326,107 @@ export const generateExcelQuotation = functions
         });
 
         // **FIX 2 & 4: Kẻ bảng chính xác, loại bỏ border thừa**
-        // Kẻ bảng vật tư
-        requests.push({
-          updateBorders: {
-            range: {
-              sheetId,
-              startRowIndex: START_ROW_MATERIALS - 2,
-              endRowIndex: lastMaterialRow + 1,
-              startColumnIndex: 0,
-              endColumnIndex: summaryEndColumn,
+        // Instead of one global border, apply borders individually for each row
+        // to correctly handle note rows (which should not have innerVertical borders)
+        if (formattedData.materials.length > 0) {
+          // First apply border to the header row
+          requests.push({
+            updateBorders: {
+              range: {
+                sheetId,
+                startRowIndex: START_ROW_MATERIALS - 2, // Header row
+                endRowIndex: START_ROW_MATERIALS - 1,
+                startColumnIndex: 0,
+                endColumnIndex: summaryEndColumn,
+              },
+              top: { style: 'SOLID' },
+              bottom: { style: 'SOLID' },
+              left: { style: 'SOLID' },
+              right: { style: 'SOLID' },
+              innerVertical: { style: 'SOLID' },
             },
-            top: { style: 'SOLID' },
-            bottom: { style: 'SOLID' },
-            left: { style: 'SOLID' },
-            right: { style: 'SOLID' },
-            innerHorizontal: { style: 'SOLID' },
-            innerVertical: { style: 'SOLID' },
-          },
-        });
+          });
+
+          // Then apply borders for each material row individually
+          formattedData.materials.forEach((material, index) => {
+            const rowStartIndex = START_ROW_MATERIALS - 1 + index;
+            const rowEndIndex = rowStartIndex + 1;
+
+            const nameIsNoteBorder = (material.name || '')
+              .toUpperCase()
+              .includes('GHI CHÚ');
+            const startsWithPlusBorder = (material.name || '')
+              .trim()
+              .startsWith('+');
+            // (legacy note row detection removed as it's no longer required)
+
+            const upperNameBorder = (material.name || '').trim().toUpperCase();
+            const isAccessoryRowBorder =
+              upperNameBorder.startsWith('PHỤ KIỆN ĐI KÈM');
+            const isGroupHeaderBorder = /^[IVXLCDM]+$/i.test(
+              String(material.no || '').trim()
+            );
+
+            const isNoteRowBorder =
+              material.isNote ||
+              nameIsNoteBorder ||
+              startsWithPlusBorder ||
+              ((!material.unit || material.unit === '') &&
+                (material.quantity === null ||
+                  material.quantity === undefined ||
+                  material.quantity === 0) &&
+                (!material.material || material.material === ''));
+
+            const shouldMergeForBorder =
+              (isNoteRowBorder ||
+                (material.name && material.name.includes('-----')) ||
+                (material.name &&
+                  material.name.toLowerCase().includes('tổng phụ')) ||
+                (material.name &&
+                  material.name.toLowerCase().includes('tạm tính'))) &&
+              !isAccessoryRowBorder &&
+              !isGroupHeaderBorder;
+
+            if (shouldMergeForBorder) {
+              // For note rows, only apply outer borders (no inner vertical borders)
+              requests.push({
+                updateBorders: {
+                  range: {
+                    sheetId,
+                    startRowIndex: rowStartIndex,
+                    endRowIndex: rowEndIndex,
+                    startColumnIndex: 0,
+                    endColumnIndex: summaryEndColumn,
+                  },
+                  top: { style: 'SOLID' },
+                  bottom: { style: 'SOLID' },
+                  left: { style: 'SOLID' },
+                  right: { style: 'SOLID' },
+                  // No innerVertical for note rows
+                },
+              });
+            } else {
+              // For regular rows, apply full borders including inner vertical lines
+              requests.push({
+                updateBorders: {
+                  range: {
+                    sheetId,
+                    startRowIndex: rowStartIndex,
+                    endRowIndex: rowEndIndex,
+                    startColumnIndex: 0,
+                    endColumnIndex: summaryEndColumn,
+                  },
+                  top: { style: 'SOLID' },
+                  bottom: { style: 'SOLID' },
+                  left: { style: 'SOLID' },
+                  right: { style: 'SOLID' },
+                  innerVertical: { style: 'SOLID' },
+                },
+              });
+            }
+          });
+        }
+
         // Kẻ bảng tổng kết
         requests.push({
           updateBorders: {
@@ -1015,6 +1444,7 @@ export const generateExcelQuotation = functions
             innerHorizontal: { style: 'SOLID' },
           },
         });
+
         // Kẻ bảng điều khoản
         requests.push({
           updateBorders: {
@@ -1031,6 +1461,7 @@ export const generateExcelQuotation = functions
             right: { style: 'SOLID' },
           },
         });
+
         // Kẻ bảng chữ ký (quan trọng: không kẻ innerVertical)
         requests.push({
           updateBorders: {
@@ -1079,7 +1510,11 @@ export const generateExcelQuotation = functions
           fields: 'webViewLink',
         });
 
-        return { success: true, excelUrl: fileResponse.data.webViewLink };
+        return {
+          success: true,
+          excelUrl: fileResponse.data.webViewLink,
+          spreadsheetId: newFileId, // Thêm spreadsheetId vào kết quả trả về
+        };
       } catch (error: any) {
         console.error(
           'Lỗi khi tạo báo giá:',

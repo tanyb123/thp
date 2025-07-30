@@ -1,0 +1,276 @@
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\attendanceService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\customerService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\googleDriveService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\inventoryService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\notificationService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\projectService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\proposalService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\purchaseOrderService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\quotationService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\api\supplierService.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\components\InventoryItemCard.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\components\ProcessPickerModal.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\components\StatusIndicator.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\components\StyledTextInput.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\components\SupplierPickerModal.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\components\TaskCard.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\config\authConfig.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\config\colors.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\config\firebaseConfig.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\contexts\AuthContext.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\contexts\ThemeContext.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\hooks\useContractGenerator.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\hooks\useInventory.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\hooks\useMaterialsProcessor.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\hooks\usePOReceipt.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\hooks\useProjectDetails.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\hooks\usePurchaseOrderGenerator.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\hooks\useQuotationGenerator.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\modules\inventory\screens\MaterialListScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\navigation\AppNavigator.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\AccountScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\AddCustomerScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\AddInventoryItemScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\AddProjectScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\AddSupplierScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\AttendanceScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\ConfirmPOReceiptScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\CreatePOScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\CreateProposalScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\CustomerDetailScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\CustomerManagementScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\DebtDashboard.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\DirectorDashboardScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\EditCustomerScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\EditInventoryItemScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\EditProjectScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\EditSupplierScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\FinalizeQuotationScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\HomeScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\InventoryItemDetailScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\InventoryReportScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\InventoryScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\InventoryTransactionScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\LoginScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\ManualQuotationScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\MaterialPurchaseScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\NotificationsScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\POListScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\ProjectDetailScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\ProjectManagementScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\ProjectsScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\ProposalListScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\QuotationScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\StageDetailScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\SupplierDetailScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\SupplierManagementScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\TaskDetailScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\TaskReportScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\screens\UserManagementScreen.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\src\utils\taskHelpers.js
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\config.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\contractGenerator.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\createProjectFolders.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\financialProcessor.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\index.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\inventoryManager.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\materialImporter.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\pdfGenerator.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\poExcelGenerator.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\poReceiptConfirmation.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\projectTriggers.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\quotationExcelGenerator.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\savePOReceiptConfirmation.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\scheduledFunctions.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\taskTriggers.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\uploadFileToDrive.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\uploadFileToDriveUser.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\excelGenerator\index.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\excelGenerator\templateGenerator.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\excelGenerator\types.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\types\workflow.ts
+==================================================
+==================================================
+Ðu?ng d?n file: C:\Users\Admin\Downloads\thpapp\functions\src\utils\driveClient.ts
+==================================================

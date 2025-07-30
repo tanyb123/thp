@@ -1,5 +1,10 @@
 //src/screens/ProjectDetailScreen.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useLayoutEffect,
+} from 'react';
 import {
   View,
   Text,
@@ -12,16 +17,21 @@ import {
   TextInput,
   ActionSheetIOS,
   Platform,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   updateTaskStatus,
   updateCustomTask,
   deleteProject,
+  updateWorkflowStageStatus,
 } from '../api/projectService';
 import { useAuth } from '../contexts/AuthContext';
 import StatusIndicator from '../components/StatusIndicator';
 import { useProjectDetails } from '../hooks/useProjectDetails';
+import * as Clipboard from 'expo-clipboard';
+import ProjectService from '../api/projectService';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 // Định nghĩa danh sách công việc cố định
 const TASK_DEFINITIONS = [
@@ -50,12 +60,18 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   // State cho quản lý công việc
   const [customTaskModalVisible, setCustomTaskModalVisible] = useState(false);
   const [customTaskName, setCustomTaskName] = useState('');
+  const [copySuccess, setCopySuccess] = useState(false);
 
   useEffect(() => {
     if (project?.tasks?.other?.name) {
       setCustomTaskName(project.tasks.other.name);
     }
   }, [project]);
+
+  // Ẩn header mặc định để tránh trùng lặp nút back / tiêu đề
+  useLayoutEffect(() => {
+    navigation.setOptions({ headerShown: false });
+  }, [navigation]);
 
   // Hàm cập nhật trạng thái công việc
   const handleUpdateTaskStatus = async (taskKey) => {
@@ -170,6 +186,86 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     );
   };
 
+  // Xử lý khi chọn khách hàng
+  const handleCopyDriveLink = async () => {
+    if (project?.driveFolderUrl) {
+      try {
+        await Clipboard.setStringAsync(project.driveFolderUrl);
+        setCopySuccess(true);
+        setTimeout(() => setCopySuccess(false), 2000);
+      } catch (err) {
+        Alert.alert('Lỗi', 'Không thể copy đường dẫn.');
+      }
+    } else {
+      Alert.alert(
+        'Thông báo',
+        'Không có đường dẫn Drive để copy. Bạn có muốn tạo thư mục Drive cho dự án này không?',
+        [
+          {
+            text: 'Không',
+            style: 'cancel',
+          },
+          {
+            text: 'Tạo thư mục',
+            onPress: handleCreateDriveFolders,
+          },
+        ]
+      );
+    }
+  };
+
+  // Hàm tạo thư mục Drive cho dự án
+  const handleCreateDriveFolders = async () => {
+    try {
+      // Kiểm tra đã đăng nhập Google chưa
+      const isSignedIn = await GoogleSignin.isSignedIn();
+      if (!isSignedIn) {
+        Alert.alert(
+          'Cần đăng nhập Google',
+          'Bạn cần đăng nhập tài khoản Google để tạo thư mục Drive'
+        );
+        return;
+      }
+
+      // Lấy token
+      const { accessToken } = await GoogleSignin.getTokens();
+      if (!accessToken) {
+        Alert.alert('Lỗi', 'Không thể lấy thông tin xác thực Google');
+        return;
+      }
+
+      // Hiện thông báo đang tạo
+      Alert.alert('Thông báo', 'Đang tạo thư mục Drive, vui lòng đợi...');
+
+      // Gọi Cloud Function
+      const result = await ProjectService.createProjectFolders(
+        projectId,
+        accessToken
+      );
+
+      if (result) {
+        fetchProjectData(); // Làm mới dữ liệu dự án
+        Alert.alert('Thành công', 'Đã tạo thư mục Drive cho dự án thành công');
+      }
+    } catch (err) {
+      console.error('Lỗi tạo thư mục Drive:', err);
+      Alert.alert('Lỗi', 'Không thể tạo thư mục Drive: ' + err.message);
+    }
+  };
+
+  const handleStagePress = (stage) => {
+    navigation.navigate('StageDetail', { projectId, stage });
+  };
+
+  const changeStatus = async (stage, status) => {
+    try {
+      await updateWorkflowStageStatus(projectId, stage.stageId, status);
+      fetchProjectData();
+    } catch (e) {
+      Alert.alert('Lỗi', e.message);
+    }
+  };
+
   // Hiển thị khi đang tải dữ liệu
   if (loading) {
     return (
@@ -239,9 +335,9 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       case 'completed':
         return '#4CAF50';
       case 'in-progress':
-        return '#2196F3';
+        return '#FFD54F';
       case 'pending':
-        return '#FF9800';
+        return '#9E9E9E';
       case 'cancelled':
         return '#F44336';
       default:
@@ -359,6 +455,85 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             <Ionicons name="calculator-outline" size={24} color="#fff" />
             <Text style={styles.quotationButtonText}>Quản lý Báo giá</Text>
           </TouchableOpacity>
+
+          {/* Nút quản lý mua vật tư - chỉ hiện khi dự án đang thực hiện */}
+          {project.status === 'in-progress' && (
+            <TouchableOpacity
+              style={[
+                styles.quotationButton,
+                { backgroundColor: '#4CAF50', marginTop: 8 },
+              ]}
+              onPress={() =>
+                navigation.navigate('MaterialPurchase', {
+                  projectId: project.id,
+                  projectName: project.name,
+                  project: project,
+                })
+              }
+            >
+              <Ionicons name="cart-outline" size={24} color="#fff" />
+              <Text style={styles.quotationButtonText}>Quản lý Mua Vật Tư</Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[
+              styles.quotationButton,
+              { backgroundColor: '#FF9800', marginTop: 8 },
+            ]}
+            onPress={() =>
+              navigation.navigate('CreateDeliveryNote', {
+                projectId: project.id,
+                materials: project.materials, // Pass materials if available
+              })
+            }
+          >
+            <Ionicons name="document-text-outline" size={24} color="#fff" />
+            <Text style={styles.quotationButtonText}>
+              Tạo Biên Bản Giao Hàng
+            </Text>
+          </TouchableOpacity>
+
+          {/* Nút mở thư mục dự án trên Google Drive */}
+          {project.driveFolderUrl ? (
+            <View style={styles.driveLinkContainer}>
+              <TouchableOpacity
+                style={styles.driveLinkButton}
+                onPress={() => {
+                  const { Linking } = require('react-native');
+                  Linking.openURL(project.driveFolderUrl).catch(() =>
+                    Alert.alert('Lỗi', 'Không thể mở thư mục Google Drive')
+                  );
+                }}
+              >
+                <Ionicons
+                  name="folder-open"
+                  size={18}
+                  color="#fff"
+                  style={styles.buttonIcon}
+                />
+                <Text style={styles.driveLinkText}>Mở thư mục Drive</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.shareButton,
+                  { backgroundColor: copySuccess ? '#4CAF50' : '#2980B9' },
+                ]}
+                onPress={handleCopyDriveLink}
+              >
+                <Ionicons
+                  name={copySuccess ? 'checkmark' : 'copy'}
+                  size={20}
+                  color="#fff"
+                />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={styles.driveNotAvailable}>
+              Thư mục Google Drive đang được tạo...
+            </Text>
+          )}
         </View>
 
         {/* Phần thông tin khách hàng và các thông tin khác */}
@@ -413,6 +588,30 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             </Text>
           </View>
 
+          {/* Hiển thị đường dẫn Drive */}
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Google Drive:</Text>
+            {project.driveFolderUrl ? (
+              <TouchableOpacity
+                style={styles.driveLink}
+                onPress={handleCopyDriveLink}
+              >
+                <Ionicons name="link" size={16} color="#0066cc" />
+                <Text style={styles.driveLinkText}>
+                  {copySuccess ? 'Đã copy đường dẫn!' : 'Copy đường dẫn'}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.createFolderButton}
+                onPress={handleCreateDriveFolders}
+              >
+                <Ionicons name="cloud-upload" size={16} color="#0066cc" />
+                <Text style={styles.createFolderText}>Tạo thư mục Drive</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Ngày kết thúc:</Text>
             <Text style={styles.infoValue}>
@@ -457,132 +656,43 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           )}
         </View>
 
-        {/* Phần danh sách công việc */}
-        <View style={styles.infoSection}>
-          <Text style={styles.sectionTitle}>Hạng mục công việc</Text>
-
-          {!project?.tasks ? (
-            <View style={styles.emptyTasksContainer}>
-              <Ionicons name="list-outline" size={40} color="#ccc" />
-              <Text style={styles.emptyTasksText}>
-                Không có thông tin hạng mục công việc
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.tasksBoard}>
-              {TASK_DEFINITIONS.map((taskDef) => {
-                const taskData = project.tasks[taskDef.key];
-
-                // Nếu là công việc "other" và chưa có tên
-                if (
-                  taskDef.key === 'other' &&
-                  (!taskData?.name || taskData.name === '')
-                ) {
-                  return (
-                    <TouchableOpacity
-                      key={taskDef.key}
-                      style={styles.taskRow}
-                      onPress={() => setCustomTaskModalVisible(true)}
-                    >
-                      <StatusIndicator
-                        status={taskData?.status || 'pending'}
-                        size={18}
-                      />
-                      <View style={styles.taskContent}>
-                        <Text style={styles.taskNamePlaceholder}>
-                          Thêm công việc khác...
-                        </Text>
-                      </View>
-                      <Ionicons
-                        name="add-circle-outline"
-                        size={24}
-                        color="#0066cc"
-                      />
-                    </TouchableOpacity>
-                  );
-                }
-
-                // Nếu là công việc "other" và đã có tên
-                if (taskDef.key === 'other' && taskData?.name) {
-                  return (
-                    <TouchableOpacity
-                      key={taskDef.key}
-                      style={styles.taskRow}
-                      onPress={() => handleUpdateTaskStatus(taskDef.key)}
-                      activeOpacity={0.7}
-                    >
-                      <StatusIndicator
-                        status={taskData?.status || 'pending'}
-                        size={18}
-                      />
-                      <View style={styles.taskContent}>
-                        <Text
-                          style={styles.taskName}
-                          numberOfLines={1}
-                          ellipsizeMode="tail"
-                        >
-                          {taskData.name}
-                        </Text>
-                        <Text
-                          style={[
-                            styles.taskStatusText,
-                            { color: getTaskStatusColor(taskData?.status) },
-                          ]}
-                        >
-                          {getTaskStatusLabel(taskData?.status)}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.editTaskButton}
-                        onPress={(e) => {
-                          e.stopPropagation(); // Ngăn sự kiện press của cha
-                          setCustomTaskModalVisible(true);
-                        }}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                      >
-                        <Ionicons
-                          name="create-outline"
-                          size={20}
-                          color="#0066cc"
-                        />
-                      </TouchableOpacity>
-                    </TouchableOpacity>
-                  );
-                }
-
-                // Các công việc thông thường
+        {/* Quy trình Sản xuất */}
+        <View style={styles.tasksBoard}>
+          <Text style={styles.sectionTitle}>Quy trình Sản xuất</Text>
+          {project.workflowStages?.length ? (
+            project.workflowStages
+              .sort((a, b) => a.order - b.order)
+              .map((item) => {
+                const color =
+                  item.status === 'completed'
+                    ? '#4CAF50'
+                    : item.status === 'in_progress'
+                    ? '#FFD54F'
+                    : '#9E9E9E';
                 return (
                   <TouchableOpacity
-                    key={taskDef.key}
+                    key={item.stageId}
                     style={styles.taskRow}
-                    onPress={() => handleUpdateTaskStatus(taskDef.key)}
-                    activeOpacity={0.7}
+                    onPress={() => handleStagePress(item)}
                   >
-                    <StatusIndicator
-                      status={taskData?.status || 'pending'}
-                      size={18}
-                    />
-                    <View style={styles.taskContent}>
-                      <Text
-                        style={styles.taskName}
-                        numberOfLines={1}
-                        ellipsizeMode="tail"
-                      >
-                        {taskDef.label}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.taskStatusText,
-                          { color: getTaskStatusColor(taskData?.status) },
-                        ]}
-                      >
-                        {getTaskStatusLabel(taskData?.status)}
-                      </Text>
-                    </View>
+                    <Text style={styles.taskName}>{item.processName}</Text>
+                    <Text
+                      style={[
+                        styles.taskStatusText,
+                        { backgroundColor: color + '33', color: color },
+                      ]}
+                    >
+                      {item.status === 'completed'
+                        ? 'Hoàn thành'
+                        : item.status === 'in_progress'
+                        ? 'Đang làm'
+                        : 'Chờ xử lý'}
+                    </Text>
                   </TouchableOpacity>
                 );
-              })}
-            </View>
+              })
+          ) : (
+            <Text style={styles.emptyTasksText}>Chưa có công đoạn.</Text>
           )}
         </View>
       </ScrollView>
@@ -830,15 +940,9 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   tasksBoard: {
-    marginTop: 10,
     backgroundColor: '#fff',
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    overflow: 'hidden',
+    padding: 16,
+    marginBottom: 12,
   },
   taskRow: {
     flexDirection: 'row',
@@ -956,12 +1060,72 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 14,
     borderRadius: 8,
+    marginBottom: 10,
   },
   quotationButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 10,
+  },
+  driveLinkContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  driveLinkButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2196F3',
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  buttonIcon: {
+    marginRight: 10,
+  },
+  driveLinkText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  shareButton: {
+    marginLeft: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  driveNotAvailable: {
+    textAlign: 'center',
+    color: '#888',
+    fontSize: 14,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  driveLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  createFolderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  createFolderText: {
+    marginLeft: 8,
+    color: '#0066cc',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 

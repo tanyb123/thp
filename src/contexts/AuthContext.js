@@ -303,6 +303,7 @@ export const AuthProvider = ({ children }) => {
   const value = {
     currentUser,
     userRole,
+    user: currentUser,
     loadingAuth,
     error,
     isSignedIn: !!currentUser,

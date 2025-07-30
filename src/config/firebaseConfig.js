@@ -10,6 +10,12 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+// Import Firebase compat to support legacy code that still uses the namespaced API (e.g., firebase.firestore())
+import firebaseCompat from 'firebase/compat/app';
+import 'firebase/compat/firestore';
+import 'firebase/compat/auth';
+import 'firebase/compat/storage';
+import 'firebase/compat/functions';
 
 // Firebase configuration object
 const firebaseConfig = {
@@ -51,6 +57,13 @@ const functions = getFunctions(app, 'asia-southeast1');
 
 console.log('Firebase services handled.');
 
+// Initialize firebase compat (namespaced) app if not already initialized
+if (!firebaseCompat.apps.length) {
+  firebaseCompat.initializeApp(firebaseConfig);
+}
+
+// Firestore and other services are now accessible via firebaseCompat.firestore(), etc.
+
 // Export the initialized services
-export { auth, db, storage, functions };
+export { auth, db, storage, functions, firebaseCompat as firebase };
 export default app;

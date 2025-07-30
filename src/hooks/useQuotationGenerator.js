@@ -3,7 +3,11 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { saveQuotation } from '../api/quotationService';
+
+// Import hook quản lý kho
+import useInventory from './useInventory';
 
 /**
  * Custom hook for generating quotations in Excel format
@@ -13,6 +17,11 @@ import { saveQuotation } from '../api/quotationService';
 const useQuotationGenerator = ({ projectId, customerData, materials }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [excelUrl, setExcelUrl] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
+
+  // Trong hook useQuotationGenerator, thêm đoạn code sau
+  const { inventoryItems, fetchInventoryItems } = useInventory();
 
   /**
    * Formats quotation data for Excel export according to the specified template
@@ -71,15 +80,71 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
 
       // Materials will be added from row 8 onwards
       materials: materials.map((item, index) => {
-        // Tính đơn giá bằng cách nhân đơn giá/kg với khối lượng
-        const weight = item.weight || 0;
-        const unitPricePerKg = item.unitPrice || item.price || 0;
-        const calculatedUnitPrice = weight * unitPricePerKg;
+        // Handle note rows differently. If isNote flag is already true OR
+        // unit & quantity are both empty/zero and material field empty, treat as note.
+        const startsWithPlus = (item.name || '').trim().startsWith('+');
+        const nameIsNote = (item.name || '').toUpperCase().includes('GHI CHÚ');
+        const inferredNote =
+          item.isNote ||
+          nameIsNote ||
+          startsWithPlus ||
+          ((!item.unit || item.unit === '') &&
+            (!item.material || item.material === '') &&
+            (item.quantity === null ||
+              item.quantity === undefined ||
+              item.quantity === 0));
+        if (inferredNote) {
+          return {
+            isNote: true,
+            no: null, // No sequence number for notes
+            stt: null,
+            name: item.name || '',
+            material: '', // No material for notes
+            unit: '', // No unit for notes
+            quantity: null, // No quantity for notes
+            unitPrice: null,
+            total: null,
+            weight: null,
+          };
+        }
+
+        const weight = item.weight ?? 0;
+        const inputUnitPrice = item.unitPrice || item.price || 0;
+
+        // Nếu không có trọng lượng (báo giá thủ công) -> dùng đơn giá trực tiếp
+        const calculatedUnitPrice =
+          weight && weight > 0 ? weight * inputUnitPrice : inputUnitPrice;
+
         const quantity = item.quantity || 0;
         const totalPrice = quantity * calculatedUnitPrice;
 
+        // Đảm bảo giá trị STT được lưu đúng định dạng
+        console.log(
+          `Formatting Item STT: ${item.stt}, Type: ${typeof item.stt}`
+        );
+
+        // Xác định giá trị STT cuối cùng
+        let finalStt = '';
+        if (
+          item.stt !== undefined &&
+          item.stt !== null &&
+          String(item.stt).trim() !== ''
+        ) {
+          finalStt = String(item.stt).trim();
+        } else if (
+          item.no !== undefined &&
+          item.no !== null &&
+          String(item.no).trim() !== ''
+        ) {
+          finalStt = String(item.no).trim();
+        } else {
+          finalStt = String(index + 1);
+        }
+
         return {
-          no: item.no || index + 1,
+          isNote: false,
+          no: finalStt,
+          stt: finalStt, // Đảm bảo stt cũng được gán giá trị
           name: item.name || '',
           material: item.material || item.type || '',
           unit: item.unit || '',
@@ -115,7 +180,17 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       // Format the data for Excel export
       const formattedData = formatQuotationDataForExcel(quotationData);
 
-      // Call cloud function to generate Excel file
+      // Ensure we have a Google access token
+      const signedIn = await GoogleSignin.isSignedIn();
+      if (!signedIn) {
+        await GoogleSignin.signIn();
+      }
+      const { accessToken } = await GoogleSignin.getTokens();
+      if (!accessToken) {
+        throw new Error('Không thể lấy Google access token');
+      }
+
+      // Call cloud function to generate Excel file (with user token)
       const functions = getFunctions(undefined, 'asia-southeast1');
       const generateExcelFunc = httpsCallable(
         functions,
@@ -124,27 +199,80 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       const result = await generateExcelFunc({
         formattedData,
         projectId,
+        accessToken,
       });
 
       // Get the Excel file URL
-      const { excelUrl } = result.data;
+      const { excelUrl, spreadsheetId } = result.data;
       setExcelUrl(excelUrl);
 
-      // Save quotation metadata to Firestore
+      // Automatically convert to PDF
+      const pdfUrl = await convertExcelToPdf(
+        spreadsheetId,
+        quotationData.quotationNumber
+      );
+
+      // Save quotation metadata to Firestore with both URLs
       await saveQuotation(projectId, {
         ...quotationData,
         excelUrl,
-        pdfUrl: excelUrl, // Using Excel URL as PDF URL to pass validation
+        pdfUrl: pdfUrl || excelUrl, // Using the PDF URL if available, otherwise Excel URL
         createdBy: quotationData.createdBy,
       });
 
-      return excelUrl;
+      return { excelUrl, pdfUrl, spreadsheetId };
     } catch (error) {
       console.error('Error generating Excel quotation:', error);
       Alert.alert('Lỗi', 'Không thể tạo báo giá Excel: ' + error.message);
       throw error;
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  /**
+   * Convert Excel to PDF using the new Cloud Function
+   * @param {string} spreadsheetId - ID of the Google Sheet to convert
+   * @param {string} fileName - Name for the generated PDF file
+   * @returns {Promise<string>} URL to the generated PDF file
+   */
+  const convertExcelToPdf = async (spreadsheetId, fileName) => {
+    if (!spreadsheetId) {
+      console.error('Missing spreadsheetId for PDF conversion');
+      return null;
+    }
+
+    try {
+      setIsPdfLoading(true);
+
+      // Get Google access token
+      const { accessToken } = await GoogleSignin.getTokens();
+
+      // Call the new cloud function to export sheet to PDF
+      const functions = getFunctions(); // us-central1 default
+      const exportToPdfFunc = httpsCallable(functions, 'exportSheetToPdf');
+
+      const result = await exportToPdfFunc({
+        spreadsheetId,
+        fileName,
+        projectId,
+        accessToken,
+      });
+
+      // Get the PDF file URL
+      const { pdfUrl } = result.data;
+      setPdfUrl(pdfUrl);
+
+      return pdfUrl;
+    } catch (error) {
+      console.error('Error converting Excel to PDF:', error);
+      Alert.alert(
+        'Thông báo',
+        'Đã tạo báo giá Excel thành công, nhưng không thể chuyển đổi sang PDF. Bạn vẫn có thể chia sẻ file Excel.'
+      );
+      return null;
+    } finally {
+      setIsPdfLoading(false);
     }
   };
 
@@ -172,11 +300,83 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
     }
   };
 
+  /**
+   * Share the generated PDF file
+   */
+  const sharePdfQuotation = async () => {
+    try {
+      if (!pdfUrl) {
+        Alert.alert('Lỗi', 'Chưa có file báo giá PDF để chia sẻ.');
+        return;
+      }
+
+      const fileUri = `${FileSystem.documentDirectory}quotation.pdf`;
+      const downloadResult = await FileSystem.downloadAsync(pdfUrl, fileUri);
+
+      if (downloadResult.status === 200) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/pdf',
+          UTI: 'com.adobe.pdf',
+        });
+      } else {
+        Alert.alert('Lỗi', 'Không thể tải file báo giá PDF.');
+      }
+    } catch (error) {
+      console.error('Error sharing PDF quotation:', error);
+      Alert.alert('Lỗi', 'Không thể chia sẻ báo giá PDF: ' + error.message);
+    }
+  };
+
+  // Thêm hàm tìm kiếm vật tư từ kho
+  const searchInventoryItems = async (keyword) => {
+    if (!inventoryItems.length) {
+      await fetchInventoryItems();
+    }
+
+    if (!keyword) return [];
+
+    const normalizedKeyword = keyword.toLowerCase().trim();
+    return inventoryItems.filter(
+      (item) =>
+        item.name?.toLowerCase().includes(normalizedKeyword) ||
+        item.code?.toLowerCase().includes(normalizedKeyword) ||
+        item.material?.toLowerCase().includes(normalizedKeyword)
+    );
+  };
+
+  // Thêm hàm áp dụng vật tư từ kho vào báo giá
+  const applyInventoryItemToQuotation = (item) => {
+    if (!item) return;
+
+    const newMaterial = {
+      name: item.name,
+      material: item.material || '',
+      unit: item.unit || '',
+      quantity: 1,
+      unitPrice: item.price || 0,
+      weight: item.weight || 0,
+      total: 1 * (item.price || 0),
+    };
+
+    // Assuming 'materials' state is managed by the parent component or passed as a prop
+    // For now, we'll just add it to the current materials array for display
+    // In a real app, you'd update the 'materials' prop or state
+    // setMaterials(prevMaterials => [...prevMaterials, newMaterial]); // This line would cause an error if 'materials' is not a state variable
+    // calculateTotals([...materials, newMaterial]); // This line would cause an error if 'materials' is not a state variable
+  };
+
   return {
     generateExcelQuotation,
+    convertExcelToPdf,
     shareExcelQuotation,
+    sharePdfQuotation,
     isLoading,
+    isPdfLoading,
     excelUrl,
+    pdfUrl,
+    searchInventoryItems,
+    applyInventoryItemToQuotation,
+    inventoryItems,
   };
 };
 

@@ -8,6 +8,8 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Linking,
+  Share,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { doc, getDoc } from 'firebase/firestore';
@@ -31,6 +33,7 @@ const TaskDetailScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [shareSuccess, setShareSuccess] = useState(false);
 
   useEffect(() => {
     const fetchProjectDetails = async () => {
@@ -69,6 +72,35 @@ const TaskDetailScreen = () => {
       );
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleOpenDriveFolder = () => {
+    if (project?.driveFolderUrl) {
+      Linking.openURL(project.driveFolderUrl);
+    } else {
+      Alert.alert('Thông báo', 'Không tìm thấy thư mục Drive cho dự án này.');
+    }
+  };
+
+  const handleShareDriveLink = async () => {
+    if (project?.driveFolderUrl) {
+      try {
+        await Share.share({
+          message: project.driveFolderUrl,
+        });
+        setShareSuccess(true);
+
+        // Reset success message after 2 seconds
+        setTimeout(() => {
+          setShareSuccess(false);
+        }, 2000);
+      } catch (error) {
+        console.error('Error sharing link:', error);
+        Alert.alert('Lỗi', 'Không thể chia sẻ đường dẫn.');
+      }
+    } else {
+      Alert.alert('Thông báo', 'Không có đường dẫn Drive để chia sẻ.');
     }
   };
 
@@ -141,6 +173,45 @@ const TaskDetailScreen = () => {
           <Text style={[styles.detailText, { color: theme.text }]}>
             Khách hàng: {project?.customerName || 'Không có'}
           </Text>
+
+          {project?.driveFolderUrl && (
+            <View style={styles.driveLinkContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.driveLinkButton,
+                  { backgroundColor: theme.primary },
+                ]}
+                onPress={handleOpenDriveFolder}
+              >
+                <Ionicons
+                  name="folder-open"
+                  size={18}
+                  color="#fff"
+                  style={styles.buttonIcon}
+                />
+                <Text style={styles.driveLinkText}>Mở thư mục Drive</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.shareButton,
+                  {
+                    backgroundColor: shareSuccess
+                      ? theme.success
+                      : theme.secondary,
+                  },
+                ]}
+                onPress={handleShareDriveLink}
+                accessibilityLabel="Chia sẻ đường dẫn thư mục"
+              >
+                <Ionicons
+                  name={shareSuccess ? 'checkmark' : 'share'}
+                  size={20}
+                  color="#fff"
+                />
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </ScrollView>
 
@@ -211,6 +282,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  driveLinkContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  driveLinkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flex: 1,
+  },
+  driveLinkText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  buttonIcon: {
+    marginRight: 8,
+  },
+  shareButton: {
+    marginLeft: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
 
 export default TaskDetailScreen;

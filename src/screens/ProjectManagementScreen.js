@@ -15,7 +15,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getProjects } from '../api/projectService';
+import { getProjectsByStatus } from '../api/projectService';
 import { useTheme } from '../contexts/ThemeContext';
 
 // Component hiển thị từng dự án trong danh sách
@@ -27,9 +27,9 @@ const ProjectListItem = ({ project, onPress }) => {
       case 'completed':
         return '#4CAF50'; // xanh lá
       case 'in-progress':
-        return '#2196F3'; // xanh dương
+        return '#FFD54F'; // vàng nhạt
       case 'pending':
-        return '#FF9800'; // cam
+        return theme.textSecondary; // gray
       case 'cancelled':
         return '#F44336'; // đỏ
       default:
@@ -141,12 +141,50 @@ const ProjectManagementScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredProjects, setFilteredProjects] = useState([]);
 
+  // Status filters
+  const FILTERS = [
+    {
+      key: 'pending',
+      label: 'Chờ xử lý',
+      color: 'transparent',
+      textColor: theme.text,
+    },
+    {
+      key: 'in-progress',
+      label: 'Đang thực hiện',
+      color: '#FFF9C4',
+      textColor: theme.text,
+    },
+    {
+      key: 'completed',
+      label: 'Đã hoàn thành',
+      color: '#4CAF50',
+      textColor: '#fff',
+    },
+  ];
+
+  const [activeFilter, setActiveFilter] = useState('pending');
+  const [cacheByStatus, setCacheByStatus] = useState({});
+
   // Hàm tải danh sách dự án
-  const loadProjects = async () => {
+  const loadProjectsByStatus = async (statusKey, forceRefresh = false) => {
     try {
       setLoading(true);
       setError(null);
-      const data = await getProjects();
+
+      if (!forceRefresh && cacheByStatus[statusKey]) {
+        setProjects(cacheByStatus[statusKey]);
+        return;
+      }
+
+      if (forceRefresh) {
+        setCacheByStatus((prev) => ({ ...prev, [statusKey]: undefined }));
+      }
+
+      const data = await getProjectsByStatus(statusKey);
+
+      // Lưu cache mới
+      setCacheByStatus((prev) => ({ ...prev, [statusKey]: data }));
 
       // Thêm animation khi cập nhật danh sách
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -164,15 +202,15 @@ const ProjectManagementScreen = ({ navigation }) => {
 
   // Tải dữ liệu khi màn hình được mở
   useEffect(() => {
-    loadProjects();
+    loadProjectsByStatus(activeFilter);
 
     // Thêm listener để làm mới danh sách khi quay lại từ màn hình khác
     const unsubscribe = navigation.addListener('focus', () => {
-      loadProjects();
+      loadProjectsByStatus(activeFilter, true); // force refresh để cập nhật nếu trạng thái dự án thay đổi
     });
 
     return unsubscribe;
-  }, [navigation]);
+  }, [navigation, activeFilter]);
 
   // Lọc danh sách dự án theo từ khóa tìm kiếm
   useEffect(() => {
@@ -204,7 +242,17 @@ const ProjectManagementScreen = ({ navigation }) => {
   // Xử lý khi người dùng kéo để làm mới
   const handleRefresh = () => {
     setRefreshing(true);
-    loadProjects();
+    // clear cache for current status then reload
+    setCacheByStatus((prev) => ({ ...prev, [activeFilter]: undefined }));
+    loadProjectsByStatus(activeFilter);
+  };
+
+  // Xử lý khi thay đổi bộ lọc
+  const handleFilterChange = (statusKey) => {
+    // Luôn refetch để đảm bảo dữ liệu mới nhất
+    loadProjectsByStatus(statusKey, true);
+    setActiveFilter(statusKey);
+    setSearchQuery('');
   };
 
   // Xử lý khi người dùng nhấn vào một dự án
@@ -227,6 +275,31 @@ const ProjectManagementScreen = ({ navigation }) => {
     setSearchQuery('');
   };
 
+  // Render filter buttons
+  const renderFilterButtons = () => (
+    <View style={styles.filterContainer}>
+      {FILTERS.map((f) => (
+        <TouchableOpacity
+          key={f.key}
+          style={[
+            styles.filterButton,
+            {
+              backgroundColor: f.color,
+              borderWidth: activeFilter === f.key ? 2 : 1,
+              borderColor:
+                activeFilter === f.key ? theme.primary : theme.border,
+            },
+          ]}
+          onPress={() => handleFilterChange(f.key)}
+        >
+          <Text style={[styles.filterText, { color: f.textColor }]}>
+            {f.label}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.background }]}
@@ -235,6 +308,8 @@ const ProjectManagementScreen = ({ navigation }) => {
         barStyle={theme.dark ? 'light-content' : 'dark-content'}
         backgroundColor={theme.background}
       />
+
+      {renderFilterButtons()}
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
@@ -506,6 +581,22 @@ const styles = StyleSheet.create({
   },
   clearSearchButton: {
     padding: 4,
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 12,
+  },
+  filterButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  filterText: {
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
 

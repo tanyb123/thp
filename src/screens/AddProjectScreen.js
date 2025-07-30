@@ -19,6 +19,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { createProject } from '../api/projectService';
 import { getCustomers } from '../api/customerService';
 import { useAuth } from '../contexts/AuthContext';
+import { functions } from '../config/firebaseConfig';
+import { httpsCallable } from 'firebase/functions';
 
 const AddProjectScreen = ({ navigation }) => {
   const { currentUser } = useAuth();
@@ -162,14 +164,36 @@ const AddProjectScreen = ({ navigation }) => {
       };
 
       // Gọi API tạo dự án mới
-      await createProject(projectData, currentUser?.uid);
+      const projectId = await createProject(projectData, currentUser?.uid);
 
-      Alert.alert('Thành công', 'Đã thêm dự án mới thành công', [
-        {
-          text: 'OK',
-          onPress: () => navigation.goBack(),
-        },
-      ]);
+      // Sau khi tạo dự án thành công, gọi hàm tạo folder
+      if (projectId) {
+        try {
+          const createFoldersFn = httpsCallable(
+            functions,
+            'createProjectFolders'
+          );
+          await createFoldersFn({ projectId });
+        } catch (folderError) {
+          // Log lỗi nhưng không chặn người dùng
+          console.error('Lỗi khi tạo thư mục dự án trên Drive:', folderError);
+          Alert.alert(
+            'Tạo dự án thành công',
+            'Dự án đã được tạo, nhưng có lỗi xảy ra khi tạo thư mục trên Google Drive. Bạn có thể thử lại sau.'
+          );
+        }
+      }
+
+      Alert.alert(
+        'Thành công',
+        'Đã thêm dự án mới và tạo thư mục thành công!',
+        [
+          {
+            text: 'OK',
+            onPress: () => navigation.goBack(),
+          },
+        ]
+      );
     } catch (error) {
       if (error.code === 'permission-denied') {
         Alert.alert(
