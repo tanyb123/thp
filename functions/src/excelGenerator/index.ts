@@ -549,7 +549,7 @@ export const generateExcelQuotation = functions
                     {
                       userEnteredValue: { stringValue: material.name || '' },
                       userEnteredFormat: {
-                        textFormat: { italic: true },
+                        textFormat: { italic: true, bold: true },
                         horizontalAlignment: 'LEFT',
                         verticalAlignment: 'MIDDLE',
                         backgroundColor: { red: 1, green: 1, blue: 0.9 },
@@ -573,6 +573,7 @@ export const generateExcelQuotation = functions
                       userEnteredValue: { stringValue: '' }, // Blank STT
                       userEnteredFormat: {
                         backgroundColor: accessoryBg,
+                        textFormat: { bold: true },
                         horizontalAlignment: 'CENTER',
                         verticalAlignment: 'MIDDLE',
                       },
@@ -581,6 +582,7 @@ export const generateExcelQuotation = functions
                       userEnteredValue: { stringValue: material.name || '' },
                       userEnteredFormat: {
                         backgroundColor: accessoryBg,
+                        textFormat: { bold: true },
                         horizontalAlignment: 'LEFT',
                         verticalAlignment: 'MIDDLE',
                       },
@@ -591,6 +593,7 @@ export const generateExcelQuotation = functions
                       },
                       userEnteredFormat: {
                         backgroundColor: accessoryBg,
+                        textFormat: { bold: true },
                         horizontalAlignment: 'CENTER',
                         verticalAlignment: 'MIDDLE',
                       },
@@ -599,21 +602,31 @@ export const generateExcelQuotation = functions
                       userEnteredValue: { stringValue: material.unit || '' },
                       userEnteredFormat: {
                         backgroundColor: accessoryBg,
+                        textFormat: { bold: true },
                         horizontalAlignment: 'CENTER',
                         verticalAlignment: 'MIDDLE',
                       },
                     },
                     {
                       userEnteredValue: { stringValue: '' },
-                      userEnteredFormat: { backgroundColor: accessoryBg },
+                      userEnteredFormat: {
+                        backgroundColor: accessoryBg,
+                        textFormat: { bold: true },
+                      },
                     }, // SL blank
                     {
                       userEnteredValue: { stringValue: '' },
-                      userEnteredFormat: { backgroundColor: accessoryBg },
+                      userEnteredFormat: {
+                        backgroundColor: accessoryBg,
+                        textFormat: { bold: true },
+                      },
                     }, // Đơn giá blank
                     {
                       userEnteredValue: { stringValue: '' },
-                      userEnteredFormat: { backgroundColor: accessoryBg },
+                      userEnteredFormat: {
+                        backgroundColor: accessoryBg,
+                        textFormat: { bold: true },
+                      },
                     }, // Thành tiền blank
                   ],
                 });
@@ -751,6 +764,43 @@ export const generateExcelQuotation = functions
                 rowIndex: START_ROW_MATERIALS - 1,
                 columnIndex: 0,
               },
+            },
+          });
+
+          // Áp dụng font Times New Roman cỡ 13 cho toàn bộ bảng vật tư (A:G)
+          requests.push({
+            repeatCell: {
+              range: {
+                sheetId,
+                startRowIndex: START_ROW_MATERIALS - 1,
+                endRowIndex: lastMaterialRow, // Dòng cuối của vật tư (exclusive)
+                startColumnIndex: 0, // Cột A
+                endColumnIndex: 7, // Cột G (exclusive)
+              },
+              cell: {
+                userEnteredFormat: {
+                  textFormat: {
+                    fontFamily: 'Times New Roman',
+                    fontSize: 13,
+                  },
+                },
+              },
+              fields:
+                'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize',
+            },
+          });
+
+          // Thiết lập chiều cao dòng ~45px (≈33.75pt) cho bảng vật tư
+          requests.push({
+            updateDimensionProperties: {
+              range: {
+                sheetId,
+                dimension: 'ROWS',
+                startIndex: START_ROW_MATERIALS - 1,
+                endIndex: lastMaterialRow, // exclusive
+              },
+              properties: { pixelSize: 45 },
+              fields: 'pixelSize',
             },
           });
 
@@ -1284,45 +1334,82 @@ export const generateExcelQuotation = functions
           },
         });
 
-        // Thêm ngày tháng tự động vào báo giá ở ô G2 với căn giữa ngang và dọc
+        // Chèn chuỗi ngày ở ô G2 (rowIndex 1) dạng ddMMyy- bằng text thuần để tránh lỗi công thức theo locale
+        const today = new Date();
+        const dd = String(today.getDate()).padStart(2, '0');
+        const mm = String(today.getMonth() + 1).padStart(2, '0');
+        const yy = String(today.getFullYear()).slice(-2);
+        const dateSlash = `${dd}/${mm}/${yy}`; // dd/MM/yy
+        const dateText = `${dd}${mm}${yy}-`; // ddMMyy-
+
+        // Ô G2 (rowIndex 1): dd/MM/yy
         requests.push({
           updateCells: {
             rows: [
               {
                 values: [
                   {
-                    userEnteredValue: {
-                      formulaValue: '=TODAY()',
-                    },
+                    userEnteredValue: { stringValue: dateSlash },
                     userEnteredFormat: {
                       horizontalAlignment: 'CENTER',
                       verticalAlignment: 'MIDDLE',
-                      numberFormat: { type: 'DATE', pattern: 'dd/MM/yyyy' },
+                      textFormat: {
+                        fontFamily: 'Times New Roman',
+                        fontSize: 13,
+                      },
                     },
                   },
                 ],
               },
             ],
             fields: '*',
-            start: { sheetId, rowIndex: 1, columnIndex: 6 }, // Cell G2
+            start: { sheetId, rowIndex: 1, columnIndex: 6 }, // G2
           },
         });
 
-        // Thêm border cho ô G2
+        // Ô G3 (rowIndex 2): ddMMyy-
         requests.push({
-          updateBorders: {
-            range: {
-              sheetId,
-              startRowIndex: 1,
-              endRowIndex: 2,
-              startColumnIndex: 6,
-              endColumnIndex: 7,
-            },
-            top: { style: 'SOLID' },
-            bottom: { style: 'SOLID' },
-            left: { style: 'SOLID' },
-            right: { style: 'SOLID' },
+          updateCells: {
+            rows: [
+              {
+                values: [
+                  {
+                    userEnteredValue: { stringValue: dateText },
+                    userEnteredFormat: {
+                      horizontalAlignment: 'CENTER',
+                      verticalAlignment: 'MIDDLE',
+                      textFormat: {
+                        fontFamily: 'Times New Roman',
+                        fontSize: 13,
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+            fields: '*',
+            start: { sheetId, rowIndex: 2, columnIndex: 6 }, // G3
           },
+        });
+
+        // Borders for G2 and G3
+        const dateRows = [1, 2];
+        dateRows.forEach((rowIdx) => {
+          requests.push({
+            updateBorders: {
+              range: {
+                sheetId,
+                startRowIndex: rowIdx,
+                endRowIndex: rowIdx + 1,
+                startColumnIndex: 6,
+                endColumnIndex: 7,
+              },
+              top: { style: 'SOLID' },
+              bottom: { style: 'SOLID' },
+              left: { style: 'SOLID' },
+              right: { style: 'SOLID' },
+            },
+          });
         });
 
         // **FIX 2 & 4: Kẻ bảng chính xác, loại bỏ border thừa**

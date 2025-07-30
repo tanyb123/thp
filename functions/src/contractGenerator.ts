@@ -22,7 +22,7 @@
  *    - Cập nhật biến `CONTRACT_TEMPLATE_ID` bên dưới bằng ID này.
  */
 import * as functions from 'firebase-functions/v1';
-import * as path from 'path';
+// path import removed
 import * as admin from 'firebase-admin';
 // Import kiểu dữ liệu, không import thư viện thực tế
 import type { docs_v1 } from 'googleapis';
@@ -152,7 +152,7 @@ export const generateContract = functions
       );
     }
 
-    const { contractData, fileName, projectId } = data;
+    const { contractData, fileName, projectId, accessToken } = data;
     const typedContractData = contractData as ContractData;
 
     if (!typedContractData || !fileName || !projectId) {
@@ -162,15 +162,18 @@ export const generateContract = functions
       );
     }
 
+    if (!accessToken) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Thiếu accessToken Google của người dùng.'
+      );
+    }
+
     try {
-      // Initialize Google APIs
-      const auth = new google.auth.GoogleAuth({
-        keyFile: path.join(__dirname, '../tanyb-fe4bf-4fbd5c01b6c7.json'),
-        scopes: [
-          'https://www.googleapis.com/auth/drive',
-          'https://www.googleapis.com/auth/documents',
-        ],
-      });
+      // Initialize Google APIs with user accessToken similary to generateExcelQuotation
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: accessToken });
+
       const drive = google.drive({ version: 'v3', auth });
       const docs = google.docs({ version: 'v1', auth });
 
