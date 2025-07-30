@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Share, Alert, Linking } from 'react-native';
 import { getFunctions, httpsCallable } from 'firebase/functions';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 /**
  * Custom hook for generating contract documents.
@@ -52,6 +53,17 @@ const useContractGenerator = ({
     setContractDocUrl(null); // Reset on new generation
 
     try {
+      // Ensure Google signed in and get access token
+      const signedIn = await GoogleSignin.isSignedIn();
+      if (!signedIn) {
+        await GoogleSignin.signIn();
+      }
+      const tokens = await GoogleSignin.getTokens();
+      const accessToken = tokens?.accessToken;
+      if (!accessToken) {
+        throw new Error('Không lấy được access token Google.');
+      }
+
       // Format contract data
       const contractData = formatContractData();
 
@@ -65,6 +77,7 @@ const useContractGenerator = ({
           customerData?.companyName || customerData?.name || 'khach_hang'
         }_${new Date().getTime()}`,
         projectId,
+        accessToken,
       });
 
       // The cloud function now returns docUrl and docId
