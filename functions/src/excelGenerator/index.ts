@@ -1529,6 +1529,7 @@ export const generateExcelQuotation = functions
             left: { style: 'SOLID' },
             right: { style: 'SOLID' },
             innerHorizontal: { style: 'SOLID' },
+            innerVertical: { style: 'SOLID' }, // <-- THÊM DÒNG NÀY
           },
         });
 

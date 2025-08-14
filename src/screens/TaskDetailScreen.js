@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,17 +11,23 @@ import {
   Linking,
   Share,
 } from 'react-native';
-import { useRoute, useNavigation } from '@react-navigation/native';
+import {
+  useRoute,
+  useNavigation,
+  useFocusEffect,
+} from '@react-navigation/native';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import { useTheme } from '../contexts/ThemeContext';
-import { updateTaskStatus } from '../api/projectService'; // We will create this function
+import { updateTaskStatus, assignTaskToUser } from '../api/projectService'; // Added assignTaskToUser import
 import { Ionicons } from '@expo/vector-icons';
 import {
   getTaskDisplayLabel,
   getStatusDisplayLabel,
   getStatusColor,
 } from '../utils/taskHelpers';
+import TaskAssignmentModal from '../components/TaskAssignmentModal'; // Import the modal component
+import MediaInstructionsViewer from '../components/MediaInstructionsViewer';
 
 const TaskDetailScreen = () => {
   const route = useRoute();
@@ -34,28 +40,38 @@ const TaskDetailScreen = () => {
   const [error, setError] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
+  const [isAssignmentModalVisible, setIsAssignmentModalVisible] =
+    useState(false); // New state for modal visibility
+
+  const fetchProjectDetails = useCallback(async () => {
+    try {
+      setLoading(true);
+      const projectRef = doc(db, 'projects', projectId);
+      const projectSnap = await getDoc(projectRef);
+
+      if (projectSnap.exists()) {
+        setProject({ id: projectSnap.id, ...projectSnap.data() });
+      } else {
+        setError('Không tìm thấy thông tin dự án.');
+      }
+    } catch (err) {
+      console.error('Error fetching project details for task:', err);
+      setError('Lỗi khi tải dữ liệu dự án.');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
 
   useEffect(() => {
-    const fetchProjectDetails = async () => {
-      try {
-        setLoading(true);
-        const projectRef = doc(db, 'projects', projectId);
-        const projectSnap = await getDoc(projectRef);
-
-        if (projectSnap.exists()) {
-          setProject({ id: projectSnap.id, ...projectSnap.data() });
-        } else {
-          setError('Không tìm thấy thông tin dự án.');
-        }
-      } catch (err) {
-        console.error('Error fetching project details for task:', err);
-        setError('Lỗi khi tải dữ liệu dự án.');
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchProjectDetails();
-  }, [projectId]);
+  }, [fetchProjectDetails]);
+
+  // Refresh project data when screen comes into focus to ensure media instructions are up to date
+  useFocusEffect(
+    useCallback(() => {
+      fetchProjectDetails();
+    }, [fetchProjectDetails])
+  );
 
   const handleCompleteTask = async () => {
     setIsUpdating(true);
@@ -104,6 +120,40 @@ const TaskDetailScreen = () => {
     }
   };
 
+  // New function to handle task assignment
+  const handleAssignTask = (userId, userName) => {
+    setIsUpdating(true);
+    assignTaskToUser(projectId, taskKey, userId, userName)
+      .then(() => {
+        // Update the local project state to reflect the change
+        setProject((prevProject) => {
+          if (!prevProject || !prevProject.tasks) return prevProject;
+
+          const updatedTasks = { ...prevProject.tasks };
+          updatedTasks[taskKey] = {
+            ...updatedTasks[taskKey],
+            assignedTo: userId,
+            assignedToName: userName,
+          };
+
+          return {
+            ...prevProject,
+            tasks: updatedTasks,
+          };
+        });
+
+        Alert.alert('Thành công', 'Đã phân công công việc cho ' + userName);
+      })
+      .catch((error) => {
+        console.error('Error assigning task:', error);
+        Alert.alert('Lỗi', 'Không thể phân công công việc: ' + error.message);
+      })
+      .finally(() => {
+        setIsAssignmentModalVisible(false);
+        setIsUpdating(false);
+      });
+  };
+
   if (loading) {
     return (
       <View
@@ -128,6 +178,22 @@ const TaskDetailScreen = () => {
   const taskLabel = getTaskDisplayLabel(taskKey, task);
   const statusLabel = getStatusDisplayLabel(task?.status);
   const statusColor = getStatusColor(task?.status, theme);
+
+  // Find the related workflow stage for this task
+  const relatedStage = project?.workflowStages?.find(
+    (stage) =>
+      stage.stageId === task?.stageId ||
+      stage.processKey === taskKey ||
+      stage.processName?.toLowerCase().includes(taskKey.replace('_', ' '))
+  );
+
+  // Extract media instructions from the related stage
+  const hasMediaInstructions =
+    relatedStage &&
+    (relatedStage.instructionNotes ||
+      (relatedStage.instructionImages &&
+        relatedStage.instructionImages.length > 0) ||
+      relatedStage.instructionAudio);
 
   return (
     <SafeAreaView
@@ -161,6 +227,41 @@ const TaskDetailScreen = () => {
               {statusLabel}
             </Text>
           </View>
+
+          {/* Display assigned user if available */}
+          {task?.assignedTo && (
+            <View style={styles.assignedContainer}>
+              <Text style={[styles.detailText, { color: theme.textSecondary }]}>
+                Đã giao cho:{' '}
+              </Text>
+              <View style={styles.assignedUser}>
+                <View style={styles.userAvatar}>
+                  <Text style={styles.avatarText}>
+                    {(task.assignedToName || '?').charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={[styles.assignedUserName, { color: theme.text }]}>
+                  {task.assignedToName || 'Người dùng không xác định'}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Add assign task button */}
+          <TouchableOpacity
+            style={[styles.assignButton, { backgroundColor: theme.primary }]}
+            onPress={() => setIsAssignmentModalVisible(true)}
+          >
+            <Ionicons
+              name="person-add"
+              size={18}
+              color="#fff"
+              style={styles.buttonIcon}
+            />
+            <Text style={styles.assignButtonText}>
+              {task?.assignedTo ? 'Thay đổi người thực hiện' : 'Giao công việc'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.card }]}>
@@ -213,6 +314,16 @@ const TaskDetailScreen = () => {
             </View>
           )}
         </View>
+
+        {/* Media Instructions Section */}
+        {hasMediaInstructions && (
+          <MediaInstructionsViewer
+            instructionImages={relatedStage.instructionImages || []}
+            instructionNotes={relatedStage.instructionNotes || ''}
+            instructionAudio={relatedStage.instructionAudio || null}
+            visible={true}
+          />
+        )}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -240,6 +351,15 @@ const TaskDetailScreen = () => {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Task Assignment Modal */}
+      <TaskAssignmentModal
+        visible={isAssignmentModalVisible}
+        onClose={() => setIsAssignmentModalVisible(false)}
+        onAssign={handleAssignTask}
+        taskName={taskLabel}
+        currentAssignee={task?.assignedTo}
+      />
     </SafeAreaView>
   );
 };
@@ -272,7 +392,11 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   taskName: { fontSize: 26, fontWeight: 'bold', marginBottom: 10 },
-  statusContainer: { flexDirection: 'row', alignItems: 'center' },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
   statusText: { fontSize: 16, fontWeight: 'bold' },
   detailText: { fontSize: 16, lineHeight: 24 },
   footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#333' },
@@ -311,6 +435,50 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // New styles for assigned user
+  assignedContainer: {
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  assignedUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    backgroundColor: 'rgba(0, 102, 204, 0.05)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  userAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#0066cc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  assignedUserName: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  assignButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  assignButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });
 

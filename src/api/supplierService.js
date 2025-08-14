@@ -79,9 +79,14 @@ export const updateSupplier = async (supplierId, supplierData) => {
   try {
     const supplierRef = doc(db, 'suppliers', supplierId);
 
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(supplierData).filter(([_, value]) => value !== undefined)
+    );
+
     // Thêm timestamp cập nhật
     const updatedData = {
-      ...supplierData,
+      ...cleanData,
       updatedAt: serverTimestamp(),
     };
 

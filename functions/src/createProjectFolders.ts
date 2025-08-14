@@ -70,7 +70,14 @@ export const createProjectFolders = functions
       const projectFolderId = projectFolderRes.data.id!;
 
       // 2. Tạo sub-folders
-      const subNames = ['baogia', 'hopdong', 'PO', 'QC_Reports'];
+      const subNames = [
+        'baogia',
+        'hopdong',
+        'PO',
+        'QC_Reports',
+        'Tài liệu',
+        'Thống kê vật tư',
+      ];
       await Promise.all(
         subNames.map((sub) =>
           drive.files.create({

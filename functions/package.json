@@ -23,7 +23,6 @@
     "pizzip": "^3.2.0",
     "puppeteer": "^24.10.2",
     "puppeteer-core": "^24.10.2",
-    "thpapp": "file:..",
     "xlsx": "^0.18.5",
     "xlsx-populate": "^1.21.0"
   },

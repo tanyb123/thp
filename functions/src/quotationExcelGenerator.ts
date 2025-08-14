@@ -189,6 +189,7 @@ function generateExcelFile(formattedData: ExcelQuotationData): Buffer {
     XLSX.utils.sheet_add_aoa(worksheet, [cellData], {
       origin: `B${currentRow}`,
     });
+
     currentRow++;
   });
 
@@ -196,6 +197,7 @@ function generateExcelFile(formattedData: ExcelQuotationData): Buffer {
   // Calculate appropriate summary row position based on materials
   const summaryStartRow = Math.max(currentRow + 1, 17); // Ensure at least some space after last material
 
+  // Add summary rows with borders
   XLSX.utils.sheet_add_aoa(
     worksheet,
     [['Tổng cộng', formattedData.summary.subTotal]],
@@ -213,6 +215,37 @@ function generateExcelFile(formattedData: ExcelQuotationData): Buffer {
     [['Tổng cộng đã bao gồm VAT 10%', formattedData.summary.grandTotal]],
     { origin: `F${summaryStartRow + 2}` }
   );
+
+  // Add borders to summary cells
+  const summaryCells = [
+    `F${summaryStartRow}`,
+    `G${summaryStartRow}`, // Tổng cộng
+    `F${summaryStartRow + 1}`,
+    `G${summaryStartRow + 1}`, // Thuế VAT 10%
+    `F${summaryStartRow + 2}`,
+    `G${summaryStartRow + 2}`, // Tổng cộng đã bao gồm VAT 10%
+  ];
+
+  summaryCells.forEach((cellRef) => {
+    if (!worksheet[cellRef]) {
+      worksheet[cellRef] = {};
+    }
+    worksheet[cellRef].s = {
+      border: {
+        top: { style: 'thin', color: { rgb: '000000' } },
+        bottom: { style: 'thin', color: { rgb: '000000' } },
+        left: { style: 'thin', color: { rgb: '000000' } },
+        right: { style: 'thin', color: { rgb: '000000' } },
+      },
+      fill: {
+        fgColor: { rgb: 'E6E6FA' }, // Light purple background
+      },
+      alignment: {
+        horizontal: 'right',
+        vertical: 'center',
+      },
+    };
+  });
 
   // Add amount in words
   XLSX.utils.sheet_add_aoa(

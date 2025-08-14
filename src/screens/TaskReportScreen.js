@@ -10,8 +10,17 @@ import {
   SafeAreaView,
   ScrollView,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  doc,
+  getDoc,
+} from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
@@ -70,6 +79,30 @@ const TaskCard = ({ item, onPress, theme }) => {
         <Text style={[styles.assignedTo, { color: theme.textSecondary }]}>
           Phụ trách: {item.assignedToName}
         </Text>
+
+        {/* Media Instructions Indicators */}
+        {(item.hasInstructions || item.hasImages || item.hasAudio) && (
+          <View style={styles.mediaIndicators}>
+            <Text style={[styles.mediaLabel, { color: theme.textSecondary }]}>
+              Hướng dẫn:
+            </Text>
+            {item.hasInstructions && (
+              <View style={styles.mediaIcon}>
+                <Ionicons name="document-text" size={16} color="#0066cc" />
+              </View>
+            )}
+            {item.hasImages && (
+              <View style={styles.mediaIcon}>
+                <Ionicons name="image" size={16} color="#0066cc" />
+              </View>
+            )}
+            {item.hasAudio && (
+              <View style={styles.mediaIcon}>
+                <Ionicons name="volume-high" size={16} color="#0066cc" />
+              </View>
+            )}
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   );
@@ -161,10 +194,52 @@ const TaskReportScreen = ({ navigation }) => {
       );
 
       const querySnapshot = await getDocs(tasksQuery);
-      const fetchedTasks = querySnapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      const fetchedTasks = await Promise.all(
+        querySnapshot.docs.map(async (taskDoc) => {
+          const taskData = { id: taskDoc.id, ...taskDoc.data() };
+
+          // Fetch project data to get workflow stage instructions
+          if (taskData.projectId) {
+            try {
+              const projectRef = doc(db, 'projects', taskData.projectId);
+              const projectSnap = await getDoc(projectRef);
+
+              if (projectSnap.exists()) {
+                const projectData = projectSnap.data();
+
+                // Find related workflow stage
+                const relatedStage = projectData.workflowStages?.find(
+                  (stage) =>
+                    stage.stageId === taskData.stageId ||
+                    stage.processKey === taskData.taskKey ||
+                    stage.processName
+                      ?.toLowerCase()
+                      .includes(taskData.taskKey?.replace('_', ' '))
+                );
+
+                if (relatedStage) {
+                  // Add media instruction flags
+                  taskData.hasInstructions = !!relatedStage.instructionNotes;
+                  taskData.hasImages = !!(
+                    relatedStage.instructionImages &&
+                    relatedStage.instructionImages.length > 0
+                  );
+                  taskData.hasAudio = !!relatedStage.instructionAudio;
+                }
+              }
+            } catch (projectError) {
+              console.error(
+                'Error fetching project for task:',
+                taskData.id,
+                projectError
+              );
+            }
+          }
+
+          return taskData;
+        })
+      );
+
       setTasks(fetchedTasks);
       setFilteredTasks(fetchedTasks);
     } catch (err) {
@@ -451,6 +526,23 @@ const styles = StyleSheet.create({
   cardBody: {},
   projectName: { fontSize: 14, marginBottom: 4 },
   assignedTo: { fontSize: 14 },
+  mediaIndicators: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  mediaLabel: {
+    fontSize: 12,
+    marginRight: 8,
+    fontWeight: '500',
+  },
+  mediaIcon: {
+    marginRight: 8,
+    padding: 2,
+  },
   filterContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',

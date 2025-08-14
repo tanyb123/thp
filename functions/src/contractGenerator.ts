@@ -302,19 +302,22 @@ export const generateContract = functions
         );
 
         // 5. ========= CREATE AND INSERT TABLE =========
-        const materialsArray = materials || [];
-        // Lọc mảng materials để loại bỏ các dòng không cần thiết.
-        const filteredMaterials = materialsArray.filter((material) => {
-          const upperName = (material.name || '').trim().toUpperCase();
-          return !upperName.startsWith('GHI CHÚ') && !upperName.startsWith('+');
+        // ===== MATERIALS FILTER & CLASSIFY =====
+        const rawMaterials = materials || [];
+
+        const filteredMaterials = rawMaterials.filter((item) => {
+          const name = (item.name || '').trim().toUpperCase();
+          const isNote = name.startsWith('GHI CHÚ');
+          const startsWithPlus = name.startsWith('+');
+          return !isNote && !startsWithPlus; // Loại bỏ ghi chú và dòng '+'
         });
 
-        // +1 cho hàng header, dựa trên mảng đã lọc
+        // +1 cho hàng header
         const numRows = filteredMaterials.length + 1;
         const numColumns = 7; // STT, Vật Tư/Hàng Hóa, VL, ĐVT, SL, Đơn giá, Thành Tiền
 
         functions.logger.info(
-          `Chuẩn bị tạo bảng với ${numRows} hàng và ${numColumns} cột.`
+          `Chuẩn bị tạo bảng với ${numRows} hàng (đã lọc) và ${numColumns} cột.`
         );
 
         // Yêu cầu để xóa placeholder và tạo bảng trống
@@ -420,51 +423,77 @@ export const generateContract = functions
         ];
         const tableData: string[][] = [headers];
 
-        filteredMaterials.forEach((material) => {
-          const upperName = (material.name || '').trim().toUpperCase();
-          const isAccessory = upperName.startsWith('PHỤ KIỆN ĐI KÈM');
-          const isRomanHeader = /^[IVXLCDM]+$/i.test(
-            String(material.no || '').trim()
+        interface SpecialRowInfo {
+          rowIndex: number; // index in table (excluding header)
+          type: 'accessory' | 'groupHeader';
+        }
+        const specialRows: SpecialRowInfo[] = [];
+
+        let seqCounter = 1;
+        filteredMaterials.forEach((material, idx) => {
+          const nameUpper = (material.name || '').trim().toUpperCase();
+          const isAccessory = nameUpper.startsWith('PHỤ KIỆN ĐI KÈM');
+          // Nhận diện số La Mã (có thể kèm dấu chấm, ví dụ: "I.")
+          const romanRegex = /^[IVXLCDM]+\.?$/i;
+          const isGroupHeader = romanRegex.test(
+            String(material.no || material.stt || '').trim()
           );
 
-          let row: string[];
-
-          if (isAccessory) {
-            row = [
-              '', // STT trống
-              material.name || '',
-              material.material || '',
-              '', // ĐVT trống
-              '', // SL trống
-              '', // Đơn giá trống
-              '', // Thành tiền trống
-            ];
-          } else if (isRomanHeader) {
-            row = [
-              String(material.no || ''),
-              material.name || '',
-              material.material || '',
-              material.unit || '',
-              '', // SL trống
-              '', // Đơn giá trống
-              '', // Thành tiền trống
-            ];
-          } else {
-            // Hàng vật tư thông thường
-            const quantity = Number(material.quantity || 0);
-            const unitPrice = Number(material.unitPrice || 0);
-            const totalPrice = Number(material.totalPrice || 0);
-            row = [
-              String(material.no || ''),
-              material.name || '',
-              material.material || '',
-              material.unit || '',
-              quantity > 0 ? String(quantity) : '',
-              unitPrice > 0 ? unitPrice.toLocaleString('vi-VN') : '',
-              totalPrice > 0 ? totalPrice.toLocaleString('vi-VN') : '',
-            ];
+          if (isAccessory || isGroupHeader) {
+            specialRows.push({
+              rowIndex: idx + 1,
+              type: isAccessory ? 'accessory' : 'groupHeader',
+            });
           }
-          tableData.push(row);
+
+          // Build row values
+          let stt = '';
+          if (!isAccessory) {
+            if (
+              material.no !== undefined &&
+              material.no !== null &&
+              String(material.no).trim() !== ''
+            ) {
+              stt = String(material.no).trim();
+            } else if (
+              material.stt !== undefined &&
+              material.stt !== null &&
+              String(material.stt).trim() !== ''
+            ) {
+              stt = String(material.stt).trim();
+            } else {
+              stt = String(seqCounter);
+            }
+            seqCounter++;
+          }
+          const quantity =
+            isAccessory || isGroupHeader
+              ? ''
+              : material.quantity
+              ? String(material.quantity)
+              : '';
+          const unitPrice =
+            isAccessory || isGroupHeader
+              ? ''
+              : material.unitPrice
+              ? Math.floor(Number(material.unitPrice)).toLocaleString('vi-VN')
+              : '';
+          const totalPrice =
+            isAccessory || isGroupHeader
+              ? ''
+              : material.totalPrice
+              ? Math.floor(Number(material.totalPrice)).toLocaleString('vi-VN')
+              : '';
+
+          tableData.push([
+            stt,
+            material.name || '',
+            material.material || '',
+            material.unit || '',
+            quantity,
+            unitPrice,
+            totalPrice,
+          ]);
         });
 
         functions.logger.info(
@@ -481,12 +510,12 @@ export const generateContract = functions
           );
         }
 
-        // *** LỖI ĐƯỢC SỬA TẠI ĐÂY: LẶP NGƯỢC TỪ CUỐI LÊN ĐẦU ***
+        // *** LẶP NGƯỢC TỪ CUỐI LÊN ĐẦU ***
         for (let r = tableData.length - 1; r >= 0; r--) {
           const rowData = tableData[r];
           for (let c = rowData.length - 1; c >= 0; c--) {
             const cellData = rowData[c];
-            if (cellData === null || cellData === undefined) continue; // Allow empty strings, skip only null/undefined
+            if (!cellData) continue; // Bỏ qua ô trống
 
             const cell = tableElement.tableRows[r]?.tableCells?.[c];
             if (!cell?.content?.[0]?.paragraph?.elements?.[0]?.startIndex) {
@@ -496,66 +525,65 @@ export const generateContract = functions
 
             const cellStartIndex =
               cell.content[0].paragraph.elements[0].startIndex;
+            functions.logger.info(
+              `Điền "${cellData}" vào ô [${r}, ${c}] tại vị trí ${cellStartIndex}`
+            );
 
-            // FIX: Only insert text if cellData is not an empty string
-            if (cellData.length > 0) {
-              functions.logger.info(
-                `Điền "${cellData}" vào ô [${r}, ${c}] tại vị trí ${cellStartIndex}`
-              );
+            // 1. Thêm yêu cầu chèn văn bản
+            dataFillRequests.push({
+              insertText: {
+                location: { index: cellStartIndex },
+                text: cellData,
+              },
+            });
 
-              // 1. Thêm yêu cầu chèn văn bản
-              dataFillRequests.push({
-                insertText: {
-                  location: { index: cellStartIndex },
-                  text: cellData,
+            // 2. Thêm yêu cầu định dạng
+            const textRange = {
+              startIndex: cellStartIndex,
+              endIndex: cellStartIndex + cellData.length,
+            };
+
+            // Thiết lập font chữ Times New Roman, màu đen, cỡ 12 cho từng ô
+            dataFillRequests.push({
+              updateTextStyle: {
+                range: textRange,
+                textStyle: {
+                  weightedFontFamily: { fontFamily: 'Times New Roman' },
+                  fontSize: { magnitude: 12, unit: 'PT' },
+                  foregroundColor: {
+                    color: {
+                      rgbColor: { red: 0, green: 0, blue: 0 },
+                    },
+                  },
                 },
-              });
+                fields: 'weightedFontFamily,fontSize,foregroundColor',
+              },
+            });
 
-              // 2. Thêm yêu cầu định dạng
-              const textRange = {
-                startIndex: cellStartIndex,
-                endIndex: cellStartIndex + cellData.length,
-              };
-
-              // Thiết lập font chữ Times New Roman, màu đen, cỡ 12 cho từng ô
+            // In đậm cho hàng tiêu đề và các hàng tổng cộng
+            // In đậm cho hàng tiêu đề và các hàng tổng cộng
+            // Chỉ in đậm cho hàng tiêu đề
+            if (r === 0) {
+              // <--- ĐÃ SỬA
               dataFillRequests.push({
                 updateTextStyle: {
                   range: textRange,
-                  textStyle: {
-                    weightedFontFamily: { fontFamily: 'Times New Roman' },
-                    fontSize: { magnitude: 12, unit: 'PT' },
-                    foregroundColor: {
-                      color: {
-                        rgbColor: { red: 0, green: 0, blue: 0 },
-                      },
-                    },
-                  },
-                  fields: 'weightedFontFamily,fontSize,foregroundColor',
-                },
-              });
-
-              // In đậm cho hàng tiêu đề
-              if (r === 0) {
-                dataFillRequests.push({
-                  updateTextStyle: {
-                    range: textRange,
-                    textStyle: { bold: true },
-                    fields: 'bold',
-                  },
-                });
-              }
-
-              // Căn giữa cho tất cả các ô (theo yêu cầu)
-              dataFillRequests.push({
-                updateParagraphStyle: {
-                  range: textRange,
-                  paragraphStyle: { alignment: 'CENTER' },
-                  fields: 'alignment',
+                  textStyle: { bold: true },
+                  fields: 'bold',
                 },
               });
             }
 
-            // Căn giữa theo chiều dọc (áp dụng cho tất cả các ô, kể cả ô trống)
+            // Căn giữa cho tất cả các ô (theo yêu cầu)
+            dataFillRequests.push({
+              updateParagraphStyle: {
+                range: textRange,
+                paragraphStyle: { alignment: 'CENTER' },
+                fields: 'alignment',
+              },
+            });
+
+            // Căn giữa theo chiều dọc
             dataFillRequests.push({
               updateTableCellStyle: {
                 tableRange: {
@@ -575,6 +603,32 @@ export const generateContract = functions
             });
           }
         }
+
+        // ===== TÔ MÀU NỀN CHO HÀNG ĐẶC BIỆT =====
+        specialRows.forEach((rowInfo) => {
+          const bgColor =
+            rowInfo.type === 'accessory'
+              ? { red: 1, green: 0.93, blue: 0.8 } // light peach for accessories
+              : { red: 0.9, green: 0.9, blue: 0.9 }; // grey for group headers
+
+          dataFillRequests.push({
+            updateTableCellStyle: {
+              tableRange: {
+                tableCellLocation: {
+                  tableStartLocation: { index: tableStartLocation || 0 },
+                  rowIndex: rowInfo.rowIndex,
+                  columnIndex: 0,
+                },
+                rowSpan: 1,
+                columnSpan: numColumns,
+              },
+              tableCellStyle: {
+                backgroundColor: { color: { rgbColor: bgColor } },
+              },
+              fields: 'backgroundColor',
+            },
+          });
+        });
 
         // Định dạng màu nền và viền cho bảng
         if (tableStartLocation) {
@@ -649,52 +703,6 @@ export const generateContract = functions
           });
           functions.logger.info(
             `Đã điền và định dạng dữ liệu cho ${tableData.length} hàng.`
-          );
-        }
-
-        // ========= APPLY SPECIAL ROW FORMATTING (BACKGROUND COLOR) =========
-        const formatRequests: docs_v1.Schema$Request[] = [];
-        if (tableStartLocation) {
-          filteredMaterials.forEach((material, index) => {
-            const upperName = (material.name || '').trim().toUpperCase();
-            const isAccessory = upperName.startsWith('PHỤ KIỆN ĐI KÈM');
-            const isRomanHeader = /^[IVXLCDM]+$/i.test(
-              String(material.no || '').trim()
-            );
-
-            if (isAccessory || isRomanHeader) {
-              formatRequests.push({
-                updateTableCellStyle: {
-                  tableRange: {
-                    tableCellLocation: {
-                      tableStartLocation: { index: tableStartLocation },
-                      rowIndex: index + 1, // +1 to skip header
-                      columnIndex: 0,
-                    },
-                    rowSpan: 1,
-                    columnSpan: numColumns,
-                  },
-                  tableCellStyle: {
-                    backgroundColor: {
-                      color: {
-                        rgbColor: { red: 0.9, green: 0.9, blue: 0.9 },
-                      }, // light grey
-                    },
-                  },
-                  fields: 'backgroundColor',
-                },
-              });
-            }
-          });
-        }
-
-        if (formatRequests.length > 0) {
-          await docs.documents.batchUpdate({
-            documentId: newDocId,
-            requestBody: { requests: formatRequests },
-          });
-          functions.logger.info(
-            `Đã áp dụng định dạng nền cho ${formatRequests.length} hàng đặc biệt.`
           );
         }
 

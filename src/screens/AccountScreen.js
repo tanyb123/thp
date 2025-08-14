@@ -289,12 +289,26 @@ const AccountScreen = ({ navigation }) => {
             color="#4285F4"
           />
           {(userRole === 'giam_doc' || userRole === 'admin') && (
-            <SettingItem
-              icon="people-outline"
-              title="Quản lý nhân viên"
-              onPress={() => navigation.navigate('UserManagement')}
-              color={theme.primary}
-            />
+            <>
+              <SettingItem
+                icon="people-outline"
+                title="Quản lý nhân viên"
+                onPress={() => navigation.navigate('UserManagement')}
+                color={theme.primary}
+              />
+              <SettingItem
+                icon="color-palette-outline"
+                title="Cài đặt Icon Stage"
+                onPress={() => navigation.navigate('IconSettings')}
+                color="#FF6B35"
+              />
+              <SettingItem
+                icon="bug-outline"
+                title="Debug Custom Icons"
+                onPress={() => navigation.navigate('CustomIconDebug')}
+                color="#9C27B0"
+              />
+            </>
           )}
         </View>
 

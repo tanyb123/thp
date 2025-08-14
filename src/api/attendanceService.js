@@ -48,8 +48,6 @@ export const clockIn = async (userId, timestamp = new Date()) => {
   const dateStr = formatDate(timestamp);
   const ref = attendanceDocRef(userId, dateStr);
   const data = {
-    userId,
-    date: dateStr,
     clockIn: timestamp,
     updatedAt: serverTimestamp(),
   };
@@ -58,7 +56,11 @@ export const clockIn = async (userId, timestamp = new Date()) => {
   if (existing.exists()) {
     // Only set clockIn if not yet recorded
     if (!existing.data().clockIn) {
-      await updateDoc(ref, data);
+      // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+      const cleanData = Object.fromEntries(
+        Object.entries(data).filter(([_, value]) => value !== undefined)
+      );
+      await updateDoc(ref, cleanData);
     }
   } else {
     data.createdAt = serverTimestamp();
@@ -79,7 +81,11 @@ export const clockOut = async (userId, timestamp = new Date()) => {
   };
   const existing = await getDoc(ref);
   if (existing.exists()) {
-    await updateDoc(ref, data);
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(data).filter(([_, value]) => value !== undefined)
+    );
+    await updateDoc(ref, cleanData);
   } else {
     // In case user forget to clock in, create new doc
     await setDoc(ref, {
@@ -101,10 +107,15 @@ export const addOvertime = async (userId, hours, timestamp = new Date()) => {
   const ref = attendanceDocRef(userId, dateStr);
   const existing = await getDoc(ref);
   if (existing.exists()) {
-    await updateDoc(ref, {
+    const data = {
       overtime: hours,
       updatedAt: serverTimestamp(),
-    });
+    };
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(data).filter(([_, value]) => value !== undefined)
+    );
+    await updateDoc(ref, cleanData);
   } else {
     await setDoc(ref, {
       userId,
@@ -129,10 +140,15 @@ export const setPresence = async (
   const ref = attendanceDocRef(userId, dateStr);
   const existing = await getDoc(ref);
   if (existing.exists()) {
-    await updateDoc(ref, {
+    const data = {
       present,
       updatedAt: serverTimestamp(),
-    });
+    };
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(data).filter(([_, value]) => value !== undefined)
+    );
+    await updateDoc(ref, cleanData);
   } else {
     await setDoc(ref, {
       userId,

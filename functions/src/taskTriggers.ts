@@ -75,11 +75,17 @@ const getTaskLabel = (taskKey: string, taskData: any): string => {
   const taskLabels: { [key: string]: string } = {
     material_separation: 'Bóc tách vật tư',
     quotation: 'Báo giá',
-    material_purchasing: 'Mua vật tư & phụ kiện',
+    material_purchasing: 'Mua vật tư',
     material_cutting: 'Cắt phôi',
     assembly: 'Lắp ráp',
     painting: 'Sơn',
     shipping: 'Vận chuyển',
+    turning: 'Tiện',
+    milling: 'Phay',
+    welding: 'Hàn',
+    bending: 'Chấn',
+    drilling: 'Khoan',
+    grinding: 'Mài',
     other: taskData?.name || 'Công việc khác',
   };
   return taskLabels[taskKey] || 'Công việc không xác định';

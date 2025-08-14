@@ -171,6 +171,7 @@ const EditProjectScreen = ({ route, navigation }) => {
       // Chuẩn bị dữ liệu để lưu
       const projectData = {
         ...formData,
+        tasks: formData.tasks, // **QUAN TRỌNG: Đảm bảo dòng này tồn tại**
         budget: formData.budget ? Number(formData.budget) : null,
         durationInDays: formData.durationInDays
           ? Number(formData.durationInDays)
@@ -385,17 +386,41 @@ const EditProjectScreen = ({ route, navigation }) => {
   };
 
   const handleAddStages = (selectedTemplates) => {
-    const next = [...workflowStages];
+    const newStages = [...workflowStages];
+    let newTasks = formData.tasks ? { ...formData.tasks } : {}; // Lấy các task hiện có hoặc tạo object rỗng nếu chưa có
+
     selectedTemplates.forEach((tpl) => {
-      next.push({
-        stageId: uuid.v4(),
+      // Tạo một ID duy nhất cho GIAI ĐOẠN mới
+      const newStageId = uuid.v4();
+
+      // Thêm giai đoạn mới vào mảng workflowStages
+      newStages.push({
+        stageId: newStageId, // ID duy nhất cho stage
         processKey: tpl.processKey,
         processName: tpl.processName,
-        order: next.length,
+        order: newStages.length,
         status: 'pending',
       });
+
+      // Tạo một ID duy nhất cho TASK mới
+      const newTaskId = `task_${newStageId}`;
+
+      // Thêm task mặc định vào object tasks
+      newTasks[newTaskId] = {
+        name: tpl.processName, // Lấy trực tiếp tên công đoạn làm tên công việc
+        status: 'pending',
+        stageId: newStageId, // Liên kết task này với stage vừa tạo
+      };
     });
-    setWorkflowStages(next);
+
+    setWorkflowStages(newStages);
+
+    // Cập nhật formData với tasks mới
+    setFormData((prev) => ({
+      ...prev,
+      tasks: newTasks,
+    }));
+
     setPickerVisible(false);
   };
 

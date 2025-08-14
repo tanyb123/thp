@@ -56,13 +56,20 @@ export const saveQuotation = async (projectId, quotationData) => {
 
     // 2. Update project task status
     const projectRef = doc(db, 'projects', projectId);
-    await updateDoc(projectRef, {
+    const updateData = {
       'tasks.quotation.status': 'completed',
       'tasks.quotation.completedAt': serverTimestamp(),
       'tasks.quotation.completedBy': createdBy,
       updatedAt: serverTimestamp(),
       updatedBy: createdBy,
-    });
+    };
+
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(updateData).filter(([_, value]) => value !== undefined)
+    );
+
+    await updateDoc(projectRef, cleanData);
 
     console.log('Project status updated.');
 

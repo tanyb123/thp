@@ -14,13 +14,12 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as FileSystem from 'expo-file-system';
+
 import * as Sharing from 'expo-sharing';
 import { getAuth } from 'firebase/auth';
 import { saveQuotation } from '../api/quotationService';
 import useQuotationGenerator from '../hooks/useQuotationGenerator';
 import useContractGenerator from '../hooks/useContractGenerator';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 
 // HTML2PDF API key
 // const HTML2PDF_API_KEY = 'Uvwhf4HC3SED5GIYlCx1F8A6jq2r3iJEt3FH8C16u1LprY5J5hBNXGIVfsLtqRxH';
@@ -157,6 +156,9 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
     projectName,
     customerData,
     initialData,
+    isRequote,
+    originalQuotationId,
+    isManualQuotation,
   } = route.params;
 
   // Determine if we are re-quoting and calculate subTotal accordingly
@@ -236,9 +238,8 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   const [grandTotal, setGrandTotal] = useState(subTotalData);
   const [amountInWords, setAmountInWords] = useState('');
 
-  // State cho quá trình tạo PDF và Excel
-  const [isLoading, setIsLoading] = useState(false);
-  const [pdfLocalUri, setPdfLocalUri] = useState(null);
+  // State cho quá trình tạo Excel
+
   const [materials, setMaterials] = useState(materialsData || []);
 
   // Tính toán lại các giá trị khi người dùng thay đổi đầu vào
@@ -265,145 +266,6 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
     setGrandTotal(calculatedGrandTotal);
     setAmountInWords(calculatedAmountInWords);
   }, [subTotalData, discountPercentage, vatPercentage]);
-
-  const handleGenerateAndSave = async () => {
-    setIsLoading(true);
-    setPdfLocalUri(null); // Reset previous URI
-
-    try {
-      const auth = getAuth();
-      const userId = auth.currentUser?.uid;
-
-      if (!userId) {
-        Alert.alert('Lỗi', 'Bạn cần đăng nhập để tạo báo giá.');
-        setIsLoading(false); // Stop loading on error
-        return;
-      }
-
-      const effectiveProjectId = projectId || route?.params?.projectId;
-
-      if (!effectiveProjectId) {
-        Alert.alert('Lỗi', 'Không tìm thấy thông tin dự án. Vui lòng thử lại.');
-        setIsLoading(false);
-        return;
-      }
-
-      // 1. Chuẩn bị dữ liệu báo giá
-      const quotationNumber = `HK-${new Date().getFullYear()}-${Math.floor(
-        Math.random() * 1000
-      )
-        .toString()
-        .padStart(3, '0')}`;
-
-      // Assemble the complete, self-contained quotation object for versioning
-      // This is the complete snapshot sent to the Cloud Function and saved to Firestore.
-      const quotationDataForSaving = {
-        // Core Info
-        quotationNumber,
-        createdBy: userId,
-        projectName: projectName,
-        quotationDate: new Date().toISOString(),
-
-        // Customer Info
-        customerData: customerData,
-
-        // Financial Snapshot (Using state values)
-        subTotal: subTotalData,
-        discountPercentage: parseFloat(discountPercentage) || 0,
-        discountAmount: discountAmount,
-        afterDiscountTotal: afterDiscountTotal,
-        vatPercentage: parseFloat(vatPercentage) || 0,
-        vatAmount: vatAmount,
-        grandTotal: grandTotal,
-        amountInWords: amountInWords,
-
-        // Materials Snapshot
-        materials: materials,
-
-        // Terms Snapshot
-        quoteValidity: quoteValidity,
-        deliveryTime: deliveryTime,
-        paymentTerms: paymentTerms,
-        warrantyTerms: warrantyTerms,
-        otherTerms: otherTerms,
-        bankDetails: bankDetails,
-        notes: notes,
-      };
-
-      // 2. Gọi Cloud Function để lấy URL của PDF
-      console.log('Calling Cloud Function with complete data payload...');
-      const functions = getFunctions();
-      const generateInvoicePDF = httpsCallable(functions, 'generateInvoicePDF');
-      const result = await generateInvoicePDF({
-        userId,
-        quotationData: quotationDataForSaving, // Pass the self-contained data
-        projectId: effectiveProjectId,
-      });
-
-      const { pdfUrl } = result.data;
-      if (!pdfUrl) {
-        throw new Error('Không nhận được URL của PDF từ server.');
-      }
-      console.log('Received PDF URL:', pdfUrl);
-
-      // 3. Tải file PDF về máy để lấy local URI
-      console.log('Downloading PDF to local device...');
-      const fileUri = FileSystem.documentDirectory + `${quotationNumber}.pdf`;
-      const { uri } = await FileSystem.downloadAsync(pdfUrl, fileUri);
-      console.log('File downloaded to:', uri);
-
-      // Lưu local URI vào state để có thể chia sẻ sau
-      setPdfLocalUri(uri);
-
-      // 4. Lưu thông tin báo giá vào Firestore, now including the pdfUrl
-      await saveQuotation(effectiveProjectId, {
-        ...quotationDataForSaving,
-        pdfUrl,
-      });
-
-      // 5. Thông báo thành công
-      Alert.alert(
-        'Thành công',
-        'Đã tạo và lưu báo giá thành công. Bạn có muốn xem hoặc chia sẻ file PDF không?',
-        [
-          { text: 'Để sau', style: 'cancel' },
-          { text: 'Chia sẻ', onPress: () => handleSharePdf(uri) },
-          { text: 'Xem PDF', onPress: () => handleSharePdf(uri) },
-        ]
-      );
-    } catch (error) {
-      console.error('Error generating PDF and saving quotation:', error);
-      const errorMessage = error.message || 'Một lỗi không xác định đã xảy ra.';
-      Alert.alert('Lỗi', `Không thể tạo báo giá: ${errorMessage}`);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Hàm chia sẻ file PDF đã được tải về
-  const handleSharePdf = async (localUri) => {
-    if (!localUri) {
-      Alert.alert(
-        'Lỗi',
-        'Không tìm thấy file PDF để chia sẻ. Vui lòng tạo lại.'
-      );
-      return;
-    }
-    const isSharingAvailable = await Sharing.isAvailableAsync();
-    if (!isSharingAvailable) {
-      Alert.alert('Lỗi', 'Chia sẻ không khả dụng trên thiết bị của bạn.');
-      return;
-    }
-    try {
-      await Sharing.shareAsync(localUri, {
-        mimeType: 'application/pdf',
-        dialogTitle: 'Chia sẻ báo giá',
-      });
-    } catch (error) {
-      console.error('Error sharing PDF:', error);
-      Alert.alert('Lỗi', 'Không thể chia sẻ file PDF.');
-    }
-  };
 
   // Hàm tạo báo giá Excel
   const handleGenerateExcel = async () => {
@@ -465,6 +327,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
         // Materials Snapshot
         materials: materials.map((material) => ({
           no: material.stt || material.no || material.id || 0,
+          stt: material.stt || material.no || material.id || 0, // Thêm trường stt để đảm bảo tương thích
           name: material.name || material.description || '',
           material: material.material || material.type || '',
           unit: material.unit || 'cái',
@@ -723,20 +586,8 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
         </View>
       </ScrollView>
 
-      {/* Nút tạo PDF và Excel */}
+      {/* Nút tạo Excel */}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: '#4CAF50' }]}
-          onPress={handleGenerateAndSave}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Tạo & Lưu Báo Giá PDF</Text>
-          )}
-        </TouchableOpacity>
-
         <TouchableOpacity
           style={[styles.button, { backgroundColor: '#FF9800' }]}
           onPress={handleGenerateExcel}
@@ -777,21 +628,6 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
             </>
           )}
         </TouchableOpacity>
-
-        {pdfLocalUri && (
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#2196F3' }]}
-            onPress={() => handleSharePdf(pdfLocalUri)}
-          >
-            <Ionicons
-              name="share-social"
-              size={20}
-              color="white"
-              style={{ marginRight: 10 }}
-            />
-            <Text style={styles.buttonText}>Chia Sẻ PDF</Text>
-          </TouchableOpacity>
-        )}
 
         {/* Nút Chia Sẻ Hợp Đồng (chỉ hiển thị khi có link) */}
         {contractDocUrl && !isContractLoading && (

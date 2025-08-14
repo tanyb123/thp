@@ -17,6 +17,7 @@ admin.initializeApp();
 
 // Export functions from other files
 export * from './materialImporter';
+export * from './customerImporter';
 export * from './projectTriggers';
 export * from './taskTriggers';
 // Loại bỏ export từ excelGenerator vì đang xung đột với quotationExcelGenerator
@@ -25,7 +26,6 @@ export * from './pdfGenerator';
 export * from './contractGenerator';
 export * from './financialProcessor';
 export * from './scheduledFunctions';
-export * from './uploadFileToDrive';
 export * from './poExcelGenerator';
 export * from './poReceiptConfirmation';
 export * from './savePOReceiptConfirmation';
@@ -33,6 +33,9 @@ export * from './createProjectFolders';
 export * from './deliveryNoteExcelGenerator';
 // Export trực tiếp từ quotationExcelGenerator
 export * from './quotationExcelGenerator';
+export * from './attendanceExcelGenerator';
+export * from './processWorkAllocations';
+export * from './aggregateMonthlyReport';
 
 // Không export từ excelGenerator nữa vì đã có export từ quotationExcelGenerator
 

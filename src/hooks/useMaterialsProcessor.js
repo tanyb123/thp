@@ -26,11 +26,13 @@ export const useMaterialsProcessor = (project) => {
     const baseUrl = 'https://www.googleapis.com/drive/v3/files';
     const params = new URLSearchParams();
 
-    // Build query based on whether we have a specific folder ID or not
-    let query =
-      "mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false";
+    // Build query: when folderId provided, restrict to it; otherwise no results (we always want a folder)
+    let query = 'trashed=false';
     if (folderId) {
-      query = `'${folderId}' in parents and ${query}`;
+      query = `'${folderId}' in parents and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' and trashed=false`;
+    } else {
+      // No folder provided → return empty list
+      return [];
     }
 
     params.append('q', query);
@@ -117,6 +119,7 @@ export const useMaterialsProcessor = (project) => {
                 isNote: false,
                 isAccessory: true,
                 no: '', // No sequence number
+                stt: '', // No sequence number
                 quantity: '', // Keep quantity blank
                 weight: 0,
                 unitPrice: 0,
@@ -129,6 +132,8 @@ export const useMaterialsProcessor = (project) => {
               return {
                 ...item,
                 isNote: true,
+                no: '', // No sequence number for notes
+                stt: '', // No sequence number for notes
                 quantity: 0,
                 weight: 0,
                 unitPrice: 0,
@@ -137,7 +142,30 @@ export const useMaterialsProcessor = (project) => {
               };
             }
 
-            return { ...item, isNote: false, selected: true }; // Regular items are selected by default
+            // Tính toán lại thành tiền dựa trên đơn giá và số lượng/khối lượng
+            const quantity = parseFloat(item.quantity || 0);
+            const weight = parseFloat(item.weight || 0);
+            const unitPrice = parseFloat(item.unitPrice || 0);
+
+            let totalPrice = 0;
+            if (weight > 0) {
+              // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
+              totalPrice = quantity * weight * unitPrice;
+            } else {
+              // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
+              totalPrice = quantity * unitPrice;
+            }
+
+            return {
+              ...item,
+              isNote: false,
+              selected: true,
+              // Đảm bảo STT được lưu đúng cách
+              stt: item.stt || item.no || '',
+              no: item.stt || item.no || '',
+              // Cập nhật thành tiền đã tính toán
+              totalPrice: totalPrice,
+            }; // Regular items are selected by default
           });
 
         console.log(`Đã xử lý ${processedMaterials.length} mục sau khi lọc.`);
@@ -186,10 +214,50 @@ export const useMaterialsProcessor = (project) => {
 
       // Check if we have project info with a Drive folder ID
       if (project && project.driveFolderId) {
-        const files = await fetchGoogleDriveFiles(
-          accessToken,
-          project.driveFolderId
+        // 1) Find or create the subfolder "Thống kê vật tư" inside the project root
+        const listChildrenUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
+          `'${project.driveFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+        )}&fields=files(id,name)&orderBy=name`;
+
+        const listRes = await fetch(listChildrenUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        if (!listRes.ok) {
+          throw new Error(`Google Drive API error: ${listRes.status}`);
+        }
+        const childJson = await listRes.json();
+        let statsFolder = (childJson.files || []).find(
+          (f) => f.name === 'Thống kê vật tư'
         );
+
+        // Create folder if missing
+        if (!statsFolder) {
+          const createRes = await fetch(
+            'https://www.googleapis.com/drive/v3/files',
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                name: 'Thống kê vật tư',
+                mimeType: 'application/vnd.google-apps.folder',
+                parents: [project.driveFolderId],
+              }),
+            }
+          );
+          if (!createRes.ok) {
+            throw new Error(
+              `Không thể tạo thư mục 'Thống kê vật tư' (HTTP ${createRes.status})`
+            );
+          }
+          const created = await createRes.json();
+          statsFolder = { id: created.id, name: created.name };
+        }
+
+        // 2) List latest Excel files from that folder
+        const files = await fetchGoogleDriveFiles(accessToken, statsFolder.id);
         if (files && files.length > 0) {
           setDriveFiles(files);
           setIsPickerVisible(true);
@@ -250,18 +318,157 @@ export const useMaterialsProcessor = (project) => {
     });
   }, []); // Dependency rỗng vì chúng ta dùng callback form của setState
 
-  const handleRequote = useCallback((quotation) => {
-    if (quotation.materials && Array.isArray(quotation.materials)) {
-      setMaterials(JSON.parse(JSON.stringify(quotation.materials)));
-      setShowMaterialsTable(true);
-      Alert.alert(
-        'Tải thành công',
-        `Đã tải lại dữ liệu từ báo giá ${quotation.quotationNumber}.`
-      );
-    } else {
-      Alert.alert('Lỗi', 'Báo giá này không chứa dữ liệu vật tư để tải lại.');
-    }
-  }, []);
+  const handleRequote = useCallback(
+    (quotation, navigation, projectId, projectName, project) => {
+      // Kiểm tra xem có phải là manual quotation không
+      // Chỉ dựa vào các cờ rõ ràng, không suy luận từ dữ liệu
+      console.log('Debug quotation data:', {
+        id: quotation.id,
+        isManualQuotation: quotation.isManualQuotation,
+        source: quotation.source,
+        materialsCount: quotation.materials?.length,
+      });
+
+      const isManualQuotation =
+        quotation.isManualQuotation === true || quotation.source === 'manual';
+
+      console.log('Is manual quotation:', isManualQuotation);
+
+      if (isManualQuotation) {
+        // Nếu là manual quotation, navigate đến ManualQuotationScreen
+        navigation.navigate('ManualQuotation', {
+          projectId,
+          projectName,
+          project,
+          existingMaterials: quotation.materials || [],
+          isRequote: true,
+          originalQuotationId: quotation.id,
+        });
+      } else {
+        // Nếu không phải manual, lấy STT từ báo giá mới nhất và tính toán lại thành tiền
+        if (quotation.materials && Array.isArray(quotation.materials)) {
+          // Lấy STT từ báo giá mới nhất (có thể là "no", số, chữ cái, etc.)
+          // và tính toán lại thành tiền dựa trên đơn giá và số lượng/khối lượng
+          const materialsWithLatestSTT = quotation.materials.map((item) => {
+            const quantity = parseFloat(item.quantity || 0);
+            const weight = parseFloat(item.weight || 0);
+            const unitPrice = parseFloat(item.unitPrice || 0);
+
+            // Tính toán lại thành tiền theo logic của QuotationScreen
+            let totalPrice = 0;
+            if (weight > 0) {
+              // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
+              totalPrice = quantity * weight * unitPrice;
+            } else {
+              // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
+              totalPrice = quantity * unitPrice;
+            }
+
+            return {
+              ...item,
+              stt: item.no || item.stt || '', // Lấy STT từ trường 'no' (được lưu trong Firestore) hoặc 'stt'
+              totalPrice: totalPrice, // Cập nhật thành tiền đã tính toán
+            };
+          });
+
+          setMaterials(materialsWithLatestSTT);
+          setShowMaterialsTable(true);
+          Alert.alert(
+            'Tải thành công',
+            `Đã tải lại dữ liệu từ báo giá ${quotation.quotationNumber} với STT từ báo giá mới nhất và đã tính toán lại thành tiền.`
+          );
+        } else {
+          Alert.alert(
+            'Lỗi',
+            'Báo giá này không chứa dữ liệu vật tư để tải lại.'
+          );
+        }
+      }
+    },
+    []
+  );
+
+  // Hàm chỉ lấy STT từ file Excel mới nhất
+  const handleGetSTTFromLatestFile = useCallback(
+    async (existingMaterials) => {
+      try {
+        // Sử dụng lại logic import từ Google Drive nhưng chỉ lấy STT
+        const tokens = await GoogleSignin.getTokens();
+        const { accessToken } = tokens;
+
+        if (!accessToken) {
+          throw new Error('Không thể lấy được access token của Google.');
+        }
+
+        // Lấy danh sách file Excel từ Google Drive
+        const files = await fetchGoogleDriveFiles(accessToken);
+
+        if (files.length === 0) {
+          throw new Error('Không tìm thấy file Excel nào.');
+        }
+
+        // Lấy file mới nhất
+        const latestFile = files[0];
+
+        // Gọi Cloud Function để import file mới nhất
+        const importMaterials = httpsCallable(
+          functions,
+          'importMaterialsFromDrive'
+        );
+        const result = await importMaterials({
+          driveFileId: latestFile.id,
+          accessToken,
+        });
+
+        if (result.data && result.data.materials) {
+          const latestMaterials = result.data.materials;
+
+          // Bắt chước y hệt cách processMaterialData lấy STT và tính toán lại thành tiền
+          const updatedMaterials = existingMaterials.map(
+            (existingItem, index) => {
+              const latestItem = latestMaterials[index];
+
+              // Tính toán lại thành tiền dựa trên đơn giá và số lượng/khối lượng hiện tại
+              const quantity = parseFloat(existingItem.quantity || 0);
+              const weight = parseFloat(existingItem.weight || 0);
+              const unitPrice = parseFloat(existingItem.unitPrice || 0);
+
+              let totalPrice = 0;
+              if (weight > 0) {
+                // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
+                totalPrice = quantity * weight * unitPrice;
+              } else {
+                // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
+                totalPrice = quantity * unitPrice;
+              }
+
+              return {
+                ...existingItem, // Giữ nguyên tất cả dữ liệu cũ
+                stt: latestItem?.stt || latestItem?.no || '', // Lấy STT từ trường 'stt' hoặc 'no'
+                totalPrice: totalPrice, // Cập nhật thành tiền đã tính toán
+              };
+            }
+          );
+
+          setMaterials(updatedMaterials);
+          setShowMaterialsTable(true);
+          Alert.alert(
+            'Thành công',
+            'Đã cập nhật STT từ file Excel mới nhất và tính toán lại thành tiền.'
+          );
+        } else {
+          throw new Error('Không thể xử lý dữ liệu từ file Excel.');
+        }
+      } catch (error) {
+        console.error('Error getting STT from latest file:', error);
+        // Nếu có lỗi, giữ nguyên dữ liệu cũ
+        setMaterials(existingMaterials);
+        setShowMaterialsTable(true);
+        Alert.alert('Lỗi', 'Không thể cập nhật STT. Giữ nguyên dữ liệu cũ.');
+      }
+    },
+    [fetchGoogleDriveFiles]
+  );
 
   // Process material data from Excel
   const processMaterialData = useCallback((rawData) => {
@@ -293,7 +500,7 @@ export const useMaterialsProcessor = (project) => {
       }
 
       return {
-        stt: item.stt || '', // Preserve the original STT (sequence number)
+        stt: item.no || item.stt || '', // Lấy STT từ trường 'no' (được lưu trong Firestore) hoặc 'stt'
         name: item.name || '',
         material: item.material || '',
         quyCach: item.quyCach || '',
@@ -324,6 +531,7 @@ export const useMaterialsProcessor = (project) => {
     handleFileSelect,
     handlePriceChange,
     handleRequote,
+    handleGetSTTFromLatestFile,
     setIsPickerVisible,
   };
 };

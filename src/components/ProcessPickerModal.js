@@ -55,12 +55,12 @@ const ProcessPickerModal = ({
     },
     {
       processKey: 'turning',
-      processName: 'Tiện (Turning)',
+      processName: 'Tiện',
       category: 'Tạo phôi & Cắt gọt',
     },
     {
       processKey: 'milling',
-      processName: 'Phay (Milling)',
+      processName: 'Phay',
       category: 'Tạo phôi & Cắt gọt',
     },
     {
@@ -71,28 +71,28 @@ const ProcessPickerModal = ({
     // Biến dạng
     {
       processKey: 'bending',
-      processName: 'Chấn / Gấp (Bending)',
+      processName: 'Chấn / Gấp',
       category: 'Biến dạng',
     },
     {
       processKey: 'rolling',
-      processName: 'Lốc / Uốn Tôn (Rolling)',
+      processName: 'Lốc / Uốn Tôn',
       category: 'Biến dạng',
     },
     {
       processKey: 'pressing',
-      processName: 'Dập / Ép (Pressing)',
+      processName: 'Dập / Ép',
       category: 'Biến dạng',
     },
     // Lắp ráp & Hoàn thiện
     {
       processKey: 'fit_up',
-      processName: 'Tổ hợp / Gá đặt (Fit-up)',
+      processName: 'Tổ hợp / Gá đặt',
       category: 'Lắp ráp & Hoàn thiện',
     },
     {
       processKey: 'welding',
-      processName: 'Hàn (Welding)',
+      processName: 'Hàn',
       category: 'Lắp ráp & Hoàn thiện',
     },
     {
@@ -107,7 +107,7 @@ const ProcessPickerModal = ({
     },
     {
       processKey: 'painting',
-      processName: 'Sơn (Painting)',
+      processName: 'Sơn',
       category: 'Lắp ráp & Hoàn thiện',
     },
     {

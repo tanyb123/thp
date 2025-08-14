@@ -1,5 +1,25 @@
 # Ứng dụng Quản lý Dự án và Kho vật tư
 
+## Tính năng mới - Ghi âm hướng dẫn công việc
+
+### Chức năng ghi âm hướng dẫn
+
+Chúng tôi đã thêm tính năng ghi âm hướng dẫn công việc trong màn hình chi tiết giai đoạn:
+
+- Ghi âm hướng dẫn bằng giọng nói cho từng giai đoạn công việc
+- Phát lại audio để nghe lại hướng dẫn
+- Lưu trữ audio cùng với các thông tin khác của giai đoạn
+- Hỗ trợ cả Android và iOS với quyền microphone
+
+### Cách sử dụng ghi âm
+
+1. Vào màn hình chi tiết giai đoạn (StageDetailScreen)
+2. Cuộn xuống phần "Hướng dẫn bằng giọng nói"
+3. Nhấn nút "Ghi âm" để bắt đầu ghi âm
+4. Nếu chưa có quyền, ứng dụng sẽ hướng dẫn cấp quyền microphone
+5. Nhấn nút "Dừng ghi âm" để kết thúc
+6. Sử dụng nút phát để nghe lại audio đã ghi
+
 ## Tính năng mới - Quản lý vật tư nâng cao
 
 ### 1. Kiểm tra vật tư tồn kho

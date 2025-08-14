@@ -9,9 +9,11 @@ import {
   ActivityIndicator,
   Alert,
   Share,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getCustomerById, deleteCustomer } from '../api/customerService';
+import { getProjects } from '../api/projectService';
 import { useFocusEffect } from '@react-navigation/native';
 
 const CustomerDetailScreen = ({ route, navigation }) => {
@@ -20,6 +22,8 @@ const CustomerDetailScreen = ({ route, navigation }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [customerProjects, setCustomerProjects] = useState([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
 
   // Hàm lấy dữ liệu khách hàng
   const fetchCustomerData = async () => {
@@ -41,10 +45,41 @@ const CustomerDetailScreen = ({ route, navigation }) => {
     }
   };
 
+  // Hàm lấy danh sách dự án của khách hàng
+  const fetchCustomerProjects = async () => {
+    try {
+      setLoadingProjects(true);
+      const allProjects = await getProjects();
+
+      // Lọc dự án theo customerId
+      const projects = allProjects.filter(
+        (project) =>
+          project.customerId === customerId ||
+          project.customerName === customer?.name
+      );
+
+      setCustomerProjects(projects);
+      console.log(
+        `Tìm thấy ${projects.length} dự án cho khách hàng ${customer?.name}`
+      );
+    } catch (err) {
+      console.error('Lỗi khi tải dự án của khách hàng:', err);
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
+
   // Lấy dữ liệu khách hàng khi màn hình được tải
   useEffect(() => {
     fetchCustomerData();
   }, [customerId]);
+
+  // Lấy dự án khi có thông tin khách hàng
+  useEffect(() => {
+    if (customer) {
+      fetchCustomerProjects();
+    }
+  }, [customer]);
 
   // Làm mới dữ liệu khi màn hình được focus (quay lại sau khi chỉnh sửa)
   useFocusEffect(
@@ -79,6 +114,119 @@ const CustomerDetailScreen = ({ route, navigation }) => {
     }
   };
 
+  // Lấy màu cho trạng thái dự án
+  const getStatusColor = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'completed':
+        return '#4CAF50'; // xanh lá
+      case 'in_progress':
+        return '#FF9800'; // cam
+      case 'pending':
+        return '#2196F3'; // xanh dương
+      case 'cancelled':
+        return '#F44336'; // đỏ
+      default:
+        return '#9E9E9E'; // xám
+    }
+  };
+
+  // Lấy nhãn trạng thái dự án
+  const getStatusLabel = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'completed':
+        return 'Hoàn thành';
+      case 'in_progress':
+        return 'Đang thực hiện';
+      case 'pending':
+        return 'Chờ xử lý';
+      case 'cancelled':
+        return 'Đã hủy';
+      default:
+        return status || 'Chưa xác định';
+    }
+  };
+
+  // Format currency
+  const formatCurrency = (amount) => {
+    if (!amount) return '0 ₫';
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+      minimumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  // Format date
+  const formatDate = (timestamp) => {
+    if (!timestamp) return 'Chưa có';
+    if (timestamp.seconds) {
+      const date = new Date(timestamp.seconds * 1000);
+      return date.toLocaleDateString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+    return new Date(timestamp).toLocaleDateString('vi-VN');
+  };
+
+  // Render project item
+  const renderProjectItem = ({ item }) => (
+    <TouchableOpacity
+      style={styles.projectCard}
+      onPress={() =>
+        navigation.navigate('ProjectDetail', { projectId: item.id })
+      }
+    >
+      <View style={styles.projectHeader}>
+        <Text style={styles.projectName} numberOfLines={2}>
+          {item.name || 'Dự án không tên'}
+        </Text>
+        <View
+          style={[
+            styles.statusBadge,
+            { backgroundColor: getStatusColor(item.status) },
+          ]}
+        >
+          <Text style={styles.statusText}>{getStatusLabel(item.status)}</Text>
+        </View>
+      </View>
+
+      <View style={styles.projectDetails}>
+        <View style={styles.projectDetailRow}>
+          <Ionicons name="calendar-outline" size={16} color="#666" />
+          <Text style={styles.projectDetailText}>
+            {formatDate(item.createdAt)}
+          </Text>
+        </View>
+
+        {item.budget && (
+          <View style={styles.projectDetailRow}>
+            <Ionicons name="cash-outline" size={16} color="#666" />
+            <Text style={styles.projectDetailText}>
+              Ngân sách: {formatCurrency(item.budget)}
+            </Text>
+          </View>
+        )}
+
+        {item.description && (
+          <View style={styles.projectDetailRow}>
+            <Ionicons name="document-text-outline" size={16} color="#666" />
+            <Text style={styles.projectDetailText} numberOfLines={2}>
+              {item.description}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.projectFooter}>
+        <Ionicons name="chevron-forward" size={20} color="#666" />
+      </View>
+    </TouchableOpacity>
+  );
+
   // Xử lý chia sẻ thông tin khách hàng
   const handleShare = async () => {
     if (!customer) return;
@@ -92,6 +240,7 @@ Người liên hệ: ${customer.contactPerson || 'Không có'}
 Email: ${customer.email || 'Không có'}
 Địa chỉ: ${customer.address || 'Không có'}
 Loại khách hàng: ${getTypeLabel(customer.type)}
+Số dự án: ${customerProjects.length}
       `;
 
       await Share.share({
@@ -99,7 +248,7 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
         title: `Thông tin khách hàng: ${customer.name}`,
       });
     } catch (error) {
-      Alert.alert('Lỗi', 'Không thể chia sẻ thông tin khách hàng');
+      console.error('Lỗi khi chia sẻ:', error);
     }
   };
 
@@ -192,20 +341,6 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
       </View>
     );
   }
-
-  // Định dạng ngày tháng
-  const formatDate = (timestamp) => {
-    if (!timestamp) return 'Không có';
-
-    const date = new Date(timestamp.seconds * 1000);
-    return date.toLocaleDateString('vi-VN', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  };
 
   return (
     <View style={styles.container}>
@@ -313,6 +448,36 @@ Loại khách hàng: ${getTypeLabel(customer.type)}
               {formatDate(customer.updatedAt)}
             </Text>
           </View>
+        </View>
+
+        {/* Section dự án của khách hàng */}
+        <View style={styles.projectSection}>
+          <View style={styles.projectSectionHeader}>
+            <Text style={styles.projectSectionTitle}>
+              Dự án đã gia công ({customerProjects.length})
+            </Text>
+            {loadingProjects && (
+              <ActivityIndicator size="small" color="#0066cc" />
+            )}
+          </View>
+
+          {customerProjects.length > 0 ? (
+            <FlatList
+              data={customerProjects}
+              renderItem={renderProjectItem}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.projectList}
+              showsVerticalScrollIndicator={false}
+              scrollEnabled={false} // Disable scroll for nested FlatList
+            />
+          ) : !loadingProjects ? (
+            <View style={styles.emptyProjects}>
+              <Ionicons name="folder-open-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyProjectsText}>
+                Chưa có dự án nào được gia công
+              </Text>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
 
@@ -476,6 +641,69 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
+  projectSection: {
+    backgroundColor: '#fff',
+    padding: 16,
+    marginBottom: 20,
+  },
+  projectSectionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 12,
+  },
+  projectList: {
+    paddingBottom: 20,
+  },
+  projectCard: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  projectHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#e0e0e0',
+  },
+  projectName: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginRight: 10,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 5,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  projectDetails: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  projectDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  projectDetailText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 5,
+  },
+  projectFooter: {
+    padding: 12,
+    alignItems: 'flex-end',
+  },
   footer: {
     backgroundColor: '#fff',
     paddingVertical: 16,
@@ -517,6 +745,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  projectSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  emptyProjects: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  emptyProjectsText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
   },
 });
 

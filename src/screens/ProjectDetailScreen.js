@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useLayoutEffect,
 } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -18,6 +19,7 @@ import {
   ActionSheetIOS,
   Platform,
   FlatList,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -25,13 +27,20 @@ import {
   updateCustomTask,
   deleteProject,
   updateWorkflowStageStatus,
+  assignWorkerToStage,
 } from '../api/projectService';
 import { useAuth } from '../contexts/AuthContext';
 import StatusIndicator from '../components/StatusIndicator';
 import { useProjectDetails } from '../hooks/useProjectDetails';
+import { useAIChatIntegration } from '../hooks/useAIChatIntegration';
 import * as Clipboard from 'expo-clipboard';
 import ProjectService from '../api/projectService';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { updateProject } from '../api/projectService';
+import { serverTimestamp } from 'firebase/firestore';
+import { useTheme } from '../contexts/ThemeContext';
+import StageAssignmentModal from '../components/StageAssignmentModal';
+import { getDiscussionCount } from '../api/projectDiscussionService';
 
 // Định nghĩa danh sách công việc cố định
 const TASK_DEFINITIONS = [
@@ -56,17 +65,48 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   const { currentUser } = useAuth();
   const { project, loading, error, fetchProjectData } =
     useProjectDetails(projectId);
+  const { theme } = useTheme();
+  const { openAIChatWithProject } = useAIChatIntegration();
 
   // State cho quản lý công việc
   const [customTaskModalVisible, setCustomTaskModalVisible] = useState(false);
   const [customTaskName, setCustomTaskName] = useState('');
   const [copySuccess, setCopySuccess] = useState(false);
+  const [stageAssignmentModalVisible, setStageAssignmentModalVisible] =
+    useState(false);
+  const [selectedStageForAssignment, setSelectedStageForAssignment] =
+    useState(null);
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [discussionCount, setDiscussionCount] = useState(0);
 
   useEffect(() => {
     if (project?.tasks?.other?.name) {
       setCustomTaskName(project.tasks.other.name);
     }
   }, [project]);
+
+  // Load discussion count
+  const loadDiscussionCount = async () => {
+    if (projectId) {
+      try {
+        const count = await getDiscussionCount(projectId);
+        setDiscussionCount(count);
+      } catch (error) {
+        console.error('Error loading discussion count:', error);
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadDiscussionCount();
+  }, [projectId]);
+
+  // Reload discussion count when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      loadDiscussionCount();
+    }, [projectId])
+  );
 
   // Ẩn header mặc định để tránh trùng lặp nút back / tiêu đề
   useLayoutEffect(() => {
@@ -254,7 +294,19 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   };
 
   const handleStagePress = (stage) => {
-    navigation.navigate('StageDetail', { projectId, stage });
+    console.log('🎯 Stage pressed:', {
+      stageId: stage.stageId,
+      processName: stage.processName,
+      status: stage.status,
+      projectId,
+    });
+
+    try {
+      navigation.navigate('StageDetail', { projectId, stage });
+    } catch (error) {
+      console.error('❌ Navigation error:', error);
+      Alert.alert('Lỗi', `Không thể mở chi tiết công đoạn: ${error.message}`);
+    }
   };
 
   const changeStatus = async (stage, status) => {
@@ -264,6 +316,31 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     } catch (e) {
       Alert.alert('Lỗi', e.message);
     }
+  };
+
+  // Handle stage assignment
+  const handleStageAssignment = async (stageId, workerId, workerName) => {
+    try {
+      setIsAssigning(true);
+      await assignWorkerToStage(projectId, stageId, workerId, workerName);
+      setStageAssignmentModalVisible(false);
+      Alert.alert('Thành công', `Đã phân công ${workerName} vào công đoạn này`);
+      fetchProjectData(); // Refresh project data
+    } catch (error) {
+      console.error('Error assigning worker to stage:', error);
+      Alert.alert('Lỗi', `Không thể phân công công việc: ${error.message}`);
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  // Handle assign workers button press
+  const handleAssignWorkers = (stage) => {
+    console.log('Opening assignment modal for stage:', stage);
+    console.log('Project workflowStages:', project?.workflowStages);
+    console.log('All project data:', project);
+    setSelectedStageForAssignment(stage);
+    setStageAssignmentModalVisible(true);
   };
 
   // Hiển thị khi đang tải dữ liệu
@@ -320,8 +397,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
 
   // Định dạng số tiền
   const formatCurrency = (amount) => {
-    if (!amount) return '0 VNĐ';
-
+    if (!amount) return '0 đ';
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
       currency: 'VND',
@@ -332,28 +408,38 @@ const ProjectDetailScreen = ({ route, navigation }) => {
   // Lấy màu sắc theo trạng thái dự án
   const getStatusColor = (status) => {
     switch (status) {
-      case 'completed':
-        return '#4CAF50';
-      case 'in-progress':
-        return '#FFD54F';
       case 'pending':
-        return '#9E9E9E';
+        return '#FFA000'; // Orange
+      case 'in_progress':
+      case 'in-progress':
+        return '#1E88E5'; // Blue
+      case 'production_complete':
+        return '#8E24AA'; // Purple
+      case 'delivered':
+        return '#43A047'; // Green
+      case 'completed':
+        return '#009688'; // Teal
       case 'cancelled':
-        return '#F44336';
+        return '#E53935'; // Red
       default:
-        return '#6c757d';
+        return '#9E9E9E'; // Grey
     }
   };
 
   // Lấy nhãn hiển thị cho trạng thái dự án
   const getStatusLabel = (status) => {
     switch (status) {
-      case 'completed':
-        return 'Hoàn thành';
-      case 'in-progress':
-        return 'Đang thực hiện';
       case 'pending':
         return 'Chờ xử lý';
+      case 'in_progress':
+      case 'in-progress':
+        return 'Đang thực hiện';
+      case 'production_complete':
+        return 'Sản xuất hoàn tất';
+      case 'delivered':
+        return 'Đã giao hàng';
+      case 'completed':
+        return 'Hoàn thành';
       case 'cancelled':
         return 'Đã hủy';
       default:
@@ -402,31 +488,35 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết dự án</Text>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={handleDeleteProject}
-        >
-          <Ionicons name="trash-outline" size={24} color="#d11a2a" />
-        </TouchableOpacity>
+        {currentUser?.role === 'giam_doc' ||
+        currentUser?.role === 'pho_giam_doc' ? (
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={handleDeleteProject}
+          >
+            <Ionicons name="trash-outline" size={24} color="#d11a2a" />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 24 }} />
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.contentContainer}>
         {/* Project Header */}
         <View style={styles.projectHeader}>
-          <Text style={styles.projectName}>
-            {project.name || 'Chưa có tên'}
-          </Text>
-
-          <View style={styles.statusContainer}>
+          <View style={styles.projectHeaderTop}>
+            <Text style={styles.projectName}>
+              {project.name || 'Chưa có tên'}
+            </Text>
             <View
               style={[
-                styles.statusTag,
-                { borderColor: getStatusColor(project.status) },
+                styles.statusChip,
+                { backgroundColor: `${getStatusColor(project.status)}20` },
               ]}
             >
               <Text
                 style={[
-                  styles.statusText,
+                  styles.statusChipText,
                   { color: getStatusColor(project.status) },
                 ]}
               >
@@ -435,105 +525,130 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             </View>
           </View>
 
-          <Text style={styles.projectDescription}>
-            {project.description || 'Không có mô tả'}
-          </Text>
+          {project.description ? (
+            <Text style={styles.projectDescription}>{project.description}</Text>
+          ) : null}
         </View>
 
-        {/* Nút điều hướng đến màn hình báo giá */}
-        <View style={styles.infoSection}>
-          <TouchableOpacity
-            style={styles.quotationButton}
-            onPress={() =>
-              navigation.navigate('Quotation', {
-                projectId: project.id,
-                projectName: project.name,
-                project: project, // Truyền toàn bộ object project
-              })
-            }
-          >
-            <Ionicons name="calculator-outline" size={24} color="#fff" />
-            <Text style={styles.quotationButtonText}>Quản lý Báo giá</Text>
-          </TouchableOpacity>
-
-          {/* Nút quản lý mua vật tư - chỉ hiện khi dự án đang thực hiện */}
-          {project.status === 'in-progress' && (
+        {/* Action Buttons Section - Grid tiles */}
+        <View style={styles.actionsContainer}>
+          <View style={styles.tileGrid}>
             <TouchableOpacity
-              style={[
-                styles.quotationButton,
-                { backgroundColor: '#4CAF50', marginTop: 8 },
-              ]}
+              style={styles.tileButton}
               onPress={() =>
-                navigation.navigate('MaterialPurchase', {
+                navigation.navigate('Quotation', {
                   projectId: project.id,
                   projectName: project.name,
                   project: project,
                 })
               }
             >
-              <Ionicons name="cart-outline" size={24} color="#fff" />
-              <Text style={styles.quotationButtonText}>Quản lý Mua Vật Tư</Text>
+              <Ionicons name="calculator-outline" size={22} color="#2E7D32" />
+              <Text style={styles.tileLabel}>Quản lý Báo giá</Text>
             </TouchableOpacity>
-          )}
 
-          <TouchableOpacity
-            style={[
-              styles.quotationButton,
-              { backgroundColor: '#FF9800', marginTop: 8 },
-            ]}
-            onPress={() =>
-              navigation.navigate('CreateDeliveryNote', {
-                projectId: project.id,
-                materials: project.materials, // Pass materials if available
-              })
-            }
-          >
-            <Ionicons name="document-text-outline" size={24} color="#fff" />
-            <Text style={styles.quotationButtonText}>
-              Tạo Biên Bản Giao Hàng
-            </Text>
-          </TouchableOpacity>
-
-          {/* Nút mở thư mục dự án trên Google Drive */}
-          {project.driveFolderUrl ? (
-            <View style={styles.driveLinkContainer}>
+            {project.status === 'in-progress' && (
               <TouchableOpacity
-                style={styles.driveLinkButton}
-                onPress={() => {
-                  const { Linking } = require('react-native');
+                style={styles.tileButton}
+                onPress={() =>
+                  navigation.navigate('MaterialPurchase', {
+                    projectId: project.id,
+                    projectName: project.name,
+                    project: project,
+                  })
+                }
+              >
+                <Ionicons name="cart-outline" size={22} color="#2E7D32" />
+                <Text style={styles.tileLabel}>Quản lý Mua Vật Tư</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={() =>
+                navigation.navigate('CreateDeliveryNote', {
+                  projectId: project.id,
+                  materials: project.materials,
+                })
+              }
+            >
+              <Ionicons
+                name="document-text-outline"
+                size={22}
+                color="#2E7D32"
+              />
+              <Text style={styles.tileLabel}>Biên Bản Giao Hàng</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={() => openAIChatWithProject(project)}
+            >
+              <Ionicons name="chatbubble-ellipses" size={22} color="#2E7D32" />
+              <Text style={styles.tileLabel}>Tư vấn AI</Text>
+            </TouchableOpacity>
+
+            {project.driveFolderUrl ? (
+              <TouchableOpacity
+                style={styles.tileButton}
+                onPress={() =>
                   Linking.openURL(project.driveFolderUrl).catch(() =>
                     Alert.alert('Lỗi', 'Không thể mở thư mục Google Drive')
-                  );
-                }}
+                  )
+                }
               >
-                <Ionicons
-                  name="folder-open"
-                  size={18}
-                  color="#fff"
-                  style={styles.buttonIcon}
-                />
-                <Text style={styles.driveLinkText}>Mở thư mục Drive</Text>
+                <Ionicons name="folder-open" size={22} color="#2E7D32" />
+                <Text style={styles.tileLabel}>Mở thư mục Drive</Text>
               </TouchableOpacity>
-
+            ) : (
               <TouchableOpacity
-                style={[
-                  styles.shareButton,
-                  { backgroundColor: copySuccess ? '#4CAF50' : '#2980B9' },
-                ]}
-                onPress={handleCopyDriveLink}
+                style={styles.tileButton}
+                onPress={handleCreateDriveFolders}
               >
-                <Ionicons
-                  name={copySuccess ? 'checkmark' : 'copy'}
-                  size={20}
-                  color="#fff"
-                />
+                <Ionicons name="cloud-upload" size={22} color="#2E7D32" />
+                <Text style={styles.tileLabel}>Tạo thư mục Drive</Text>
               </TouchableOpacity>
-            </View>
-          ) : (
-            <Text style={styles.driveNotAvailable}>
-              Thư mục Google Drive đang được tạo...
-            </Text>
-          )}
+            )}
+
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={() =>
+                navigation.navigate('ExpenseList', {
+                  projectId: project.id,
+                  projectName: project.name,
+                })
+              }
+            >
+              <Ionicons name="cash-outline" size={22} color="#2E7D32" />
+              <Text style={styles.tileLabel}>Chi phí dự án</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={() =>
+                navigation.navigate('ProjectDiscussion', {
+                  projectId: project.id,
+                  projectName: project.name,
+                })
+              }
+            >
+              <View style={styles.tileIconContainer}>
+                <Ionicons
+                  name="chatbubbles-outline"
+                  size={22}
+                  color="#2E7D32"
+                />
+                {discussionCount > 0 && (
+                  <View style={styles.discussionBadge}>
+                    <Text style={styles.discussionBadgeText}>
+                      {discussionCount > 99 ? '99+' : discussionCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.tileLabel}>Thảo luận dự án</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Phần thông tin khách hàng và các thông tin khác */}
@@ -576,9 +691,11 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </View>
 
+        {/* Thông tin cơ bản */}
         <View style={styles.infoSection}>
           <Text style={styles.sectionTitle}>Thông tin cơ bản</Text>
 
+          {/* Các thông tin hiện có */}
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Ngày bắt đầu:</Text>
             <Text style={styles.infoValue}>
@@ -639,13 +756,51 @@ const ProjectDetailScreen = ({ route, navigation }) => {
             </Text>
           </View>
 
-          <View style={styles.infoRow}>
+          {/* Thêm nút tính toán chi phí */}
+          <View style={[styles.infoRow, { marginTop: 15 }]}>
             <Text style={styles.infoLabel}>Ngân sách:</Text>
-            <Text style={styles.infoValue}>
-              {project.budget
-                ? formatCurrency(project.budget)
-                : 'Chưa xác định'}
-            </Text>
+            <View style={styles.budgetContainer}>
+              <Text style={styles.infoValue}>
+                {project.budget?.grandTotal
+                  ? formatCurrency(project.budget.grandTotal)
+                  : project.budget && typeof project.budget === 'number'
+                  ? formatCurrency(project.budget)
+                  : 'Chưa xác định'}
+              </Text>
+              {(currentUser?.role === 'ke_toan' ||
+                currentUser?.role === 'giam_doc' ||
+                currentUser?.role === 'pho_giam_doc') && (
+                <TouchableOpacity
+                  style={styles.budgetButton}
+                  onPress={() =>
+                    navigation.navigate('ProjectCost', {
+                      projectId: project.id,
+                    })
+                  }
+                >
+                  <Ionicons name="calculator-outline" size={16} color="#fff" />
+                  <Text style={styles.budgetButtonText}>Tính chi phí</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* Thêm nút Quản lý Thanh toán */}
+          <View style={[styles.infoRow, { marginTop: 15 }]}>
+            <Text style={styles.infoLabel}>Thanh toán:</Text>
+            <View style={styles.budgetContainer}>
+              <TouchableOpacity
+                style={[styles.budgetButton, { backgroundColor: '#4CAF50' }]}
+                onPress={() =>
+                  navigation.navigate('PaymentRequestList', {
+                    projectId: project.id,
+                  })
+                }
+              >
+                <Ionicons name="cash-outline" size={16} color="#fff" />
+                <Text style={styles.budgetButtonText}>Quản lý Thanh toán</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {project.notes && (
@@ -656,10 +811,218 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           )}
         </View>
 
+        {/* Status Change Section - Only visible for authorized roles */}
+        {(currentUser?.role === 'pho_giam_doc' ||
+          currentUser?.role === 'giam_doc' ||
+          currentUser?.role === 'ke_toan') && (
+          <View
+            style={[
+              styles.section,
+              { backgroundColor: theme.cardBackground, marginTop: 10 },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              Trạng thái dự án
+            </Text>
+
+            <View style={styles.statusActionsContainer}>
+              {/* Current status display */}
+              <View style={styles.currentStatusContainer}>
+                <Text style={{ color: theme.textSecondary }}>
+                  Trạng thái hiện tại:
+                </Text>
+                <View
+                  style={[
+                    styles.statusBadge,
+                    { backgroundColor: getStatusColor(project?.status) },
+                  ]}
+                >
+                  <Text style={styles.statusBadgeText}>
+                    {getStatusLabel(project?.status)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Status transition buttons */}
+              <View style={styles.statusButtonsContainer}>
+                {/* Show "Mark as Production Complete" button only if the project is in progress */}
+                {(project?.status === 'in_progress' ||
+                  project?.status === 'in-progress') && (
+                  <TouchableOpacity
+                    style={[
+                      styles.statusButton,
+                      {
+                        backgroundColor: getStatusColor('production_complete'),
+                      },
+                    ]}
+                    onPress={() => {
+                      Alert.alert(
+                        'Xác nhận',
+                        'Đánh dấu dự án đã sản xuất xong?',
+                        [
+                          { text: 'Hủy', style: 'cancel' },
+                          {
+                            text: 'Xác nhận',
+                            onPress: async () => {
+                              try {
+                                await updateProject(project.id, {
+                                  status: 'production_complete',
+                                  updatedAt: serverTimestamp(),
+                                });
+
+                                // Refresh project data
+                                fetchProjectData();
+
+                                Alert.alert(
+                                  'Thành công',
+                                  'Đã cập nhật trạng thái dự án'
+                                );
+                              } catch (error) {
+                                console.error(
+                                  'Error updating project status:',
+                                  error
+                                );
+                                Alert.alert(
+                                  'Lỗi',
+                                  'Không thể cập nhật trạng thái dự án'
+                                );
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <Ionicons
+                      name="checkmark-circle-outline"
+                      size={20}
+                      color="#fff"
+                      style={styles.statusButtonIcon}
+                    />
+                    <Text style={styles.statusButtonText}>
+                      Đánh dấu đã sản xuất xong
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Show "Mark as Delivered" button only if the project is production_complete */}
+                {project?.status === 'production_complete' && (
+                  <TouchableOpacity
+                    style={[
+                      styles.statusButton,
+                      { backgroundColor: getStatusColor('delivered') },
+                    ]}
+                    onPress={() => {
+                      Alert.alert('Xác nhận', 'Đánh dấu dự án đã giao hàng?', [
+                        { text: 'Hủy', style: 'cancel' },
+                        {
+                          text: 'Xác nhận',
+                          onPress: async () => {
+                            try {
+                              await updateProject(project.id, {
+                                status: 'delivered',
+                                updatedAt: serverTimestamp(),
+                              });
+
+                              // Refresh project data
+                              fetchProjectData();
+
+                              Alert.alert(
+                                'Thành công',
+                                'Đã cập nhật trạng thái dự án'
+                              );
+                            } catch (error) {
+                              console.error(
+                                'Error updating project status:',
+                                error
+                              );
+                              Alert.alert(
+                                'Lỗi',
+                                'Không thể cập nhật trạng thái dự án'
+                              );
+                            }
+                          },
+                        },
+                      ]);
+                    }}
+                  >
+                    <Ionicons
+                      name="paper-plane-outline"
+                      size={20}
+                      color="#fff"
+                      style={styles.statusButtonIcon}
+                    />
+                    <Text style={styles.statusButtonText}>
+                      Đánh dấu đã giao hàng
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Show "Mark as Completed" button only if the project is delivered */}
+                {project?.status === 'delivered' && (
+                  <TouchableOpacity
+                    style={[
+                      styles.statusButton,
+                      { backgroundColor: getStatusColor('completed') },
+                    ]}
+                    onPress={() => {
+                      Alert.alert('Xác nhận', 'Đánh dấu dự án hoàn thành?', [
+                        { text: 'Hủy', style: 'cancel' },
+                        {
+                          text: 'Xác nhận',
+                          onPress: async () => {
+                            try {
+                              await updateProject(project.id, {
+                                status: 'completed',
+                                updatedAt: serverTimestamp(),
+                              });
+
+                              // Refresh project data
+                              fetchProjectData();
+
+                              Alert.alert(
+                                'Thành công',
+                                'Đã cập nhật trạng thái dự án'
+                              );
+                            } catch (error) {
+                              console.error(
+                                'Error updating project status:',
+                                error
+                              );
+                              Alert.alert(
+                                'Lỗi',
+                                'Không thể cập nhật trạng thái dự án'
+                              );
+                            }
+                          },
+                        },
+                      ]);
+                    }}
+                  >
+                    <Ionicons
+                      name="checkmark-done-outline"
+                      size={20}
+                      color="#fff"
+                      style={styles.statusButtonIcon}
+                    />
+                    <Text style={styles.statusButtonText}>
+                      Đánh dấu hoàn thành
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Quy trình Sản xuất */}
         <View style={styles.tasksBoard}>
-          <Text style={styles.sectionTitle}>Quy trình Sản xuất</Text>
-          {project.workflowStages?.length ? (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Quy trình Sản xuất</Text>
+            {/* Remove the assignment button here */}
+          </View>
+
+          {project?.workflowStages?.length ? (
             project.workflowStages
               .sort((a, b) => a.order - b.order)
               .map((item) => {
@@ -670,25 +1033,42 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                     ? '#FFD54F'
                     : '#9E9E9E';
                 return (
-                  <TouchableOpacity
-                    key={item.stageId}
-                    style={styles.taskRow}
-                    onPress={() => handleStagePress(item)}
-                  >
-                    <Text style={styles.taskName}>{item.processName}</Text>
-                    <Text
-                      style={[
-                        styles.taskStatusText,
-                        { backgroundColor: color + '33', color: color },
-                      ]}
+                  <View key={item.stageId} style={styles.stageContainer}>
+                    <TouchableOpacity
+                      style={styles.stageInfo}
+                      onPress={() => handleStagePress(item)}
                     >
-                      {item.status === 'completed'
-                        ? 'Hoàn thành'
-                        : item.status === 'in_progress'
-                        ? 'Đang làm'
-                        : 'Chờ xử lý'}
-                    </Text>
-                  </TouchableOpacity>
+                      <Text style={styles.taskName}>{item.processName}</Text>
+                      <Text
+                        style={[
+                          styles.taskStatusText,
+                          { backgroundColor: color + '33', color: color },
+                        ]}
+                      >
+                        {item.status === 'completed'
+                          ? 'Hoàn thành'
+                          : item.status === 'in_progress'
+                          ? 'Đang làm'
+                          : 'Chờ xử lý'}
+                      </Text>
+
+                      {/* Show assigned workers */}
+                      {item.assignedWorkers &&
+                        item.assignedWorkers.length > 0 && (
+                          <Text style={styles.assignedWorkersText}>
+                            Đã giao: {item.assignedWorkers.length} người
+                          </Text>
+                        )}
+                    </TouchableOpacity>
+
+                    {/* Assign Workers Button */}
+                    <TouchableOpacity
+                      style={styles.assignButton}
+                      onPress={() => handleAssignWorkers(item)}
+                    >
+                      <Ionicons name="person-add" size={20} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
                 );
               })
           ) : (
@@ -706,6 +1086,8 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           <Ionicons name="create-outline" size={20} color="#fff" />
           <Text style={styles.editButtonText}>Chỉnh sửa</Text>
         </TouchableOpacity>
+
+        {/* Xóa nút "Phân công" thừa ở đây */}
       </View>
 
       {/* Modal cập nhật tên công việc khác */}
@@ -755,6 +1137,20 @@ const ProjectDetailScreen = ({ route, navigation }) => {
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
+      {/* Stage Assignment Modal */}
+      <StageAssignmentModal
+        visible={stageAssignmentModalVisible}
+        onClose={() => {
+          setStageAssignmentModalVisible(false);
+          setSelectedStageForAssignment(null);
+        }}
+        onAssign={handleStageAssignment}
+        projectId={projectId}
+        selectedStage={selectedStageForAssignment}
+        projectStages={project?.workflowStages || []}
+        navigation={navigation}
+      />
     </View>
   );
 };
@@ -807,6 +1203,10 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   headerTitle: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    textAlign: 'center',
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
@@ -821,11 +1221,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     padding: 16,
     marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eef1f5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  projectHeaderTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   projectName: {
     fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '800',
+    color: '#111827',
     marginBottom: 8,
   },
   statusContainer: {
@@ -838,13 +1251,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
+  statusChip: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  statusChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
   statusText: {
     fontSize: 14,
     fontWeight: '500',
   },
   projectDescription: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 15,
+    color: '#4B5563',
     lineHeight: 22,
     marginTop: 8,
   },
@@ -852,22 +1275,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     padding: 16,
     marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#eef1f5',
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '700',
+    color: '#111827',
     marginBottom: 12,
   },
   customerCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#fff',
     padding: 12,
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#0066cc',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#eef1f5',
   },
   customerInfo: {
     flexDirection: 'row',
@@ -879,8 +1305,8 @@ const styles = StyleSheet.create({
   },
   customerName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: '700',
+    color: '#111827',
     marginBottom: 2,
   },
   customerDetail: {
@@ -893,17 +1319,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: '#eef1f5',
   },
   infoLabel: {
     fontSize: 15,
-    color: '#666',
+    color: '#6B7280',
     flex: 1,
   },
   infoValue: {
     fontSize: 15,
-    color: '#333',
-    fontWeight: '500',
+    color: '#111827',
+    fontWeight: '600',
     flex: 1,
     textAlign: 'right',
   },
@@ -924,6 +1350,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderTopWidth: 1,
     borderTopColor: '#eee',
+    flexDirection: 'row',
+    justifyContent: 'space-between', // Better alignment for multiple buttons
   },
   editButton: {
     backgroundColor: '#0066cc',
@@ -931,13 +1359,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 8,
+    flex: 1, // Make buttons take equal space
+  },
+  assignButton: {
+    backgroundColor: '#4CAF50',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flex: 1, // Make buttons take equal space
+    marginLeft: 10,
   },
   editButtonText: {
-    color: '#fff',
-    fontSize: 16,
+    color: 'white',
     fontWeight: '600',
-    marginLeft: 8,
+    marginLeft: 6,
+  },
+  assignButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 6,
   },
   tasksBoard: {
     backgroundColor: '#fff',
@@ -1126,6 +1572,226 @@ const styles = StyleSheet.create({
     color: '#0066cc',
     fontSize: 14,
     fontWeight: '500',
+  },
+  actionsContainer: {
+    backgroundColor: '#fff',
+    padding: 16,
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#eee',
+  },
+  tileGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  tileButton: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#eef1f5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  tileLabel: {
+    color: '#000',
+    fontWeight: '600',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  tileIconContainer: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  discussionBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#FF5722',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  discussionBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  actionIcon: {
+    marginRight: 10,
+  },
+  actionText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  budgetContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  budgetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0066cc',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  budgetButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 5,
+  },
+  driveButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  driveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1976D2',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    flex: 1,
+    marginRight: 8,
+    justifyContent: 'center',
+  },
+  budgetCalcButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0066cc',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    flex: 1,
+    marginLeft: 8,
+    justifyContent: 'center',
+  },
+  driveButtonIcon: {
+    marginRight: 8,
+  },
+  driveButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  expenseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF9800', // Orange color for expense tracking
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 4,
+    flex: 1,
+    marginRight: 8,
+    justifyContent: 'center',
+  },
+
+  currentStatusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 10,
+  },
+  statusBadgeText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  statusActionsContainer: {
+    marginTop: 10,
+  },
+  statusButtonsContainer: {
+    marginTop: 8,
+  },
+  statusButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 4,
+    marginVertical: 5,
+  },
+  statusButtonIcon: {
+    marginRight: 8,
+  },
+  statusButtonText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  assignButtonText: {
+    color: '#fff',
+    fontWeight: '500',
+    fontSize: 14,
+    marginLeft: 4,
+  },
+
+  stageContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  stageInfo: {
+    flex: 1,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  assignedWorkersText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  assignButton: {
+    padding: 12,
+    marginRight: 16,
+    borderRadius: 8,
+    backgroundColor: '#2196F3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+    minHeight: 44,
   },
 });
 

@@ -6,6 +6,7 @@ import * as admin from 'firebase-admin';
  * Updates the purchase order document with receipt confirmation data
  * This function only updates the Firestore document, it doesn't upload any files
  * It now also automatically adds received items to inventory
+ * and creates expense records for materials
  */
 export const savePOReceiptConfirmation = functions
   .region('asia-southeast1')
@@ -115,6 +116,15 @@ export const savePOReceiptConfirmation = functions
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
       console.log('PO document updated successfully');
+
+      // Get project data for expense creation
+      const projectSnap = await db.collection('projects').doc(projectId).get();
+      const projectName = projectSnap.exists
+        ? projectSnap.data()?.name || 'Unknown Project'
+        : 'Unknown Project';
+
+      // Track expenses to be created
+      const expensesCreated = [];
 
       // Automatically add received items to inventory
       if (materialsList.length > 0) {
@@ -267,6 +277,42 @@ export const savePOReceiptConfirmation = functions
                 `Inventory transaction record created for existing item`
               );
             }
+
+            // Calculate total cost for this material
+            const totalCost = quantity * price;
+
+            // Create expense record for this material
+            if (totalCost > 0) {
+              const expenseData = {
+                projectId: projectId,
+                projectName: projectName,
+                type: 'material',
+                amount: totalCost,
+                description: `${name} (${quantity} ${material.unit || 'cái'})`,
+                date: admin.firestore.FieldValue.serverTimestamp(),
+                relatedDocId: poId,
+                createdBy: context.auth.uid,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              };
+
+              const expenseRef = await db
+                .collection('expenses')
+                .add(expenseData);
+              console.log(
+                `Expense record created with ID: ${expenseRef.id} for material: ${name}`
+              );
+
+              // Keep track of created expenses
+              expensesCreated.push({
+                id: expenseRef.id,
+                description: expenseData.description,
+                amount: expenseData.amount,
+              });
+            } else {
+              console.log(
+                `No expense record created for material ${name} - cost is zero`
+              );
+            }
           } catch (itemError) {
             // Log error but continue with other items
             console.error(
@@ -282,6 +328,7 @@ export const savePOReceiptConfirmation = functions
         await poRef.update({
           inventoryProcessed: true,
           inventoryProcessedAt: admin.firestore.FieldValue.serverTimestamp(),
+          expensesCreated: expensesCreated,
         });
         console.log(`PO ${poId} has been marked as processed for inventory.`);
       } else {
@@ -291,6 +338,11 @@ export const savePOReceiptConfirmation = functions
       return {
         success: true,
         message: 'PO đã được xác nhận và vật tư đã được thêm vào kho tự động.',
+        expenses: {
+          count: expensesCreated.length,
+          total: expensesCreated.reduce((sum, exp) => sum + exp.amount, 0),
+          items: expensesCreated,
+        },
       };
     } catch (err: any) {
       console.error('savePOReceiptConfirmation error', err);

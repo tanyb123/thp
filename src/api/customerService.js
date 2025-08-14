@@ -89,13 +89,19 @@ export const getCustomerById = async (customerId) => {
  */
 export const updateCustomer = async (customerId, customerData, userId) => {
   try {
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(customerData).filter(([_, value]) => value !== undefined)
+    );
+
     const customerRef = doc(db, 'customers', customerId);
     await updateDoc(customerRef, {
-      ...customerData,
+      ...cleanData,
       updatedAt: serverTimestamp(),
       updatedBy: userId,
     });
   } catch (error) {
+    console.error('Lỗi khi cập nhật khách hàng:', error);
     throw error;
   }
 };

@@ -31,10 +31,18 @@ import {
   getAttendance,
   addOvertime,
 } from '../api/attendanceService';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import * as WebBrowser from 'expo-web-browser';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { getApp } from 'firebase/app';
+import { useAuth } from '../contexts/AuthContext';
 
-const AttendanceScreen = () => {
+const AttendanceScreen = ({ navigation }) => {
   const { theme } = useTheme();
+  const { user } = useAuth(); // Get user from AuthContext
+  const isAccountant = user?.role === 'ke_toan'; // Check if user is an accountant
+
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
@@ -47,6 +55,7 @@ const AttendanceScreen = () => {
   const [showOvertimeModal, setShowOvertimeModal] = useState(false);
   const [overtimeHours, setOvertimeHours] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const functions = getFunctions(getApp(), 'asia-southeast1');
 
   // Add default overtime hours
   const DEFAULT_OVERTIME_HOURS = 2.5; // Default 2.5 hours (20:30)
@@ -268,6 +277,127 @@ const AttendanceScreen = () => {
     setShowOvertimeModal(true);
   };
 
+  // Export attendance data to Excel
+  const exportToExcel = async () => {
+    try {
+      setSavingId('export');
+
+      // Get current year and month from selectedDate
+      const year = selectedDate.getFullYear();
+      const month = selectedDate.getMonth() + 1; // JavaScript months are 0-indexed
+
+      // Show confirmation alert
+      Alert.alert(
+        'Xuất báo cáo chấm công',
+        `Xuất dữ liệu chấm công tháng ${month}/${year}?`,
+        [
+          {
+            text: 'Hủy',
+            style: 'cancel',
+            onPress: () => setSavingId(null),
+          },
+          {
+            text: 'Xuất Excel',
+            onPress: async () => {
+              try {
+                // Get the Google access token
+                // In a real app, you'd fetch this from your authentication service
+                // For now, we'll assume you have a function to get it
+                const accessToken = await getGoogleAccessToken();
+
+                if (!accessToken) {
+                  Alert.alert('Lỗi', 'Không thể lấy Google access token');
+                  setSavingId(null);
+                  return;
+                }
+
+                // Call the Cloud Function to generate the Excel file
+                const generateAttendanceExcel = httpsCallable(
+                  functions,
+                  'generateExcelAttendance'
+                );
+                const result = await generateAttendanceExcel({
+                  year,
+                  month,
+                  accessToken,
+                });
+
+                // Check if successful
+                if (result.data.success) {
+                  // Open the Excel file in a browser
+                  await WebBrowser.openBrowserAsync(result.data.fileUrl);
+                  Alert.alert(
+                    'Thành công',
+                    'Đã tạo file Excel báo cáo chấm công'
+                  );
+                } else {
+                  Alert.alert('Lỗi', 'Không thể tạo file Excel');
+                }
+              } catch (error) {
+                console.error('Export Excel error:', error);
+                Alert.alert('Lỗi', `Không thể xuất Excel: ${error.message}`);
+              } finally {
+                setSavingId(null);
+              }
+            },
+          },
+        ],
+        { cancelable: true, onDismiss: () => setSavingId(null) }
+      );
+    } catch (error) {
+      console.error('Export Excel prepare error:', error);
+      Alert.alert('Lỗi', 'Không thể chuẩn bị xuất Excel');
+      setSavingId(null);
+    }
+  };
+
+  // Get Google access token using GoogleSignin - same approach as other Excel generators
+  const getGoogleAccessToken = async () => {
+    try {
+      const isSignedIn = await GoogleSignin.isSignedIn();
+      if (!isSignedIn) {
+        Alert.alert(
+          'Chưa đăng nhập Google',
+          'Vui lòng đăng nhập với Google để xuất dữ liệu.',
+          [
+            { text: 'Đóng', style: 'cancel' },
+            {
+              text: 'Đăng nhập',
+              onPress: async () => {
+                try {
+                  await GoogleSignin.hasPlayServices();
+                  await GoogleSignin.signIn();
+                  // After signing in, retry
+                  exportToExcel();
+                } catch (error) {
+                  console.error('Google Sign In Error:', error);
+                  Alert.alert('Lỗi', 'Không thể đăng nhập với Google.');
+                }
+              },
+            },
+          ]
+        );
+        return null;
+      }
+
+      // User is signed in, get token
+      const tokens = await GoogleSignin.getTokens();
+      if (!tokens || !tokens.accessToken) {
+        throw new Error('Không lấy được token Google');
+      }
+
+      console.log('Đã lấy Google access token thành công');
+      return tokens.accessToken;
+    } catch (error) {
+      console.error('Google token error:', error);
+      Alert.alert(
+        'Lỗi xác thực',
+        'Không lấy được token Google: ' + error.message
+      );
+      return null;
+    }
+  };
+
   const renderItem = ({ item }) => {
     const attendance = attMap[item.uid];
     const present = attendance?.present;
@@ -297,7 +427,8 @@ const AttendanceScreen = () => {
         {overtime > 0 && (
           <TouchableOpacity
             style={styles.overtimeBadge}
-            onPress={() => openOvertimeModal(item)}
+            onPress={() => !isAccountant && openOvertimeModal(item)}
+            disabled={isAccountant}
           >
             <Ionicons
               name="time"
@@ -313,8 +444,8 @@ const AttendanceScreen = () => {
 
         <View style={styles.attendanceActions}>
           <TouchableOpacity
-            onPress={() => togglePresent(item)}
-            disabled={isSaving}
+            onPress={() => !isAccountant && togglePresent(item)}
+            disabled={isSaving || isAccountant}
             style={styles.checkButton}
           >
             {isSaving ? (
@@ -330,8 +461,8 @@ const AttendanceScreen = () => {
 
           <View style={styles.overtimeActionContainer}>
             <TouchableOpacity
-              onPress={() => toggleOvertime(item)}
-              disabled={isSaving}
+              onPress={() => !isAccountant && toggleOvertime(item)}
+              disabled={isSaving || isAccountant}
               style={styles.checkButtonOvertime}
             >
               {isSaving ? (
@@ -433,28 +564,71 @@ const AttendanceScreen = () => {
 
       {/* Action buttons */}
       <View style={styles.actionBar}>
+        {!isAccountant && (
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              { backgroundColor: theme.secondary || '#FF9500' },
+            ]}
+            onPress={markAllPresent}
+            disabled={savingId === 'all' || isAccountant}
+          >
+            {savingId === 'all' ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons
+                  name="checkbox"
+                  size={18}
+                  color="#fff"
+                  style={styles.actionIcon}
+                />
+                <Text style={styles.actionText}>Chấm Công Tất Cả</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity
           style={[
             styles.actionButton,
-            { backgroundColor: theme.secondary || '#FF9500' },
+            { backgroundColor: theme.success || '#4CAF50' },
           ]}
-          onPress={markAllPresent}
-          disabled={savingId === 'all'}
+          onPress={() => exportToExcel()}
+          disabled={savingId === 'export'}
         >
-          {savingId === 'all' ? (
+          {savingId === 'export' ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
             <>
               <Ionicons
-                name="checkbox"
+                name="document-text"
                 size={18}
                 color="#fff"
                 style={styles.actionIcon}
               />
-              <Text style={styles.actionText}>Chấm Công Tất Cả</Text>
+              <Text style={styles.actionText}>Xuất Excel</Text>
             </>
           )}
         </TouchableOpacity>
+
+        {isAccountant && (
+          <TouchableOpacity
+            style={[
+              styles.actionButton,
+              { backgroundColor: theme.info || '#007BFF' },
+            ]}
+            onPress={() => navigation.navigate('AssignSalary')}
+          >
+            <Ionicons
+              name="cash-outline"
+              size={18}
+              color="#fff"
+              style={styles.actionIcon}
+            />
+            <Text style={styles.actionText}>Gán Lương</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Employee list */}
@@ -519,12 +693,14 @@ const AttendanceScreen = () => {
       )}
 
       {/* Add employee button */}
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: theme.primary }]}
-        onPress={() => setShowAddModal(true)}
-      >
-        <Ionicons name="person-add" size={24} color="#fff" />
-      </TouchableOpacity>
+      {!isAccountant && (
+        <TouchableOpacity
+          style={[styles.fab, { backgroundColor: theme.primary }]}
+          onPress={() => setShowAddModal(true)}
+        >
+          <Ionicons name="person-add" size={24} color="#fff" />
+        </TouchableOpacity>
+      )}
 
       {/* Date picker */}
       {showDatePicker && (

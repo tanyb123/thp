@@ -112,13 +112,21 @@ export const updateProposalStatus = async (
   comment = ''
 ) => {
   const proposalRef = doc(db, 'purchase_proposals', proposalId);
-  await updateDoc(proposalRef, {
+
+  // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+  const updateData = {
     status,
     approvedBy,
     approvedByName,
     approvedAt: serverTimestamp(),
     comment,
-  });
+  };
+
+  const cleanData = Object.fromEntries(
+    Object.entries(updateData).filter(([_, value]) => value !== undefined)
+  );
+
+  await updateDoc(proposalRef, cleanData);
 
   // Create a notification for the creator
   if (status === 'approved' || status === 'rejected') {
@@ -178,10 +186,17 @@ export const updateProposalMaterialPrices = async (proposalId, materials) => {
     }
   });
 
-  await updateDoc(ref, {
+  const updateData = {
     items: materials,
     hasPrices: true,
     totalValue: totalOrderValue,
     priceUpdatedAt: serverTimestamp(),
-  });
+  };
+
+  // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+  const cleanData = Object.fromEntries(
+    Object.entries(updateData).filter(([_, value]) => value !== undefined)
+  );
+
+  await updateDoc(ref, cleanData);
 };

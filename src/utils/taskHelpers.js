@@ -8,11 +8,17 @@ export const getTaskDisplayLabel = (taskKey, taskData) => {
   const taskLabels = {
     material_separation: 'Bóc tách vật tư',
     quotation: 'Báo giá',
-    material_purchasing: 'Mua vật tư & phụ kiện',
+    material_purchasing: 'Mua vật tư',
     material_cutting: 'Cắt phôi',
     assembly: 'Lắp ráp',
     painting: 'Sơn',
     shipping: 'Vận chuyển',
+    turning: 'Tiện',
+    milling: 'Phay',
+    welding: 'Hàn',
+    bending: 'Chấn',
+    drilling: 'Khoan',
+    grinding: 'Mài',
     other: taskData?.name || 'Công việc khác',
   };
   return taskLabels[taskKey] || taskKey.replace(/_/g, ' ');
@@ -38,14 +44,14 @@ export const getStatusDisplayLabel = (status) => {
  * @param {object} theme The application theme object.
  * @returns {string} The color hex code.
  */
-export const getStatusColor = (status, theme) => {
+export const getStatusColor = (status, theme = {}) => {
   switch (status) {
     case 'completed':
-      return theme.success || '#28a745';
+      return theme.statusCompleted || theme.success || '#28a745';
     case 'in_progress':
-      return theme.info || '#17a2b8';
+      return theme.statusInProgress || theme.info || '#17a2b8';
     case 'pending':
-      return theme.warning || '#ffc107';
+      return theme.statusPending || theme.warning || '#ffc107';
     default:
       return theme.textMuted || '#6c757d';
   }

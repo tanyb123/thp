@@ -174,13 +174,21 @@ export const updateProject = async (projectId, projectData, userId) => {
       }
     }
 
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(projectToUpdate).filter(
+        ([_, value]) => value !== undefined
+      )
+    );
+
     const projectRef = doc(db, 'projects', projectId);
     await updateDoc(projectRef, {
-      ...projectToUpdate,
+      ...cleanData,
       updatedAt: serverTimestamp(),
       updatedBy: userId,
     });
   } catch (error) {
+    console.error('Lỗi khi cập nhật dự án:', error);
     throw error;
   }
 };
@@ -233,9 +241,30 @@ export const getProjectsByCustomer = async (customerId) => {
 export const getProjectsByStatus = async (status) => {
   try {
     const projectsRef = collection(db, 'projects');
+
+    // Special case for 'all' - return all projects
+    if (status === 'all') {
+      const q = query(projectsRef, orderBy('createdAt', 'desc'));
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+    }
+
+    // Map filter keys to actual status values in the database
+    let statusValue = status;
+    if (status === 'in_progress') {
+      statusValue = 'in-progress';
+    } else if (status === 'production_complete') {
+      statusValue = 'production-complete';
+    } else if (status === 'delivered') {
+      statusValue = 'delivered';
+    }
+
     const q = query(
       projectsRef,
-      where('status', '==', status),
+      where('status', '==', statusValue),
       orderBy('createdAt', 'desc')
     );
 
@@ -340,28 +369,80 @@ export const updateWorkflowStageStatus = async (
   newStatus,
   assignedToId = null
 ) => {
-  try {
-    const projectRef = doc(db, 'projects', projectId);
-    await updateDoc(projectRef, {
-      workflowStages: arrayUnion(), // placeholder to trigger merge; we'll overwrite in transaction
+  console.log('🔄 updateWorkflowStageStatus called:', {
+    projectId,
+    stageId,
+    newStatus,
+    assignedToId,
+  });
+
+  // 🔧 ALWAYS use transaction for workflowStages updates to ensure consistency
+  console.log(
+    '🔄 Using transaction for workflowStages update (recommended approach)'
+  );
+
+  await runTransaction(db, async (transaction) => {
+    const ref = doc(db, 'projects', projectId);
+    const snap = await transaction.get(ref);
+
+    if (!snap.exists()) {
+      console.error('❌ Project not found:', projectId);
+      throw new Error('Project not found');
+    }
+
+    const stages = snap.data().workflowStages || [];
+    console.log(
+      '📋 Current stages:',
+      stages.map((s) => ({
+        stageId: s.stageId,
+        processName: s.processName,
+        status: s.status,
+      }))
+    );
+
+    console.log('🔍 Looking for stageId:', stageId);
+    console.log(
+      '🔍 Available stageIds:',
+      stages.map((s) => s.stageId)
+    );
+    console.log('🔍 StageId type:', typeof stageId);
+    console.log(
+      '🔍 Available stageId types:',
+      stages.map((s) => typeof s.stageId)
+    );
+
+    const idx = stages.findIndex((s) => s.stageId === stageId);
+    console.log('🎯 Found stage at index:', idx);
+
+    if (idx === -1) {
+      console.error('❌ Stage not found:', stageId);
+      console.error(
+        'Available stageIds:',
+        stages.map((s) => s.stageId)
+      );
+      throw new Error('Stage not found');
+    }
+
+    console.log(`🎯 Found stage at index ${idx}:`, {
+      stageId: stages[idx].stageId,
+      processName: stages[idx].processName,
+      currentStatus: stages[idx].status,
+      newStatus,
     });
-  } catch (e) {
-    console.error('Direct update failed, fallback to transaction', e);
-    await runTransaction(db, async (transaction) => {
-      const ref = doc(db, 'projects', projectId);
-      const snap = await transaction.get(ref);
-      if (!snap.exists()) throw new Error('Project not found');
-      const stages = snap.data().workflowStages || [];
-      const idx = stages.findIndex((s) => s.stageId === stageId);
-      if (idx === -1) throw new Error('Stage not found');
-      stages[idx] = {
-        ...stages[idx],
-        status: newStatus,
-        ...(assignedToId ? { assignedToId } : {}),
-      };
-      transaction.update(ref, { workflowStages: stages });
+
+    stages[idx] = {
+      ...stages[idx],
+      status: newStatus,
+      ...(assignedToId ? { assignedToId } : {}),
+    };
+
+    console.log('💾 Updating stage to:', stages[idx]);
+    transaction.update(ref, {
+      workflowStages: stages,
+      updatedAt: serverTimestamp(),
     });
-  }
+    console.log('✅ Transaction update completed');
+  });
 };
 
 /**
@@ -382,9 +463,14 @@ export const updateStageDetails = async (projectId, stageId, data) => {
       const idx = stages.findIndex((s) => s.stageId === stageId);
       if (idx === -1) throw new Error('Stage not found');
 
+      // Loại bỏ các field undefined từ data
+      const cleanData = Object.fromEntries(
+        Object.entries(data).filter(([_, value]) => value !== undefined)
+      );
+
       stages[idx] = {
         ...stages[idx],
-        ...data, // status, notes, files
+        ...cleanData, // status, notes, files
       };
 
       tx.update(projectRef, {
@@ -473,6 +559,98 @@ const ProjectService = {
       throw error;
     }
   },
+};
+
+/**
+ * Assign worker to a project stage
+ * @param {string} projectId - Project ID
+ * @param {string} stageId - Stage ID
+ * @param {string} workerId - Worker ID
+ * @param {string} workerName - Worker name
+ * @returns {Promise<void>}
+ */
+export const assignWorkerToStage = async (
+  projectId,
+  stageId,
+  workerId,
+  workerName
+) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+
+    await runTransaction(db, async (transaction) => {
+      const projectDoc = await transaction.get(projectRef);
+
+      if (!projectDoc.exists()) {
+        throw new Error('Project not found');
+      }
+
+      const projectData = projectDoc.data();
+      const workflowStages = projectData.workflowStages || [];
+
+      // Find and update the specific stage
+      const updatedStages = workflowStages.map((stage) => {
+        if (stage.stageId === stageId) {
+          const assignedWorkers = stage.assignedWorkers || [];
+
+          // Check if worker is already assigned
+          if (!assignedWorkers.includes(workerId)) {
+            return {
+              ...stage,
+              assignedWorkers: [...assignedWorkers, workerId],
+              assignedWorkerNames: [
+                ...(stage.assignedWorkerNames || []),
+                workerName,
+              ],
+              status: 'assigned', // Update status to assigned
+              assignedAt: new Date(),
+            };
+          }
+        }
+        return stage;
+      });
+
+      // Update the project with new stage assignments
+      transaction.update(projectRef, {
+        workflowStages: updatedStages,
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    console.log(
+      `Successfully assigned ${workerName} to stage ${stageId} in project ${projectId}`
+    );
+  } catch (error) {
+    console.error('Error assigning worker to stage:', error);
+    throw error;
+  }
+};
+
+export const saveProjectAccessoryPrice = async (projectId, accessoryPrice) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    await updateDoc(projectRef, {
+      accessoryPrice: Number(accessoryPrice || 0),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    console.error('Lỗi khi lưu giá phụ kiện:', error);
+    throw error;
+  }
+};
+
+export const getProjectAccessoryPrice = async (projectId) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const projectSnap = await getDoc(projectRef);
+    if (projectSnap.exists()) {
+      return projectSnap.data().accessoryPrice || 0;
+    }
+    return 0;
+  } catch (error) {
+    console.error('Lỗi khi lấy giá phụ kiện:', error);
+    return 0;
+  }
 };
 
 export default ProjectService;

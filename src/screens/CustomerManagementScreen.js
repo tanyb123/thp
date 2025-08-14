@@ -17,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { getCustomers } from '../api/customerService';
 import { useTheme } from '../contexts/ThemeContext';
+import CustomerAddModal from '../components/CustomerAddModal';
 
 // Component hiển thị từng khách hàng trong danh sách
 const CustomerListItem = ({ customer, onPress }) => {
@@ -128,6 +129,7 @@ const CustomerManagementScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredCustomers, setFilteredCustomers] = useState([]);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   // Hàm tải danh sách khách hàng
   const loadCustomers = async () => {
@@ -204,7 +206,15 @@ const CustomerManagementScreen = ({ navigation }) => {
 
   // Xử lý khi người dùng muốn thêm khách hàng mới
   const handleAddCustomer = () => {
+    setShowAddModal(true);
+  };
+
+  const handleManualAdd = () => {
     navigation.navigate('AddCustomer');
+  };
+
+  const handleImportExcel = () => {
+    navigation.navigate('CustomerImport');
   };
 
   // Xử lý khi người dùng nhập từ khóa tìm kiếm
@@ -307,12 +317,24 @@ const CustomerManagementScreen = ({ navigation }) => {
         <Text style={[styles.headerTitle, { color: theme.text }]}>
           Quản lý Khách hàng
         </Text>
-        <TouchableOpacity
-          style={[styles.addButton, { backgroundColor: theme.primary }]}
-          onPress={handleAddCustomer}
-        >
-          <Ionicons name="add" size={24} color="#fff" />
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity
+            style={[styles.importButton, { borderColor: theme.border }]}
+            onPress={() => navigation.navigate('CustomerImport')}
+          >
+            <Ionicons
+              name="cloud-upload-outline"
+              size={20}
+              color={theme.primary}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.addButton, { backgroundColor: theme.primary }]}
+            onPress={handleAddCustomer}
+          >
+            <Ionicons name="add" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View
@@ -386,6 +408,14 @@ const CustomerManagementScreen = ({ navigation }) => {
           }
         />
       )}
+
+      {/* Add Customer Modal */}
+      <CustomerAddModal
+        visible={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onManualAdd={handleManualAdd}
+        onImportExcel={handleImportExcel}
+      />
     </SafeAreaView>
   );
 };
@@ -412,6 +442,19 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  importButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addButton: {
     width: 40,

@@ -28,7 +28,6 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import * as ImagePicker from 'expo-image-picker';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const UserManagementScreen = () => {
   const { theme } = useTheme();
@@ -42,7 +41,8 @@ const UserManagementScreen = () => {
     email: '',
     role: '',
     photoURL: '',
-    monthlySalary: '',
+    dailySalary: '',
+    monthlySalary: '', // Added monthlySalary
     phoneNumber: '',
     address: '',
     notes: '',
@@ -93,7 +93,8 @@ const UserManagementScreen = () => {
       email: user.email || '',
       role: user.role || 'user',
       photoURL: user.photoURL || '',
-      monthlySalary: user.monthlySalary ? String(user.monthlySalary) : '',
+      dailySalary: user.dailySalary ? String(user.dailySalary) : '',
+      monthlySalary: user.monthlySalary ? String(user.monthlySalary) : '', // Added monthlySalary
       phoneNumber: user.phoneNumber || '',
       address: user.address || '',
       notes: user.notes || '',
@@ -117,7 +118,10 @@ const UserManagementScreen = () => {
       // Convert salary to number if provided
       const userData = {
         ...editData,
-        monthlySalary: editData.monthlySalary
+        dailySalary: editData.dailySalary
+          ? parseFloat(editData.dailySalary)
+          : null,
+        monthlySalary: editData.monthlySalary // Added monthlySalary
           ? parseFloat(editData.monthlySalary)
           : null,
       };
@@ -148,50 +152,82 @@ const UserManagementScreen = () => {
   // Pick and upload profile image
   const pickImage = async () => {
     try {
+      // Request permissions first
+      const { status } =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Lỗi', 'Cần quyền truy cập thư viện ảnh để upload ảnh');
+        return;
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7,
+        quality: 0.7, // Tăng quality một chút cho ảnh đẹp hơn
+        base64: true, // Bật base64 để lấy dữ liệu trực tiếp
       });
 
+      console.log('ImagePicker result:', result);
+
       if (!result.canceled && result.assets && result.assets[0]) {
-        uploadImage(result.assets[0].uri);
+        const asset = result.assets[0];
+        console.log('Selected image:', {
+          uri: asset.uri,
+          width: asset.width,
+          height: asset.height,
+          fileSize: asset.fileSize,
+        });
+
+        uploadImageAsBase64(asset.base64, asset.uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
-      Alert.alert('Lỗi', 'Không thể chọn ảnh');
+      Alert.alert('Lỗi', 'Không thể chọn ảnh: ' + error.message);
     }
   };
 
-  // Upload image to Firebase Storage
-  const uploadImage = async (uri) => {
+  // Upload image as base64 - Main method
+  const uploadImageAsBase64 = async (base64Data, uri) => {
     try {
       setUploadingImage(true);
+      console.log('Starting base64 image upload');
 
-      // Convert image to blob
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      // Validate base64 data
+      if (!base64Data) {
+        throw new Error('Invalid base64 data');
+      }
 
-      // Upload to Firebase Storage
-      const storage = getStorage();
-      const fileExtension = uri.split('.').pop();
-      const fileName = `profile_${
-        selectedUser.id
-      }_${Date.now()}.${fileExtension}`;
-      const storageRef = ref(storage, `profiles/${fileName}`);
+      // Get file extension from URI
+      const fileExtension = uri.split('.').pop() || 'jpg';
 
-      await uploadBytes(storageRef, blob);
-      const downloadURL = await getDownloadURL(storageRef);
+      // Create data URL with proper MIME type
+      const mimeType = `image/${fileExtension}`;
+      const dataURL = `data:${mimeType};base64,${base64Data}`;
 
-      // Update edit data with new image URL
+      console.log('Base64 data length:', base64Data.length);
+      console.log('Data URL created with MIME type:', mimeType);
+
+      // Update edit data with base64 image
       setEditData((prev) => ({
         ...prev,
-        photoURL: downloadURL,
+        photoURL: dataURL,
       }));
+
+      console.log('Base64 image saved successfully');
+      Alert.alert('Thành công', 'Đã lưu ảnh thành công!');
     } catch (error) {
-      console.error('Error uploading image:', error);
-      Alert.alert('Lỗi', 'Không thể tải lên ảnh');
+      console.error('Error uploading base64 image:', error);
+
+      let errorMessage = 'Không thể lưu ảnh';
+      if (error.message.includes('Invalid')) {
+        errorMessage = 'Dữ liệu ảnh không hợp lệ';
+      }
+
+      Alert.alert(
+        'Lỗi Upload',
+        errorMessage + '\n\nChi tiết: ' + error.message
+      );
     } finally {
       setUploadingImage(false);
     }
@@ -231,9 +267,14 @@ const UserManagementScreen = () => {
           <Text style={[styles.userRole, { color: theme.textSecondary }]}>
             {getRoleLabel(item.role)}
           </Text>
-          {item.monthlySalary && (
+          {item.dailySalary && (
             <Text style={[styles.userSalary, { color: theme.textMuted }]}>
-              {formatCurrency(item.monthlySalary)} VND/tháng
+              Lương ngày: {formatCurrency(item.dailySalary)} VND
+            </Text>
+          )}
+          {item.monthlySalary && ( // Added monthlySalary display
+            <Text style={[styles.userSalary, { color: theme.textMuted }]}>
+              Lương tháng: {formatCurrency(item.monthlySalary)} VND
             </Text>
           )}
         </View>
@@ -430,7 +471,31 @@ const UserManagementScreen = () => {
 
               <View style={styles.formGroup}>
                 <Text style={[styles.label, { color: theme.text }]}>
-                  Lương tháng (VND)
+                  Lương theo ngày (VND)
+                </Text>
+                <TextInput
+                  style={[
+                    styles.input,
+                    { borderColor: theme.border, color: theme.text },
+                  ]}
+                  value={editData.dailySalary} // Changed from monthlySalary
+                  onChangeText={(text) => {
+                    // Only allow numbers
+                    const filtered = text.replace(/[^0-9]/g, '');
+                    setEditData((prev) => ({
+                      ...prev,
+                      dailySalary: filtered, // Changed from monthlySalary
+                    }));
+                  }}
+                  placeholder="Lương theo ngày"
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="numeric"
+                />
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={[styles.label, { color: theme.text }]}>
+                  Lương cố định (tháng, VND)
                 </Text>
                 <TextInput
                   style={[
@@ -439,14 +504,13 @@ const UserManagementScreen = () => {
                   ]}
                   value={editData.monthlySalary}
                   onChangeText={(text) => {
-                    // Only allow numbers
                     const filtered = text.replace(/[^0-9]/g, '');
                     setEditData((prev) => ({
                       ...prev,
                       monthlySalary: filtered,
                     }));
                   }}
-                  placeholder="Lương tháng"
+                  placeholder="Lương cố định nguyên tháng"
                   placeholderTextColor={theme.textMuted}
                   keyboardType="numeric"
                 />

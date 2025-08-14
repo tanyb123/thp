@@ -34,6 +34,7 @@ import ProposalListScreen from '../screens/ProposalListScreen';
 import CreatePOScreen from '../screens/CreatePOScreen';
 import POListScreen from '../screens/POListScreen';
 import CreateDeliveryNoteScreen from '../screens/CreateDeliveryNoteScreen';
+import ProjectCostScreen from '../screens/ProjectCostScreen';
 // import StagingScreen from '../screens/StagingScreen';
 
 // Import màn hình tài khoản
@@ -47,8 +48,13 @@ import UserManagementScreen from '../screens/UserManagementScreen';
 
 // Import màn hình dashboard cho giám đốc
 import DirectorDashboardScreen from '../screens/DirectorDashboardScreen';
+
+// Import màn hình cài đặt icon
+import IconSettingsScreen from '../screens/IconSettingsScreen';
+import CustomIconDebug from '../components/CustomIconDebug';
 import DebtDashboard from '../screens/DebtDashboard';
 import NotificationsScreen from '../screens/NotificationsScreen'; // Import NotificationsScreen
+import FinancialDashboardScreen from '../screens/FinancialDashboardScreen';
 
 // Import các màn hình quản lý nhà cung cấp
 import SupplierManagementScreen from '../screens/SupplierManagementScreen';
@@ -64,6 +70,35 @@ import EditInventoryItemScreen from '../screens/EditInventoryItemScreen';
 import InventoryItemDetailScreen from '../screens/InventoryItemDetailScreen';
 import InventoryTransactionScreen from '../screens/InventoryTransactionScreen';
 import InventoryReportScreen from '../screens/InventoryReportScreen';
+import AssignSalaryScreen from '../screens/AssignSalaryScreen';
+
+// Import expense tracking screens
+import ExpenseListScreen from '../screens/ExpenseListScreen';
+
+// Import the AddCompanyExpenseScreen
+import AddCompanyExpenseScreen from '../screens/AddCompanyExpenseScreen';
+
+// Import material management screen
+import MaterialManagementScreen from '../screens/MaterialManagementScreen';
+import MonthlyCostReportScreen from '../screens/MonthlyCostReportScreen';
+import CustomerImportScreen from '../screens/CustomerImportScreen';
+
+// Import the payment screens
+import PaymentRequestListScreen from '../screens/PaymentRequestListScreen';
+import CreatePaymentRequestScreen from '../screens/CreatePaymentRequestScreen';
+import PaymentRequestDetailScreen from '../screens/PaymentRequestDetailScreen';
+
+// Import production screens
+import KioskScreen from '../screens/KioskScreen';
+import StarboardScreen from '../screens/StarboardScreen';
+import ProductionDashboard from '../screens/ProductionDashboard';
+import WorkAllocationScreen from '../screens/WorkAllocationScreen';
+
+// Import AI Chat screen
+import AIChatScreen from '../screens/AIChatScreen';
+
+// Import Project Discussion screen
+import ProjectDiscussionScreen from '../screens/ProjectDiscussionScreen';
 
 // Tạo Stack Navigator cho quản lý dự án
 const ProjectStack = createNativeStackNavigator();
@@ -88,25 +123,7 @@ const ProjectStackNavigator = () => {
       <ProjectStack.Screen
         name="ProjectManagement"
         component={ProjectManagementScreen}
-        options={({ navigation }) => ({
-          title: 'Quản lý Dự án',
-          headerRight: () => (
-            <TouchableOpacity
-              onPress={() => navigation.navigate('AddProject')}
-              style={{
-                marginRight: 15,
-                backgroundColor: theme.primary,
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
-            >
-              <Ionicons name="add" size={24} color="#fff" />
-            </TouchableOpacity>
-          ),
-        })}
+        options={{ headerShown: false }}
       />
       <ProjectStack.Screen
         name="ProjectDetail"
@@ -136,7 +153,7 @@ const ProjectStackNavigator = () => {
       <ProjectStack.Screen
         name="FinalizeQuotation"
         component={FinalizeQuotationScreen}
-        options={{ title: 'Hoàn tất Báo giá', headerRight: null }}
+        options={{ headerShown: false }}
       />
       <ProjectStack.Screen
         name="StageDetail"
@@ -147,6 +164,11 @@ const ProjectStackNavigator = () => {
         name="MaterialPurchase"
         component={MaterialPurchaseScreen}
         options={{ title: 'Quản lý Mua Vật Tư' }}
+      />
+      <ProjectStack.Screen
+        name="AIChat"
+        component={AIChatScreen}
+        options={{ headerShown: false }}
       />
       <ProjectStack.Screen
         name="CreateProposal"
@@ -167,6 +189,16 @@ const ProjectStackNavigator = () => {
         name="POList"
         component={POListScreen}
         options={{ title: 'Đơn đặt hàng' }}
+      />
+      <ProjectStack.Screen
+        name="ProjectCost"
+        component={ProjectCostScreen}
+        options={{ title: 'Chi phí dự án', headerShown: false }}
+      />
+      <ProjectStack.Screen
+        name="ProjectDiscussion"
+        component={ProjectDiscussionScreen}
+        options={{ headerShown: false }}
       />
     </ProjectStack.Navigator>
   );
@@ -412,14 +444,6 @@ const MainTabNavigator = () => {
         />
       )}
 
-      {canManageAttendance && (
-        <Tab.Screen
-          name="Attendance"
-          component={AttendanceScreen}
-          options={{ title: 'Chấm Công' }}
-        />
-      )}
-
       {canAccessInventory && (
         <Tab.Screen
           name="Inventory"
@@ -613,7 +637,99 @@ const AppNavigator = () => {
               name="CreateDeliveryNote"
               component={CreateDeliveryNoteScreen}
             />
+            <Stack.Screen
+              name="Attendance"
+              component={AttendanceScreen}
+              options={{ title: 'Bảng Chấm Công' }}
+            />
+            <Stack.Screen
+              name="AssignSalary"
+              component={AssignSalaryScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="ProjectCost"
+              component={ProjectCostScreen}
+              options={{ headerShown: false }}
+            />
             {/* <Stack.Screen name="Staging" component={StagingScreen} /> */}
+
+            {/* Add the new expense tracking screens */}
+            <Stack.Screen
+              name="ExpenseList"
+              component={ExpenseListScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="AddCompanyExpense"
+              component={AddCompanyExpenseScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="PaymentRequestList"
+              component={PaymentRequestListScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="CreatePaymentRequest"
+              component={CreatePaymentRequestScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="PaymentRequestDetail"
+              component={PaymentRequestDetailScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="FinancialDashboard"
+              component={FinancialDashboardScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="Kiosk"
+              component={KioskScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="Starboard"
+              component={StarboardScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="ProductionDashboard"
+              component={ProductionDashboard}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="WorkAllocation"
+              component={WorkAllocationScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="MaterialManagement"
+              component={MaterialManagementScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="MonthlyCostReport"
+              component={MonthlyCostReportScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="CustomerImport"
+              component={CustomerImportScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="IconSettings"
+              component={IconSettingsScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="CustomIconDebug"
+              component={CustomIconDebug}
+              options={{ headerShown: false }}
+            />
           </>
         ) : (
           // Người dùng chưa đăng nhập

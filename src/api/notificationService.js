@@ -44,7 +44,14 @@ export const markNotificationAsRead = async (notificationId) => {
 
   try {
     const ref = doc(db, 'notifications', notificationId);
-    await updateDoc(ref, { read: true });
+    const data = { read: true };
+
+    // Loại bỏ các field có giá trị undefined để tránh lỗi Firestore
+    const cleanData = Object.fromEntries(
+      Object.entries(data).filter(([_, value]) => value !== undefined)
+    );
+
+    await updateDoc(ref, cleanData);
   } catch (error) {
     console.error('Error marking notification as read:', error);
   }

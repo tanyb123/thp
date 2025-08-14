@@ -556,7 +556,15 @@ const QuotationScreen = ({ route, navigation }) => {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.historyActionButton, styles.requoteButton]}
-                    onPress={() => handleRequote(item)}
+                    onPress={() =>
+                      handleRequote(
+                        item,
+                        navigation,
+                        projectId,
+                        projectName,
+                        project
+                      )
+                    }
                   >
                     <Ionicons name="copy-outline" size={20} color="#fff" />
                     <Text style={styles.historyActionButtonText}>

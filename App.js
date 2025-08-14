@@ -7,6 +7,7 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { Provider as PaperProvider } from 'react-native-paper';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
+import { AIChatProvider } from './src/contexts/AIChatContext';
 import AppNavigator from './src/navigation/AppNavigator';
 // Import để đảm bảo Firebase được khởi tạo trước
 import './src/config/firebaseConfig';
@@ -57,7 +58,9 @@ export default function App() {
       <PaperProvider>
         <AuthProvider>
           <ThemeProvider>
-            <AppNavigator />
+            <AIChatProvider>
+              <AppNavigator />
+            </AIChatProvider>
           </ThemeProvider>
         </AuthProvider>
       </PaperProvider>

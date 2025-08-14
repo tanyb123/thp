@@ -21,19 +21,50 @@ const MATERIAL_OPTIONS = ['SUS304', 'SS400', 'SUS316', 'SUS304 2B', 'Khác'];
 const UNIT_OPTIONS = ['Cái', 'Cây', 'Bộ', 'Kg', 'm'];
 
 const ManualQuotationScreen = ({ route, navigation }) => {
-  const { projectId, projectName, project } = route.params;
+  const {
+    projectId,
+    projectName,
+    project,
+    existingMaterials,
+    isRequote,
+    originalQuotationId,
+  } = route.params;
 
-  const [materials, setMaterials] = useState([
-    {
-      name: '',
-      material: MATERIAL_OPTIONS[0],
-      unit: UNIT_OPTIONS[0],
-      quantity: '',
-      unitPrice: '',
-      totalPrice: 0,
-      selected: false,
-    },
-  ]);
+  const [materials, setMaterials] = useState(() => {
+    // Nếu là requote và có existingMaterials, sử dụng dữ liệu cũ
+    if (isRequote && existingMaterials && Array.isArray(existingMaterials)) {
+      return existingMaterials.map((item, index) => {
+        const quantity = parseFloat(item.quantity) || 0;
+        const unitPrice = parseFloat(item.unitPrice) || 0;
+        const totalPrice = quantity * unitPrice; // Tính lại totalPrice
+
+        return {
+          stt: item.no || item.stt || '', // Lấy STT từ trường 'no' (được lưu trong Firestore) hoặc 'stt'
+          name: item.name || '',
+          material: item.material || MATERIAL_OPTIONS[0],
+          unit: item.unit || UNIT_OPTIONS[0],
+          quantity: item.quantity ? item.quantity.toString() : '',
+          unitPrice: item.unitPrice ? item.unitPrice.toString() : '0',
+          totalPrice: totalPrice, // Sử dụng totalPrice đã tính lại
+          selected: false,
+        };
+      });
+    }
+
+    // Nếu không phải requote, sử dụng dữ liệu mặc định
+    return [
+      {
+        stt: '', // Để trống STT như QuotationScreen
+        name: '',
+        material: MATERIAL_OPTIONS[0],
+        unit: UNIT_OPTIONS[0],
+        quantity: '',
+        unitPrice: '0',
+        totalPrice: 0,
+        selected: false,
+      },
+    ];
+  });
 
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
@@ -47,11 +78,12 @@ const ManualQuotationScreen = ({ route, navigation }) => {
     setMaterials((prev) => [
       ...prev,
       {
+        stt: '', // Để trống STT như QuotationScreen
         name: '',
         material: MATERIAL_OPTIONS[0],
         unit: UNIT_OPTIONS[0],
         quantity: '',
-        unitPrice: '',
+        unitPrice: '0',
         totalPrice: 0,
         selected: false,
       },
@@ -62,6 +94,7 @@ const ManualQuotationScreen = ({ route, navigation }) => {
     setMaterials((prev) => {
       const newArr = [...prev];
       newArr[index][field] = value;
+
       // Auto-recalculate total
       const qty = parseFloat(newArr[index].quantity) || 0;
       const unitP = parseFloat(newArr[index].unitPrice) || 0;
@@ -83,7 +116,9 @@ const ManualQuotationScreen = ({ route, navigation }) => {
     handleChange(activeSearchIndex, 'name', item.name);
     handleChange(activeSearchIndex, 'material', item.material || '');
     handleChange(activeSearchIndex, 'unit', item.unit || 'cái');
-    handleChange(activeSearchIndex, 'unitPrice', item.price?.toString() || '');
+    // Ensure unitPrice is set correctly
+    const price = item.price || item.unitPrice || 0;
+    handleChange(activeSearchIndex, 'unitPrice', price.toString());
     // You might want to also bring the item code and description
     handleChange(activeSearchIndex, 'code', item.code || '');
   };
@@ -125,7 +160,10 @@ const ManualQuotationScreen = ({ route, navigation }) => {
     setHasSelections(value);
   };
 
-  const formatNumber = (num) => (num || num === 0 ? num.toString() : '');
+  const formatNumber = (num) => {
+    if (num === null || num === undefined || num === '') return '0';
+    return num.toString();
+  };
 
   const computeSubTotal = () => {
     return materials.reduce((sum, m) => sum + (m.totalPrice || 0), 0);
@@ -166,6 +204,9 @@ const ManualQuotationScreen = ({ route, navigation }) => {
       projectId,
       projectName: project.name || projectName || 'Dự án',
       customerData,
+      isRequote,
+      originalQuotationId,
+      isManualQuotation: true, // Đánh dấu đây là manual quotation
     });
   };
 
@@ -182,6 +223,31 @@ const ManualQuotationScreen = ({ route, navigation }) => {
             color={item.selected ? '#0066CC' : '#999'}
           />
         </TouchableOpacity>
+
+        <View
+          style={[
+            styles.sttCol,
+            {
+              flex: 0.8,
+              justifyContent: 'center',
+              backgroundColor: '#f8f8f8',
+              borderRightWidth: 1,
+              borderRightColor: '#ddd',
+              marginRight: 2,
+            },
+          ]}
+        >
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: 'bold',
+              color: '#333',
+              textAlign: 'center',
+            }}
+          >
+            {item.stt || ''}
+          </Text>
+        </View>
 
         <TextInput
           style={[styles.input, { flex: 2 }]}
@@ -216,15 +282,15 @@ const ManualQuotationScreen = ({ route, navigation }) => {
           style={[styles.input, { flex: 0.8 }]}
           placeholder="SL"
           keyboardType="numeric"
-          value={formatNumber(item.quantity)}
+          value={item.quantity || ''}
           onChangeText={(text) => handleChange(index, 'quantity', text)}
         />
 
         <TextInput
           style={[styles.input, { flex: 1 }]}
-          placeholder="Đơn giá"
+          placeholder="0"
           keyboardType="numeric"
-          value={formatNumber(item.unitPrice)}
+          value={item.unitPrice || '0'}
           onChangeText={(text) => handleChange(index, 'unitPrice', text)}
         />
 
@@ -273,7 +339,10 @@ const ManualQuotationScreen = ({ route, navigation }) => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={{ padding: 16 }}>
-        <Text style={styles.title}>Báo Giá Thủ Công – {projectName}</Text>
+        <Text style={styles.title}>
+          {isRequote ? 'Báo Giá Lại Thủ Công' : 'Báo Giá Thủ Công'} –{' '}
+          {projectName}
+        </Text>
 
         <View style={styles.bulkActionContainer}>
           <View style={styles.selectAllContainer}>
@@ -310,6 +379,7 @@ const ManualQuotationScreen = ({ route, navigation }) => {
 
         <View style={styles.tableHeader}>
           <View style={{ width: 30 }}></View>
+          <Text style={[styles.headerCell, { flex: 0.8 }]}>STT</Text>
           <Text style={[styles.headerCell, { flex: 2 }]}>Tên VT</Text>
           <Text style={[styles.headerCell, { flex: 1.5 }]}>Vật Liệu</Text>
           <Text style={[styles.headerCell, { flex: 0.9 }]}>ĐVT</Text>
@@ -496,6 +566,16 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 4,
   },
+  sttCol: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  sttText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#333',
+  },
   searchIcon: {
     width: 40,
     justifyContent: 'center',
@@ -631,9 +711,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 4,
-  },
-  disabledButton: {
-    backgroundColor: '#ccc',
   },
   bulkPriceText: {
     color: '#fff',

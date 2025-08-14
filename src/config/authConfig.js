@@ -12,8 +12,8 @@ export const googleAuthConfig = {
 
   // Các scopes mặc định cho Google Drive
   driveScopes: [
-    'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/drive.metadata.readonly',
+    'https://www.googleapis.com/auth/drive.file', // Cho phép app tạo và quản lý các file do app tạo
+    // Nếu cần rộng hơn: 'https://www.googleapis.com/auth/drive'
   ],
 
   // Các scopes mặc định cho Google Sheets

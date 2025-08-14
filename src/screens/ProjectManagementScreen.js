@@ -27,11 +27,13 @@ const ProjectListItem = ({ project, onPress }) => {
       case 'completed':
         return '#4CAF50'; // xanh lá
       case 'in-progress':
-        return '#FFD54F'; // vàng nhạt
+        return '#1E88E5'; // xanh dương
       case 'pending':
-        return theme.textSecondary; // gray
-      case 'cancelled':
-        return '#F44336'; // đỏ
+        return '#FFA000'; // vàng
+      case 'production-complete':
+        return '#8E24AA'; // tím
+      case 'delivered':
+        return '#43A047'; // xanh lá nhạt
       default:
         return theme.textMuted; // Sử dụng màu từ theme
     }
@@ -46,8 +48,10 @@ const ProjectListItem = ({ project, onPress }) => {
         return 'Đang thực hiện';
       case 'pending':
         return 'Chờ xử lý';
-      case 'cancelled':
-        return 'Đã hủy';
+      case 'production-complete':
+        return 'Chờ giao hàng';
+      case 'delivered':
+        return 'Đã giao hàng';
       default:
         return status || 'Không xác định';
     }
@@ -143,27 +147,35 @@ const ProjectManagementScreen = ({ navigation }) => {
 
   // Status filters
   const FILTERS = [
+    { key: 'all', label: 'Tất cả', color: '#6c757d', textColor: '#fff' },
+    { key: 'pending', label: 'Chờ xử lý', color: '#FFA000', textColor: '#fff' },
     {
-      key: 'pending',
-      label: 'Chờ xử lý',
-      color: 'transparent',
-      textColor: theme.text,
+      key: 'in_progress',
+      label: 'Đang thực hiện',
+      color: '#1E88E5',
+      textColor: '#fff',
     },
     {
-      key: 'in-progress',
-      label: 'Đang thực hiện',
-      color: '#FFF9C4',
-      textColor: theme.text,
+      key: 'production_complete',
+      label: 'Chờ giao hàng',
+      color: '#8E24AA',
+      textColor: '#fff',
+    },
+    {
+      key: 'delivered',
+      label: 'Đã giao hàng',
+      color: '#43A047',
+      textColor: '#fff',
     },
     {
       key: 'completed',
-      label: 'Đã hoàn thành',
-      color: '#4CAF50',
+      label: 'Hoàn thành',
+      color: '#009688',
       textColor: '#fff',
     },
   ];
 
-  const [activeFilter, setActiveFilter] = useState('pending');
+  const [activeFilter, setActiveFilter] = useState('all');
   const [cacheByStatus, setCacheByStatus] = useState({});
 
   // Hàm tải danh sách dự án
@@ -284,15 +296,21 @@ const ProjectManagementScreen = ({ navigation }) => {
           style={[
             styles.filterButton,
             {
-              backgroundColor: f.color,
-              borderWidth: activeFilter === f.key ? 2 : 1,
-              borderColor:
-                activeFilter === f.key ? theme.primary : theme.border,
+              backgroundColor: activeFilter === f.key ? f.color : 'transparent',
+              borderWidth: 1.5,
+              borderColor: activeFilter === f.key ? f.color : theme.border,
             },
           ]}
           onPress={() => handleFilterChange(f.key)}
         >
-          <Text style={[styles.filterText, { color: f.textColor }]}>
+          <Text
+            style={[
+              styles.filterText,
+              {
+                color: activeFilter === f.key ? f.textColor : theme.textPrimary,
+              },
+            ]}
+          >
             {f.label}
           </Text>
         </TouchableOpacity>
@@ -308,6 +326,15 @@ const ProjectManagementScreen = ({ navigation }) => {
         barStyle={theme.dark ? 'light-content' : 'dark-content'}
         backgroundColor={theme.background}
       />
+
+      <View style={[styles.header, { borderBottomColor: theme.border }]}>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>
+          Quản lý dự án
+        </Text>
+        <TouchableOpacity onPress={handleAddProject}>
+          <Ionicons name="add-circle" size={28} color={theme.primary} />
+        </TouchableOpacity>
+      </View>
 
       {renderFilterButtons()}
 
@@ -369,7 +396,14 @@ const ProjectManagementScreen = ({ navigation }) => {
             color={theme.textMuted}
           />
           <Text style={[styles.emptyText, { color: theme.textSecondary }]}>
-            Chưa có dự án nào
+            {searchQuery
+              ? 'Không tìm thấy dự án phù hợp với từ khóa'
+              : activeFilter === 'all'
+              ? 'Chưa có dự án nào'
+              : `Không có dự án nào ở trạng thái "${
+                  FILTERS.find((f) => f.key === activeFilter)?.label ||
+                  activeFilter
+                }"`}
           </Text>
           <TouchableOpacity
             onPress={handleAddProject}
@@ -385,7 +419,10 @@ const ProjectManagementScreen = ({ navigation }) => {
             <ProjectListItem project={item} onPress={handleProjectPress} />
           )}
           keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContainer}
+          contentContainerStyle={[
+            styles.listContainer,
+            { backgroundColor: theme.background },
+          ]}
           onRefresh={handleRefresh}
           refreshing={refreshing}
         />
@@ -432,33 +469,36 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    margin: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 0,
     backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EEEEEE',
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f1f1f1',
     borderRadius: 8,
-    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 10,
   },
   searchInput: {
     flex: 1,
-    height: 44,
+    height: 48,
     fontSize: 16,
     color: '#333',
+    paddingVertical: 8,
   },
   clearButton: {
     padding: 4,
   },
   listContainer: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#f8f9fa',
   },
   resultCount: {
     marginHorizontal: 16,
@@ -469,14 +509,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 8,
     padding: 16,
-    marginBottom: 12,
+    marginTop: 8,
+    marginBottom: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    elevation: 1,
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
   },
   cardPressed: {
     opacity: 0.7,
@@ -484,7 +525,7 @@ const styles = StyleSheet.create({
   },
   projectInfo: {
     flex: 1,
-    paddingRight: 8,
+    paddingRight: 12,
   },
   projectName: {
     fontSize: 16,
@@ -503,18 +544,20 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   projectStatusContainer: {
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     alignItems: 'flex-end',
   },
   projectStatusTag: {
     borderWidth: 1,
     borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   projectStatusText: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: 'bold',
   },
   loadingText: {
     marginTop: 12,
@@ -584,19 +627,25 @@ const styles = StyleSheet.create({
   },
   filterContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     padding: 12,
+    backgroundColor: 'white',
   },
   filterButton: {
-    flex: 1,
     paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 6,
     alignItems: 'center',
     marginHorizontal: 4,
+    marginVertical: 4,
+    minWidth: '30%', // Ensure buttons have a minimum width
+    elevation: 1,
   },
   filterText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });
 

@@ -284,24 +284,25 @@ const DirectorDashboardScreen = ({ navigation }) => {
             Báo cáo dự án
           </Text>
         </View>
+
         <TouchableOpacity
           style={[styles.dashboardCard, { backgroundColor: theme.card }]}
-          onPress={() => navigation.navigate('ProjectManagement')}
+          onPress={() => navigation.navigate('FinancialDashboard')}
         >
           <Ionicons
             name="stats-chart"
             size={24}
-            color={theme.primary}
+            color="#4CAF50"
             style={styles.cardIcon}
           />
           <View style={styles.cardContent}>
             <Text style={[styles.cardTitle, { color: theme.text }]}>
-              Quản lý dự án
+              Báo cáo Tài chính
             </Text>
             <Text
               style={[styles.cardDescription, { color: theme.textSecondary }]}
             >
-              Xem và quản lý tất cả dự án
+              Xem doanh thu, chi phí và lợi nhuận
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
