@@ -10,6 +10,16 @@ function isRomanNumeral(str: string): boolean {
   return romanPattern.test(str.toString().trim());
 }
 
+// Chuẩn hóa chuỗi tiếng Việt để so khớp không dấu
+function normalizeVi(str: string): string {
+  return (str || '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+}
+
 // admin đã được khởi tạo ở file index.ts chính
 
 export const importMaterialsFromDrive = functions
@@ -52,10 +62,12 @@ export const importMaterialsFromDrive = functions
       const worksheet = workbook.Sheets[sheetName];
       const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
+        defval: null,
       });
 
       const parsedMaterials: any[] = [];
-      for (let i = 4; i < rawData.length; i++) {
+      // Bắt đầu từ dòng 3 (index 2) để không bỏ lỡ dòng tổng hợp đầu bảng nếu có
+      for (let i = 2; i < rawData.length; i++) {
         const row: any[] = rawData[i];
 
         // Bỏ qua hàng trống hoàn toàn
@@ -85,6 +97,32 @@ export const importMaterialsFromDrive = functions
           }, Is Roman: ${isRoman}, Type: ${typeof row[0]}`
         );
 
+        // Nếu là dòng tổng hợp/tổng cộng (STT La Mã hoặc tên chứa từ khoá), tạo một item đặc biệt
+        const rawName = (row[1] || '').toString();
+        const nameNormalized = normalizeVi(rawName);
+        if (
+          isRoman ||
+          nameNormalized.includes('TONG CONG') ||
+          nameNormalized.includes('TONG HOP') ||
+          nameNormalized.includes('TONG KET')
+        ) {
+          const summaryItem = {
+            stt: String(row[0] || '').trim(),
+            name: rawName,
+            material: '',
+            quyCach: '',
+            unit: String(row[6] || '').trim(),
+            quantity: parseFloat(String(row[7] || '0')) || 0,
+            weight: parseFloat(String(row[8] || '0')) || 0, // KL/cái
+            totalWeight: parseFloat(String(row[9] || '0')) || 0, // KL tổng
+            unitPrice: 0,
+            totalPrice: 0,
+            isSummary: true,
+          };
+          parsedMaterials.push(summaryItem);
+          continue; // không xử lý tiếp như vật tư thường
+        }
+
         // Đảm bảo STT được lưu dưới dạng chuỗi
         let sttValue = '';
         if (hasSTT) {
@@ -94,19 +132,20 @@ export const importMaterialsFromDrive = functions
         // Xử lý thông tin vật tư, mặc định giá trị là 0 hoặc chuỗi rỗng nếu không có dữ liệu
         const materialItem = {
           stt: sttValue,
-          name: row[1] || '',
+          name: rawName || '',
           material: row[2] || '',
-          quyCach: row[3] && row[4] ? `${row[3]}x${row[4]}` : '',
-          unit: row[6] || '',
+          quyCach: row[3] && row[4] ? `${row[3]}x${row[4]}` : row[3] || '',
+          unit: String(row[6] || '').trim(),
           quantity: parseFloat(String(row[7] || '0')) || 0,
-          weight: parseFloat(String(row[8] || '0')) || 0,
+          weight: parseFloat(String(row[8] || '0')) || 0, // KL/cái
+          totalWeight: parseFloat(String(row[9] || '0')) || 0, // KL tổng (cột J)
           unitPrice: 0,
           totalPrice: 0,
         };
         parsedMaterials.push(materialItem);
       }
 
-      // Trả về kết quả
+      // Trả về duy nhất mảng materials (đã bao gồm item isSummary nếu có)
       return { materials: parsedMaterials };
     } catch (error: any) {
       console.error('Error importing materials from Drive:', error);

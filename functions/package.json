@@ -16,6 +16,9 @@
   "main": "lib/index.js",
   "dependencies": {
     "@sparticuz/chromium": "^137.0.1",
+    "@types/cors": "^2.8.19",
+    "@types/uuid": "^10.0.0",
+    "cors": "^2.8.5",
     "docxtemplater": "^3.65.1",
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^6.4.0",
@@ -23,6 +26,7 @@
     "pizzip": "^3.2.0",
     "puppeteer": "^24.10.2",
     "puppeteer-core": "^24.10.2",
+    "uuid": "^11.1.0",
     "xlsx": "^0.18.5",
     "xlsx-populate": "^1.21.0"
   },

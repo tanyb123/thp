@@ -20,6 +20,7 @@
     "src/quotationExcelGenerator.ts",
     "src/deliveryNoteExcelGenerator.ts",
     "src/contractGenerator.ts",
-    "src/poReceiptConfirmation.ts"
+    "src/poReceiptConfirmation.ts",
+    "src/notificationTriggers.ts"
   ]
 }

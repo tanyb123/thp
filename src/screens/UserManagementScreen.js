@@ -28,6 +28,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import * as ImagePicker from 'expo-image-picker';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const UserManagementScreen = () => {
   const { theme } = useTheme();
@@ -164,8 +165,8 @@ const UserManagementScreen = () => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7, // Tăng quality một chút cho ảnh đẹp hơn
-        base64: true, // Bật base64 để lấy dữ liệu trực tiếp
+        quality: 0.5, // Giảm quality để tránh file quá lớn
+        base64: false, // Không cần base64
       });
 
       console.log('ImagePicker result:', result);
@@ -179,7 +180,7 @@ const UserManagementScreen = () => {
           fileSize: asset.fileSize,
         });
 
-        uploadImageAsBase64(asset.base64, asset.uri);
+        uploadImage(asset.uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -187,49 +188,139 @@ const UserManagementScreen = () => {
     }
   };
 
-  // Upload image as base64 - Main method
-  const uploadImageAsBase64 = async (base64Data, uri) => {
+  // Upload image to Firebase Storage
+  const uploadImage = async (uri) => {
     try {
       setUploadingImage(true);
-      console.log('Starting base64 image upload');
+      console.log('Starting image upload for URI:', uri);
 
-      // Validate base64 data
-      if (!base64Data) {
-        throw new Error('Invalid base64 data');
+      // Validate URI
+      if (!uri) {
+        throw new Error('Invalid image URI');
       }
 
-      // Get file extension from URI
+      // Convert image to blob with better error handling
+      const response = await fetch(uri);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      console.log('Blob created successfully, size:', blob.size);
+
+      // Validate blob
+      if (!blob || blob.size === 0) {
+        throw new Error('Invalid image data');
+      }
+
+      // Try Firebase Storage upload with timeout
+      const storage = getStorage();
       const fileExtension = uri.split('.').pop() || 'jpg';
+      const fileName = `profile_${
+        selectedUser.id
+      }_${Date.now()}.${fileExtension}`;
+      const storageRef = ref(storage, `profiles/${fileName}`);
 
-      // Create data URL with proper MIME type
-      const mimeType = `image/${fileExtension}`;
-      const dataURL = `data:${mimeType};base64,${base64Data}`;
+      console.log('Uploading to Firebase Storage:', fileName);
+      console.log('Storage bucket:', storage.app.options.storageBucket);
 
-      console.log('Base64 data length:', base64Data.length);
-      console.log('Data URL created with MIME type:', mimeType);
+      // Upload with metadata and timeout
+      const metadata = {
+        contentType: `image/${fileExtension}`,
+        customMetadata: {
+          uploadedBy: currentUser?.uid || 'unknown',
+          uploadedAt: new Date().toISOString(),
+        },
+      };
 
-      // Update edit data with base64 image
+      // Add timeout to upload
+      const uploadPromise = uploadBytes(storageRef, blob, metadata);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timeout after 30s')), 30000)
+      );
+
+      await Promise.race([uploadPromise, timeoutPromise]);
+      console.log('Upload successful, getting download URL...');
+
+      const downloadURL = await getDownloadURL(storageRef);
+      console.log('Download URL obtained:', downloadURL);
+
+      // Update edit data with new image URL
       setEditData((prev) => ({
         ...prev,
-        photoURL: dataURL,
+        photoURL: downloadURL,
       }));
 
-      console.log('Base64 image saved successfully');
-      Alert.alert('Thành công', 'Đã lưu ảnh thành công!');
+      Alert.alert('Thành công', 'Đã tải lên ảnh thành công!');
     } catch (error) {
-      console.error('Error uploading base64 image:', error);
+      console.error('Error uploading image:', error);
 
-      let errorMessage = 'Không thể lưu ảnh';
-      if (error.message.includes('Invalid')) {
-        errorMessage = 'Dữ liệu ảnh không hợp lệ';
+      // Try fallback method with base64
+      try {
+        console.log('Trying fallback method with base64...');
+        await uploadImageFallback(uri);
+        return;
+      } catch (fallbackError) {
+        console.error('Fallback method also failed:', fallbackError);
+      }
+
+      // More specific error messages
+      let errorMessage = 'Không thể tải lên ảnh';
+      if (error.code === 'storage/unauthorized') {
+        errorMessage = 'Không có quyền truy cập Firebase Storage';
+      } else if (error.code === 'storage/canceled') {
+        errorMessage = 'Upload bị hủy';
+      } else if (error.code === 'storage/unknown') {
+        errorMessage =
+          'Lỗi không xác định từ Firebase Storage. Có thể do mạng hoặc cấu hình.';
+      } else if (error.message.includes('fetch')) {
+        errorMessage = 'Không thể đọc file ảnh';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Upload quá lâu, vui lòng thử lại';
       }
 
       Alert.alert(
         'Lỗi Upload',
-        errorMessage + '\n\nChi tiết: ' + error.message
+        errorMessage +
+          '\n\nChi tiết: ' +
+          error.message +
+          '\n\nGợi ý: Kiểm tra kết nối mạng và thử lại'
       );
     } finally {
       setUploadingImage(false);
+    }
+  };
+
+  // Fallback method: Save image as base64 directly to Firestore
+  const uploadImageFallback = async (uri) => {
+    try {
+      console.log('Using fallback method: base64 storage');
+
+      // Convert image to base64
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      // Convert blob to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      const base64Data = await base64Promise;
+      console.log('Base64 conversion successful, length:', base64Data.length);
+
+      // Update edit data with base64 image
+      setEditData((prev) => ({
+        ...prev,
+        photoURL: base64Data,
+      }));
+
+      Alert.alert('Thành công', 'Đã lưu ảnh thành công (phương án dự phòng)!');
+    } catch (error) {
+      console.error('Fallback method failed:', error);
+      throw error;
     }
   };
 

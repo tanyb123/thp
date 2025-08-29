@@ -21,7 +21,7 @@ import {
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import InventoryService from '../api/inventoryService';
+
 import { firebase } from '../config/firebaseConfig';
 import useInventory from '../hooks/useInventory';
 
@@ -42,9 +42,10 @@ const AddInventoryItemScreen = () => {
     weight: 0,
     material: '',
     totalPrice: 0,
+    imageBase64: '', // Thêm field để lưu ảnh base64
   });
   const [image, setImage] = useState(null);
-  const [imageBlob, setImageBlob] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false); // Thay đổi từ imageBlob sang uploadingImage
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [categories, setCategories] = useState([]);
@@ -65,6 +66,7 @@ const AddInventoryItemScreen = () => {
 
   // Load danh sách danh mục khi màn hình được mount
   useEffect(() => {
+    console.log('=== USEEFFECT: MOUNT SCREEN ===');
     fetchCategories();
     requestPermissions();
   }, []);
@@ -72,16 +74,24 @@ const AddInventoryItemScreen = () => {
   // Hàm lấy danh sách danh mục từ Firestore
   const fetchCategories = async () => {
     try {
+      console.log('=== FETCHCATEGORIES: BẮT ĐẦU ===');
       const snapshot = await firebase
         .firestore()
         .collection('inventory_categories')
         .get();
+
       const fetchedCategories = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
+
+      console.log('=== FETCHCATEGORIES: KẾT QUẢ ===');
+      console.log('Số lượng categories:', fetchedCategories.length);
+      console.log('Categories:', JSON.stringify(fetchedCategories, null, 2));
+
       setCategories(fetchedCategories);
     } catch (error) {
+      console.error('=== FETCHCATEGORIES: LỖI ===');
       console.error('Lỗi khi lấy danh mục:', error);
       Alert.alert('Lỗi', 'Không thể lấy danh sách danh mục');
     }
@@ -106,6 +116,10 @@ const AddInventoryItemScreen = () => {
 
   // Xử lý thay đổi giá trị các trường
   const handleChange = (field, value) => {
+    console.log(`=== HANDLECHANGE: ${field} ===`);
+    console.log('Giá trị mới:', value);
+    console.log('formData hiện tại:', JSON.stringify(formData, null, 2));
+
     // Xử lý cho trường số
     if (['stockQuantity', 'minQuantity', 'price', 'weight'].includes(field)) {
       const numericValue = parseFloat(value.replace(/[^0-9.]/g, ''));
@@ -122,12 +136,22 @@ const AddInventoryItemScreen = () => {
           updatedFormData.stockQuantity * updatedFormData.price;
       }
 
+      console.log(
+        'formData sau khi cập nhật:',
+        JSON.stringify(updatedFormData, null, 2)
+      );
       setFormData(updatedFormData);
     } else {
-      setFormData({
+      const updatedFormData = {
         ...formData,
         [field]: value,
-      });
+      };
+
+      console.log(
+        'formData sau khi cập nhật:',
+        JSON.stringify(updatedFormData, null, 2)
+      );
+      setFormData(updatedFormData);
     }
 
     // Xóa lỗi khi người dùng điền lại
@@ -141,11 +165,24 @@ const AddInventoryItemScreen = () => {
 
   // Chọn danh mục
   const handleCategorySelect = (category) => {
+    console.log('=== HANDLECATEGORYSELECT ===');
+    console.log('Category được chọn:', JSON.stringify(category, null, 2));
+    console.log(
+      'formData trước khi cập nhật:',
+      JSON.stringify(formData, null, 2)
+    );
+
     setSelectedCategory(category);
-    setFormData({
+    const updatedFormData = {
       ...formData,
       categoryId: category.id,
-    });
+    };
+
+    console.log(
+      'formData sau khi cập nhật categoryId:',
+      JSON.stringify(updatedFormData, null, 2)
+    );
+    setFormData(updatedFormData);
     setCategoryDialogVisible(false);
 
     // Xóa lỗi danh mục nếu có
@@ -159,10 +196,23 @@ const AddInventoryItemScreen = () => {
 
   // Chọn đơn vị tính
   const handleUnitSelect = (unit) => {
-    setFormData({
+    console.log('=== HANDLEUNITSELECT ===');
+    console.log('Unit được chọn:', unit);
+    console.log(
+      'formData trước khi cập nhật:',
+      JSON.stringify(formData, null, 2)
+    );
+
+    const updatedFormData = {
       ...formData,
       unit,
-    });
+    };
+
+    console.log(
+      'formData sau khi cập nhật unit:',
+      JSON.stringify(updatedFormData, null, 2)
+    );
+    setFormData(updatedFormData);
     setUnitDialogVisible(false);
 
     // Xóa lỗi đơn vị nếu có
@@ -181,17 +231,36 @@ const AddInventoryItemScreen = () => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality: 0.7,
+        base64: true, // Bật base64 để lấy dữ liệu trực tiếp
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
-        const imageUri = result.assets[0].uri;
+        const asset = result.assets[0];
+        const imageUri = asset.uri;
         setImage(imageUri);
 
-        // Chuyển ảnh thành blob để upload
-        const response = await fetch(imageUri);
-        const blob = await response.blob();
-        setImageBlob(blob);
+        // Lấy base64 data trực tiếp từ ImagePicker
+        if (asset.base64) {
+          setUploadingImage(true);
+          try {
+            // Tạo data URL với MIME type phù hợp
+            const fileExtension = imageUri.split('.').pop() || 'jpg';
+            const mimeType = `image/${fileExtension}`;
+            const dataURL = `data:${mimeType};base64,${asset.base64}`;
+
+            setFormData((prev) => ({
+              ...prev,
+              imageBase64: dataURL,
+            }));
+
+            console.log('Base64 image saved successfully');
+          } finally {
+            setUploadingImage(false);
+          }
+        } else {
+          Alert.alert('Lỗi', 'Không thể lấy dữ liệu ảnh');
+        }
       }
     } catch (error) {
       console.error('Lỗi khi chọn ảnh:', error);
@@ -205,17 +274,36 @@ const AddInventoryItemScreen = () => {
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality: 0.7,
+        base64: true, // Bật base64 để lấy dữ liệu trực tiếp
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
-        const imageUri = result.assets[0].uri;
+        const asset = result.assets[0];
+        const imageUri = asset.uri;
         setImage(imageUri);
 
-        // Chuyển ảnh thành blob để upload
-        const response = await fetch(imageUri);
-        const blob = await response.blob();
-        setImageBlob(blob);
+        // Lấy base64 data trực tiếp từ ImagePicker
+        if (asset.base64) {
+          setUploadingImage(true);
+          try {
+            // Tạo data URL với MIME type phù hợp
+            const fileExtension = imageUri.split('.').pop() || 'jpg';
+            const mimeType = `image/${fileExtension}`;
+            const dataURL = `data:${mimeType};base64,${asset.base64}`;
+
+            setFormData((prev) => ({
+              ...prev,
+              imageBase64: dataURL,
+            }));
+
+            console.log('Base64 image saved successfully');
+          } finally {
+            setUploadingImage(false);
+          }
+        } else {
+          Alert.alert('Lỗi', 'Không thể lấy dữ liệu ảnh');
+        }
       }
     } catch (error) {
       console.error('Lỗi khi chụp ảnh:', error);
@@ -225,23 +313,33 @@ const AddInventoryItemScreen = () => {
 
   // Kiểm tra form trước khi lưu
   const validateForm = () => {
+    console.log('=== VALIDATEFORM ===');
+    console.log('formData để validate:', JSON.stringify(formData, null, 2));
+
     const newErrors = {};
 
     if (!formData.name.trim()) {
       newErrors.name = 'Vui lòng nhập tên vật tư';
+      console.log('Lỗi: Thiếu tên vật tư');
     }
 
     if (!formData.code.trim()) {
       newErrors.code = 'Vui lòng nhập mã vật tư';
+      console.log('Lỗi: Thiếu mã vật tư');
     }
 
     if (!formData.categoryId) {
       newErrors.categoryId = 'Vui lòng chọn danh mục';
+      console.log('Lỗi: Thiếu categoryId');
     }
 
     if (!formData.unit.trim()) {
       newErrors.unit = 'Vui lòng chọn đơn vị tính';
+      console.log('Lỗi: Thiếu đơn vị tính');
     }
+
+    console.log('Các lỗi validation:', newErrors);
+    console.log('Kết quả validation:', Object.keys(newErrors).length === 0);
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -254,20 +352,60 @@ const AddInventoryItemScreen = () => {
     setLoading(true);
 
     try {
-      // Thêm vật tư mới sử dụng useInventory hook để đảm bảo refresh
-      const result = await addInventoryItem(formData);
+      // Log dữ liệu trước khi gửi
+      console.log('=== DỮ LIỆU VẬT TƯ TRƯỚC KHI GỬI ===');
+      console.log('formData:', JSON.stringify(formData, null, 2));
+      console.log('selectedCategory:', selectedCategory);
+      console.log('=== END DỮ LIỆU ===');
 
-      // Nếu có hình ảnh, upload và cập nhật URL
-      if (imageBlob && result.id) {
-        await InventoryService.uploadItemImage(result.id, imageBlob);
+      // Kiểm tra dữ liệu bắt buộc
+      if (
+        !formData.name ||
+        !formData.code ||
+        !formData.categoryId ||
+        !formData.unit
+      ) {
+        const missingFields = [];
+        if (!formData.name) missingFields.push('Tên vật tư');
+        if (!formData.code) missingFields.push('Mã vật tư');
+        if (!formData.categoryId) missingFields.push('Danh mục');
+        if (!formData.unit) missingFields.push('Đơn vị tính');
+
+        throw new Error(
+          `Thiếu thông tin bắt buộc: ${missingFields.join(', ')}`
+        );
       }
+
+      // Thêm vật tư mới sử dụng useInventory hook để đảm bảo refresh
+      // Ảnh đã được lưu trực tiếp vào formData.imageBase64, không cần upload riêng
+      console.log('Bắt đầu gọi addInventoryItem...');
+      const result = await addInventoryItem(formData);
+      console.log('Kết quả addInventoryItem:', result);
 
       Alert.alert('Thành công', 'Đã thêm vật tư mới vào kho', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (error) {
-      console.error('Lỗi khi lưu vật tư:', error);
-      Alert.alert('Lỗi', error.message || 'Không thể lưu vật tư');
+      console.error('=== LỖI CHI TIẾT KHI LƯU VẬT TƯ ===');
+      console.error('Error object:', error);
+      console.error('Error message:', error.message);
+      console.error('Error code:', error.code);
+      console.error('Error details:', error.details);
+      console.error('=== END LỖI CHI TIẾT ===');
+
+      let errorMessage = 'Không thể lưu vật tư';
+
+      if (error.code === 'unauthenticated') {
+        errorMessage = 'Bạn cần đăng nhập để thực hiện chức năng này';
+      } else if (error.code === 'invalid-argument') {
+        errorMessage = error.message || 'Dữ liệu không hợp lệ';
+      } else if (error.code === 'already-exists') {
+        errorMessage = error.message || 'Mã vật tư đã tồn tại';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      Alert.alert('Lỗi', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -275,10 +413,7 @@ const AddInventoryItemScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.BackAction onPress={() => navigation.goBack()} />
-        <Appbar.Content title="Thêm vật tư mới" />
-      </Appbar.Header>
+      {/* Đã xóa header thứ 2 - chỉ giữ lại nội dung form */}
 
       <ScrollView style={styles.scrollView}>
         {/* Thông tin cơ bản */}
@@ -401,8 +536,11 @@ const AddInventoryItemScreen = () => {
         <Text style={styles.sectionTitle}>Hình ảnh vật tư</Text>
 
         <View style={styles.imageContainer}>
-          {image ? (
-            <Image source={{ uri: image }} style={styles.image} />
+          {formData.imageBase64 ? (
+            <Image
+              source={{ uri: formData.imageBase64 }}
+              style={styles.image}
+            />
           ) : (
             <View style={styles.imagePlaceholder}>
               <Text style={styles.placeholderText}>Chưa có ảnh</Text>
@@ -414,6 +552,8 @@ const AddInventoryItemScreen = () => {
               mode="contained"
               onPress={pickImage}
               style={styles.imageButton}
+              loading={uploadingImage}
+              disabled={uploadingImage}
             >
               Chọn ảnh
             </Button>
@@ -421,6 +561,8 @@ const AddInventoryItemScreen = () => {
               mode="outlined"
               onPress={takePhoto}
               style={styles.imageButton}
+              loading={uploadingImage}
+              disabled={uploadingImage}
             >
               Chụp ảnh
             </Button>

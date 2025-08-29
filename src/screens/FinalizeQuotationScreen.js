@@ -16,7 +16,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import * as Sharing from 'expo-sharing';
-import { getAuth } from 'firebase/auth';
+import { auth } from '../config/firebaseConfig';
 import { saveQuotation } from '../api/quotationService';
 import useQuotationGenerator from '../hooks/useQuotationGenerator';
 import useContractGenerator from '../hooks/useContractGenerator';
@@ -178,6 +178,9 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
     shareExcelQuotation,
     isLoading: isExcelLoading,
     excelUrl,
+    pdfUrl,
+    sharePdfQuotation,
+    isPdfLoading,
   } = useQuotationGenerator({
     projectId,
     customerData,
@@ -270,7 +273,6 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   // Hàm tạo báo giá Excel
   const handleGenerateExcel = async () => {
     try {
-      const auth = getAuth();
       const userId = auth.currentUser?.uid;
 
       if (!userId) {
@@ -608,42 +610,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
           )}
         </TouchableOpacity>
 
-        {/* Contract generation button */}
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: '#9C27B0' }]}
-          onPress={handleGenerateContract}
-          disabled={isContractLoading}
-        >
-          {isContractLoading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <>
-              <Ionicons
-                name="document-text"
-                size={20}
-                color="white"
-                style={{ marginRight: 10 }}
-              />
-              <Text style={styles.buttonText}>Tạo Hợp Đồng</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Nút Chia Sẻ Hợp Đồng (chỉ hiển thị khi có link) */}
-        {contractDocUrl && !isContractLoading && (
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#673AB7' }]}
-            onPress={() => shareContractDoc()}
-          >
-            <Ionicons
-              name="share-social"
-              size={20}
-              color="white"
-              style={{ marginRight: 10 }}
-            />
-            <Text style={styles.buttonText}>Chia Sẻ Hợp Đồng</Text>
-          </TouchableOpacity>
-        )}
+        {/* Hợp đồng chuyển sang mục riêng ở màn hình chính */}
 
         {excelUrl && (
           <TouchableOpacity
@@ -657,6 +624,21 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               style={{ marginRight: 10 }}
             />
             <Text style={styles.buttonText}>Chia Sẻ Excel</Text>
+          </TouchableOpacity>
+        )}
+
+        {pdfUrl && (
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: '#3F51B5' }]}
+            onPress={sharePdfQuotation}
+          >
+            <Ionicons
+              name="share-outline"
+              size={20}
+              color="white"
+              style={{ marginRight: 10 }}
+            />
+            <Text style={styles.buttonText}>Chia Sẻ PDF</Text>
           </TouchableOpacity>
         )}
       </View>

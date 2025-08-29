@@ -1421,6 +1421,7 @@ export const getTotalMonthlyFixedCosts = async () => {
 
 
 
+
 --- END: src\api\fixedCostService.js ---
 
 
@@ -1998,11 +1999,26 @@ const InventoryService = {
    */
   async addInventoryItem(itemData) {
     try {
+      console.log('=== INVENTORYSERVICE: BẮT ĐẦU THÊM VẬT TƯ ===');
+      console.log('itemData nhận được:', JSON.stringify(itemData, null, 2));
+
       const addInventoryItemFn = httpsCallable(functions, 'addInventoryItem');
+      console.log('=== INVENTORYSERVICE: GỌI CLOUD FUNCTION ===');
+
       const result = await addInventoryItemFn(itemData);
+      console.log('=== INVENTORYSERVICE: KẾT QUẢ TỪ CLOUD FUNCTION ===');
+      console.log('result:', result);
+      console.log('result.data:', result.data);
+
       return result.data;
     } catch (error) {
-      console.error('Lỗi thêm vật tư:', error);
+      console.error('=== INVENTORYSERVICE: LỖI THÊM VẬT TƯ ===');
+      console.error('Error object:', error);
+      console.error('Error message:', error.message);
+      console.error('Error code:', error.code);
+      console.error('Error details:', error.details);
+      console.error('=== END LỖI INVENTORYSERVICE ===');
+
       throw error;
     }
   },
@@ -2594,6 +2610,7 @@ export const getAllMaterialPrices = async () => {
     return {};
   }
 };
+
 
 
 
@@ -7063,6 +7080,7 @@ export default CustomerAddModal;
 
 
 
+
 --- END: src\components\CustomerAddModal.js ---
 
 
@@ -7290,6 +7308,16 @@ const styles = StyleSheet.create({
 });
 
 export default CustomIconDebug;
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -8237,19 +8265,55 @@ export const SearchInventoryModal = ({ visible, onClose, onSelect }) => {
   const loadInventoryItems = async () => {
     setLoading(true);
     try {
+      console.log('=== SEARCHINVENTORYMODAL: BẮT ĐẦU LOAD ===');
       const inventoryRef = collection(db, 'inventory');
-      const q = query(inventoryRef, orderBy('name'), limit(100));
 
-      const snapshot = await getDocs(q);
+      let q;
+      let snapshot;
+
+      try {
+        // Thử query với orderBy name trước
+        console.log('=== SEARCHINVENTORYMODAL: THỬ QUERY VỚI ORDERBY NAME ===');
+        q = query(inventoryRef, orderBy('name'), limit(100));
+        snapshot = await getDocs(q);
+        console.log('=== SEARCHINVENTORYMODAL: QUERY ORDERBY THÀNH CÔNG ===');
+      } catch (orderByError) {
+        console.log(
+          '=== SEARCHINVENTORYMODAL: QUERY ORDERBY THẤT BẠI, THỬ QUERY KHÔNG CÓ ORDERBY ==='
+        );
+        console.log('Lỗi orderBy:', orderByError.message);
+
+        // Fallback: query không có orderBy
+        q = query(inventoryRef, limit(100));
+        snapshot = await getDocs(q);
+        console.log(
+          '=== SEARCHINVENTORYMODAL: QUERY KHÔNG CÓ ORDERBY THÀNH CÔNG ==='
+        );
+      }
+
       const inventoryItems = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
 
-      setItems(inventoryItems);
-      setFilteredItems(inventoryItems);
+      console.log('=== SEARCHINVENTORYMODAL: DỮ LIỆU ĐÃ LOAD ===');
+      console.log('Số lượng items:', inventoryItems.length);
+
+      // Sắp xếp thủ công theo tên nếu cần
+      const sortedItems = inventoryItems.sort((a, b) => {
+        const aName = (a.name || '').toLowerCase();
+        const bName = (b.name || '').toLowerCase();
+        return aName.localeCompare(bName);
+      });
+
+      setItems(sortedItems);
+      setFilteredItems(sortedItems);
+
+      console.log('=== SEARCHINVENTORYMODAL: HOÀN THÀNH LOAD ===');
     } catch (error) {
+      console.error('=== SEARCHINVENTORYMODAL: LỖI LOAD ===');
       console.error('Error loading inventory items:', error);
+      console.error('Error details:', error.message, error.code);
     } finally {
       setLoading(false);
     }
@@ -10404,6 +10468,16 @@ export default TestComponent;
 
 
 
+
+
+
+
+
+
+
+
+
+
 --- END: src\components\TestComponent.js ---
 
 
@@ -12326,6 +12400,8 @@ import { auth, db } from '../config/firebaseConfig';
 import { Alert } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import messaging from '@react-native-firebase/messaging';
+import { updateUser } from '../api/userService';
 
 // Tạo context cho xác thực
 const AuthContext = createContext();
@@ -12356,6 +12432,28 @@ export const AuthProvider = ({ children }) => {
       unsubscribeNetInfo();
     };
   }, []);
+
+  // Hàm yêu cầu quyền và lấy FCM token
+  const requestUserPermissionAndGetToken = async (userId) => {
+    const authStatus = await messaging().requestPermission();
+    const enabled =
+      authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+      authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+    if (enabled) {
+      console.log('Authorization status:', authStatus);
+      try {
+        const fcmToken = await messaging().getToken();
+        if (fcmToken) {
+          console.log('A new FCM token has been generated:', fcmToken);
+          // Lưu token vào Firestore
+          await updateUser(userId, { fcmToken: fcmToken });
+        }
+      } catch (error) {
+        console.error('Failed to get FCM token', error);
+      }
+    }
+  };
 
   // Hàm lấy thông tin người dùng từ Firestore
   const fetchUserData = useCallback(async (userAuth) => {
@@ -12421,6 +12519,8 @@ export const AuthProvider = ({ children }) => {
           if (userData) {
             setCurrentUser(userData);
             setUserRole(userData.role || 'user');
+            // GỌI HÀM LẤY TOKEN Ở ĐÂY
+            requestUserPermissionAndGetToken(userAuth.uid);
           }
         } else {
           setCurrentUser(null);
@@ -13004,7 +13104,8 @@ export const useAIChatIntegration = () => {
 --- START: src\hooks\useContractGenerator.js ---
 import { useState } from 'react';
 import { Share, Alert, Linking } from 'react-native';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import app from '../config/firebaseConfig';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 /**
@@ -13072,7 +13173,7 @@ const useContractGenerator = ({
       const contractData = formatContractData();
 
       // Call cloud function to generate contract
-      const functions = getFunctions();
+      const functions = getFunctions(app, 'us-central1');
       const generateContractFunc = httpsCallable(functions, 'generateContract');
 
       const result = await generateContractFunc({
@@ -13406,6 +13507,7 @@ export const useCustomerImport = () => {
 
 
 
+
 --- END: src\hooks\useCustomerImport.js ---
 
 
@@ -13414,7 +13516,8 @@ import { useState, useEffect, useCallback } from 'react';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable } from 'firebase/functions';
+import { functions as firebaseFunctions } from '../config/firebaseConfig';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import {
   collection,
@@ -13547,9 +13650,8 @@ const useDeliveryNoteGenerator = ({ projectId }) => {
         accessToken ? 'Valid token' : 'No token'
       );
 
-      const functions = getFunctions();
       const generateExcelFunc = httpsCallable(
-        functions,
+        firebaseFunctions,
         'generateDeliveryNoteExcel'
       );
 
@@ -13645,6 +13747,8 @@ const useInventory = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('=== USEINVENTORY: BẮT ĐẦU FETCH INVENTORY ITEMS ===');
+
       // Khởi tạo truy vấn
       let query = firebase.firestore().collection('inventory');
 
@@ -13658,7 +13762,11 @@ const useInventory = () => {
       }
 
       // Thực hiện truy vấn
+      console.log('=== USEINVENTORY: THỰC HIỆN QUERY ===');
       const snapshot = await query.get();
+
+      console.log('=== USEINVENTORY: KẾT QUẢ QUERY ===');
+      console.log('Số lượng documents:', snapshot.docs.length);
 
       // Lấy dữ liệu từ kết quả
       const items = snapshot.docs.map((doc) => ({
@@ -13666,18 +13774,44 @@ const useInventory = () => {
         ...doc.data(),
       }));
 
+      console.log('=== USEINVENTORY: DỮ LIỆU ĐÃ PARSE ===');
+      console.log('Số lượng items:', items.length);
+      if (items.length > 0) {
+        console.log('Item đầu tiên:', JSON.stringify(items[0], null, 2));
+      }
+
+      // Sắp xếp theo thời gian (mới nhất trước)
+      const sortedItems = items.sort((a, b) => {
+        // Ưu tiên lastUpdated, sau đó updatedAt, cuối cùng createdAt
+        const aTime = a.lastUpdated || a.updatedAt || a.createdAt;
+        const bTime = b.lastUpdated || b.updatedAt || b.createdAt;
+
+        if (aTime && bTime) {
+          return bTime.toDate().getTime() - aTime.toDate().getTime();
+        }
+        return 0;
+      });
+
+      console.log('=== USEINVENTORY: DỮ LIỆU ĐÃ SẮP XẾP ===');
+      console.log('Số lượng items sau khi sắp xếp:', sortedItems.length);
+
       // Áp dụng bộ lọc tồn kho nếu có
       const filteredItems = filters.lowStock
-        ? items.filter(
+        ? sortedItems.filter(
             (item) =>
               item.stockQuantity <= (item.minQuantity || 0) &&
               item.minQuantity > 0
           )
-        : items;
+        : sortedItems;
+
+      console.log('=== USEINVENTORY: DỮ LIỆU SAU KHI LỌC ===');
+      console.log('Số lượng items sau khi lọc:', filteredItems.length);
 
       setInventoryItems(filteredItems);
     } catch (err) {
+      console.error('=== USEINVENTORY: LỖI FETCH ===');
       console.error('Lỗi khi lấy danh sách vật tư:', err);
+      console.error('Error details:', err.message, err.code);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -13726,7 +13860,7 @@ const useInventory = () => {
   }, []);
 
   /**
-   * Thêm vật tư mới
+   * Thêm vật tư mới vào kho
    * @param {Object} itemData - Thông tin vật tư
    * @returns {Promise<Object>} - Kết quả thao tác
    */
@@ -13734,12 +13868,27 @@ const useInventory = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('=== USEINVENTORY: BẮT ĐẦU THÊM VẬT TƯ ===');
+      console.log('itemData nhận được:', JSON.stringify(itemData, null, 2));
+
       const result = await InventoryService.addInventoryItem(itemData);
+      console.log('=== USEINVENTORY: KẾT QUẢ TỪ INVENTORYSERVICE ===');
+      console.log('result:', result);
+
       // Refresh danh sách nếu thành công
+      console.log('=== USEINVENTORY: BẮT ĐẦU REFRESH DANH SÁCH ===');
       await fetchInventoryItems();
+      console.log('=== USEINVENTORY: HOÀN THÀNH REFRESH DANH SÁCH ===');
+
       return result;
     } catch (err) {
-      console.error('Lỗi khi thêm vật tư:', err);
+      console.error('=== USEINVENTORY: LỖI KHI THÊM VẬT TƯ ===');
+      console.error('Error object:', err);
+      console.error('Error message:', err.message);
+      console.error('Error code:', err.code);
+      console.error('Error details:', err.details);
+      console.error('=== END LỖI USEINVENTORY ===');
+
       setError(err.message);
       throw err;
     } finally {
@@ -14162,85 +14311,105 @@ export const useMaterialsProcessor = (project) => {
       });
 
       // 3. Xử lý kết quả trả về
-      const { materials: importedMaterials } = result.data;
+      const { materials: importedMaterials } = result.data || {};
 
       if (importedMaterials && importedMaterials.length > 0) {
+        // DEBUG: log nguyên liệu gốc
+        try {
+          console.log(
+            'Dữ liệu gốc từ backend:',
+            JSON.stringify(importedMaterials, null, 2)
+          );
+        } catch (_) {}
+
+        // Luôn giữ lại dòng tổng hợp (isSummary)
+        const filteredMaterials = importedMaterials.filter(
+          (item) =>
+            item?.isSummary ||
+            !(item?.name && item.name.toUpperCase().includes('LÊ SỸ BÌNH'))
+        );
+
+        // DEBUG: log sau khi lọc
+        try {
+          console.log(
+            'Dữ liệu sau khi lọc:',
+            JSON.stringify(filteredMaterials, null, 2)
+          );
+        } catch (_) {}
+
         // Process materials: filter out unwanted rows and mark special rows
-        const processedMaterials = importedMaterials
-          .filter(
-            (item) =>
-              !(item.name && item.name.toUpperCase().includes('LÊ SỸ BÌNH'))
-          )
-          .map((item) => {
-            const name = (item.name || '').trim().toUpperCase();
+        const processedMaterials = filteredMaterials.map((item) => {
+          // 1) Ưu tiên kiểm tra dòng tổng hợp trước tiên
+          if (item.isSummary) {
+            return {
+              ...item,
+              // Gán giá trị KL tổng (totalWeight) vào thuộc tính KL (weight)
+              // để giao diện hiển thị một cách nhất quán
+              weight: item.totalWeight || item.weight || 0,
+              selected: false,
+              isNote: false,
+              isAccessory: false,
+            };
+          }
 
-            // Check for note-like patterns or if it's mostly empty
-            const isNote =
-              /^(GHI CHÚ|\+|-|\*)/.test(name) ||
-              (item.name &&
-                !item.quantity &&
-                !item.unit &&
-                !item.material &&
-                !item.quyCach);
+          const name = (item.name || '').trim().toUpperCase();
 
-            // Check specifically for accessories
-            const isAccessory = /^(PHỤ KIỆN ĐI KÈM)/.test(name);
-
-            if (isAccessory) {
-              // Accessory: treat differently from normal notes
-              return {
-                ...item,
-                isNote: false,
-                isAccessory: true,
-                no: '', // No sequence number
-                stt: '', // No sequence number
-                quantity: '', // Keep quantity blank
-                weight: 0,
-                unitPrice: 0,
-                totalPrice: 0,
-                selected: false,
-              };
-            }
-
-            if (isNote) {
-              return {
-                ...item,
-                isNote: true,
-                no: '', // No sequence number for notes
-                stt: '', // No sequence number for notes
-                quantity: 0,
-                weight: 0,
-                unitPrice: 0,
-                totalPrice: 0,
-                selected: false,
-              };
-            }
-
-            // Tính toán lại thành tiền dựa trên đơn giá và số lượng/khối lượng
-            const quantity = parseFloat(item.quantity || 0);
-            const weight = parseFloat(item.weight || 0);
-            const unitPrice = parseFloat(item.unitPrice || 0);
-
-            let totalPrice = 0;
-            if (weight > 0) {
-              // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
-              totalPrice = quantity * weight * unitPrice;
-            } else {
-              // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
-              totalPrice = quantity * unitPrice;
-            }
-
+          // 2) Kiểm tra phụ kiện
+          const isAccessory = /^(PHỤ KIỆN ĐI KÈM)/.test(name);
+          if (isAccessory) {
             return {
               ...item,
               isNote: false,
-              selected: true,
-              // Đảm bảo STT được lưu đúng cách
-              stt: item.stt || item.no || '',
-              no: item.stt || item.no || '',
-              // Cập nhật thành tiền đã tính toán
-              totalPrice: totalPrice,
-            }; // Regular items are selected by default
-          });
+              isAccessory: true,
+              no: '',
+              stt: '',
+              quantity: '',
+              weight: 0,
+              unitPrice: 0,
+              totalPrice: 0,
+              selected: false,
+            };
+          }
+
+          // 3) Kiểm tra ghi chú
+          const isNote =
+            /^(GHI CHÚ|\+|-|\*)/.test(name) ||
+            (item.name &&
+              !item.quantity &&
+              !item.unit &&
+              !item.material &&
+              !item.quyCach);
+          if (isNote) {
+            return {
+              ...item,
+              isNote: true,
+              no: '',
+              stt: '',
+              quantity: 0,
+              weight: 0,
+              unitPrice: 0,
+              totalPrice: 0,
+              selected: false,
+            };
+          }
+
+          // 4) Vật tư thông thường: tính thành tiền
+          const quantity = parseFloat(item.quantity || 0);
+          const weight = parseFloat(item.weight || 0);
+          const unitPrice = parseFloat(item.unitPrice || 0);
+          const totalPrice =
+            weight > 0 ? quantity * weight * unitPrice : quantity * unitPrice;
+
+          return {
+            ...item,
+            isNote: false,
+            isAccessory: false,
+            selected: true,
+            stt: item.stt || item.no || '',
+            no: item.stt || item.no || '',
+            totalPrice,
+          };
+        });
 
         console.log(`Đã xử lý ${processedMaterials.length} mục sau khi lọc.`);
 
@@ -14376,6 +14545,12 @@ export const useMaterialsProcessor = (project) => {
       const price = parseFloat(text) || 0;
       item.unitPrice = price;
 
+      // Dòng tổng hợp: thành tiền = đơn giá
+      if (item.isSummary) {
+        item.totalPrice = price;
+        return newMaterials;
+      }
+
       // Calculate total price based on whether weight exists
       const quantity = parseFloat(item.quantity || 0);
       const weight = parseFloat(item.weight || 0);
@@ -14429,14 +14604,11 @@ export const useMaterialsProcessor = (project) => {
             const unitPrice = parseFloat(item.unitPrice || 0);
 
             // Tính toán lại thành tiền theo logic của QuotationScreen
-            let totalPrice = 0;
-            if (weight > 0) {
-              // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
-              totalPrice = quantity * weight * unitPrice;
-            } else {
-              // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
-              totalPrice = quantity * unitPrice;
-            }
+            const totalPrice = item.isSummary
+              ? unitPrice
+              : weight > 0
+              ? quantity * weight * unitPrice
+              : quantity * unitPrice;
 
             return {
               ...item,
@@ -14507,14 +14679,11 @@ export const useMaterialsProcessor = (project) => {
               const weight = parseFloat(existingItem.weight || 0);
               const unitPrice = parseFloat(existingItem.unitPrice || 0);
 
-              let totalPrice = 0;
-              if (weight > 0) {
-                // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
-                totalPrice = quantity * weight * unitPrice;
-              } else {
-                // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
-                totalPrice = quantity * unitPrice;
-              }
+              const totalPrice = existingItem.isSummary
+                ? unitPrice
+                : weight > 0
+                ? quantity * weight * unitPrice
+                : quantity * unitPrice;
 
               return {
                 ...existingItem, // Giữ nguyên tất cả dữ liệu cũ
@@ -14552,6 +14721,17 @@ export const useMaterialsProcessor = (project) => {
     }
 
     const processed = rawData.map((item) => {
+      // Dòng tổng hợp: KL hiển thị = totalWeight (nếu có), thành tiền = đơn giá
+      if (item.isSummary) {
+        return {
+          ...item,
+          weight: item.totalWeight || item.weight || 0,
+          totalPrice: parseFloat(item.unitPrice || 0),
+          selected: false,
+          isNote: false,
+        };
+      }
+
       // Check if the item is a note
       if (item.isNote) {
         return {
@@ -14997,7 +15177,8 @@ import { useState } from 'react';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import app, { functions as firebaseFunctions } from '../config/firebaseConfig';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { saveQuotation } from '../api/quotationService';
 
@@ -15186,9 +15367,8 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       }
 
       // Call cloud function to generate Excel file (with user token)
-      const functions = getFunctions(undefined, 'asia-southeast1');
       const generateExcelFunc = httpsCallable(
-        functions,
+        firebaseFunctions,
         'generateExcelQuotation'
       );
       const result = await generateExcelFunc({
@@ -15214,6 +15394,13 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
         pdfUrl: pdfUrl || excelUrl, // Using the PDF URL if available, otherwise Excel URL
         createdBy: quotationData.createdBy,
       });
+
+      // Offer PDF share if available
+      if (pdfUrl) {
+        try {
+          await Sharing.shareAsync(pdfUrl);
+        } catch (_) {}
+      }
 
       return { excelUrl, pdfUrl, spreadsheetId };
     } catch (error) {
@@ -15243,9 +15430,9 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       // Get Google access token
       const { accessToken } = await GoogleSignin.getTokens();
 
-      // Call the new cloud function to export sheet to PDF
-      const functions = getFunctions(); // us-central1 default
-      const exportToPdfFunc = httpsCallable(functions, 'exportSheetToPdf');
+      // Call the PDF function deployed in us-central1
+      const functionsUS = getFunctions(app, 'us-central1');
+      const exportToPdfFunc = httpsCallable(functionsUS, 'exportSheetToPdf');
 
       const result = await exportToPdfFunc({
         spreadsheetId,
@@ -15292,6 +15479,20 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
     } catch (error) {
       console.error('Error sharing Excel quotation:', error);
       Alert.alert('Lỗi', 'Không thể chia sẻ báo giá Excel: ' + error.message);
+    }
+  };
+
+  // Quick share PDF helper if needed elsewhere
+  const sharePdf = async () => {
+    if (!pdfUrl) {
+      Alert.alert('Lỗi', 'Chưa có file báo giá PDF để chia sẻ.');
+      return;
+    }
+    try {
+      await Sharing.shareAsync(pdfUrl);
+    } catch (error) {
+      console.error('Error sharing PDF:', error);
+      Alert.alert('Lỗi', 'Không thể chia sẻ PDF: ' + error.message);
     }
   };
 
@@ -15364,6 +15565,7 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
     generateExcelQuotation,
     convertExcelToPdf,
     shareExcelQuotation,
+    sharePdf,
     sharePdfQuotation,
     isLoading,
     isPdfLoading,
@@ -15424,7 +15626,7 @@ export default MaterialListScreen;
 
 --- START: src\navigation\AppNavigator.js ---
 import React from 'react';
-import { Text, View, TouchableOpacity } from 'react-native';
+import { Text, View, TouchableOpacity, Alert } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -15435,6 +15637,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import messaging from '@react-native-firebase/messaging';
+import { useEffect } from 'react';
 
 // Import các màn hình
 import LoginScreen from '../screens/LoginScreen';
@@ -15678,6 +15882,13 @@ const InventoryStackNavigator = () => {
         component={AddInventoryItemScreen}
         options={({ navigation }) => ({
           title: 'Thêm Vật Tư Mới',
+          headerTitleAlign: 'center', // Căn giữa hoàn toàn
+          headerTitleStyle: {
+            textAlign: 'center',
+            flex: 1,
+            marginLeft: -60, // Tăng khoảng cách để căn giữa tốt hơn
+            marginRight: -20, // Thêm margin bên phải để cân bằng
+          },
           headerLeft: () => (
             <TouchableOpacity
               onPress={() => navigation.navigate('InventoryMain')}
@@ -15908,6 +16119,61 @@ const AppNavigator = () => {
     },
   };
 
+  // Xử lý FCM notifications
+  useEffect(() => {
+    // Xử lý khi app đang chạy (foreground)
+    const unsubscribeOnMessage = messaging().onMessage(
+      async (remoteMessage) => {
+        console.log('FCM Message received in foreground:', remoteMessage);
+        Alert.alert(
+          remoteMessage.notification.title,
+          remoteMessage.notification.body
+        );
+      }
+    );
+
+    // Xử lý khi người dùng nhấn vào notification (app đang ở background)
+    messaging().onNotificationOpenedApp((remoteMessage) => {
+      console.log(
+        'Notification caused app to open from background:',
+        remoteMessage
+      );
+      const { projectId, projectName } = remoteMessage.data;
+      if (projectId) {
+        // Cần navigation reference để điều hướng
+        // Tạm thời chỉ log ra
+        console.log('Should navigate to ProjectDiscussion with:', {
+          projectId,
+          projectName,
+        });
+      }
+    });
+
+    // Kiểm tra nếu app được mở từ trạng thái tắt (killed)
+    messaging()
+      .getInitialNotification()
+      .then((remoteMessage) => {
+        if (remoteMessage) {
+          console.log(
+            'Notification caused app to open from quit state:',
+            remoteMessage
+          );
+          const { projectId, projectName } = remoteMessage.data;
+          if (projectId) {
+            // Cần một cơ chế để điều hướng sau khi app đã sẵn sàng
+            // Ví dụ: lưu vào một state global và điều hướng sau
+            // Tạm thời chỉ log ra
+            console.log('Should navigate to ProjectDiscussion with:', {
+              projectId,
+              projectName,
+            });
+          }
+        }
+      });
+
+    return unsubscribeOnMessage;
+  }, []);
+
   // Hiển thị màn hình loading nếu đang kiểm tra trạng thái đăng nhập
   if (loadingAuth) {
     return (
@@ -16038,10 +16304,7 @@ const AppNavigator = () => {
 
             {/* Thêm các màn hình quản lý kho */}
             <Stack.Screen name="Inventory" component={InventoryScreen} />
-            <Stack.Screen
-              name="AddInventoryItem"
-              component={AddInventoryItemScreen}
-            />
+            {/* Đã xóa duplicate AddInventoryItem - chỉ giữ trong InventoryStackNavigator */}
             <Stack.Screen
               name="EditInventoryItem"
               component={EditInventoryItemScreen}
@@ -17669,7 +17932,7 @@ import {
 } from 'react-native-paper';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import InventoryService from '../api/inventoryService';
+
 import { firebase } from '../config/firebaseConfig';
 import useInventory from '../hooks/useInventory';
 
@@ -17690,9 +17953,10 @@ const AddInventoryItemScreen = () => {
     weight: 0,
     material: '',
     totalPrice: 0,
+    imageBase64: '', // Thêm field để lưu ảnh base64
   });
   const [image, setImage] = useState(null);
-  const [imageBlob, setImageBlob] = useState(null);
+  const [uploadingImage, setUploadingImage] = useState(false); // Thay đổi từ imageBlob sang uploadingImage
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
   const [categories, setCategories] = useState([]);
@@ -17713,6 +17977,7 @@ const AddInventoryItemScreen = () => {
 
   // Load danh sách danh mục khi màn hình được mount
   useEffect(() => {
+    console.log('=== USEEFFECT: MOUNT SCREEN ===');
     fetchCategories();
     requestPermissions();
   }, []);
@@ -17720,16 +17985,24 @@ const AddInventoryItemScreen = () => {
   // Hàm lấy danh sách danh mục từ Firestore
   const fetchCategories = async () => {
     try {
+      console.log('=== FETCHCATEGORIES: BẮT ĐẦU ===');
       const snapshot = await firebase
         .firestore()
         .collection('inventory_categories')
         .get();
+
       const fetchedCategories = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
+
+      console.log('=== FETCHCATEGORIES: KẾT QUẢ ===');
+      console.log('Số lượng categories:', fetchedCategories.length);
+      console.log('Categories:', JSON.stringify(fetchedCategories, null, 2));
+
       setCategories(fetchedCategories);
     } catch (error) {
+      console.error('=== FETCHCATEGORIES: LỖI ===');
       console.error('Lỗi khi lấy danh mục:', error);
       Alert.alert('Lỗi', 'Không thể lấy danh sách danh mục');
     }
@@ -17754,6 +18027,10 @@ const AddInventoryItemScreen = () => {
 
   // Xử lý thay đổi giá trị các trường
   const handleChange = (field, value) => {
+    console.log(`=== HANDLECHANGE: ${field} ===`);
+    console.log('Giá trị mới:', value);
+    console.log('formData hiện tại:', JSON.stringify(formData, null, 2));
+
     // Xử lý cho trường số
     if (['stockQuantity', 'minQuantity', 'price', 'weight'].includes(field)) {
       const numericValue = parseFloat(value.replace(/[^0-9.]/g, ''));
@@ -17770,12 +18047,22 @@ const AddInventoryItemScreen = () => {
           updatedFormData.stockQuantity * updatedFormData.price;
       }
 
+      console.log(
+        'formData sau khi cập nhật:',
+        JSON.stringify(updatedFormData, null, 2)
+      );
       setFormData(updatedFormData);
     } else {
-      setFormData({
+      const updatedFormData = {
         ...formData,
         [field]: value,
-      });
+      };
+
+      console.log(
+        'formData sau khi cập nhật:',
+        JSON.stringify(updatedFormData, null, 2)
+      );
+      setFormData(updatedFormData);
     }
 
     // Xóa lỗi khi người dùng điền lại
@@ -17789,11 +18076,24 @@ const AddInventoryItemScreen = () => {
 
   // Chọn danh mục
   const handleCategorySelect = (category) => {
+    console.log('=== HANDLECATEGORYSELECT ===');
+    console.log('Category được chọn:', JSON.stringify(category, null, 2));
+    console.log(
+      'formData trước khi cập nhật:',
+      JSON.stringify(formData, null, 2)
+    );
+
     setSelectedCategory(category);
-    setFormData({
+    const updatedFormData = {
       ...formData,
       categoryId: category.id,
-    });
+    };
+
+    console.log(
+      'formData sau khi cập nhật categoryId:',
+      JSON.stringify(updatedFormData, null, 2)
+    );
+    setFormData(updatedFormData);
     setCategoryDialogVisible(false);
 
     // Xóa lỗi danh mục nếu có
@@ -17807,10 +18107,23 @@ const AddInventoryItemScreen = () => {
 
   // Chọn đơn vị tính
   const handleUnitSelect = (unit) => {
-    setFormData({
+    console.log('=== HANDLEUNITSELECT ===');
+    console.log('Unit được chọn:', unit);
+    console.log(
+      'formData trước khi cập nhật:',
+      JSON.stringify(formData, null, 2)
+    );
+
+    const updatedFormData = {
       ...formData,
       unit,
-    });
+    };
+
+    console.log(
+      'formData sau khi cập nhật unit:',
+      JSON.stringify(updatedFormData, null, 2)
+    );
+    setFormData(updatedFormData);
     setUnitDialogVisible(false);
 
     // Xóa lỗi đơn vị nếu có
@@ -17829,17 +18142,36 @@ const AddInventoryItemScreen = () => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality: 0.7,
+        base64: true, // Bật base64 để lấy dữ liệu trực tiếp
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
-        const imageUri = result.assets[0].uri;
+        const asset = result.assets[0];
+        const imageUri = asset.uri;
         setImage(imageUri);
 
-        // Chuyển ảnh thành blob để upload
-        const response = await fetch(imageUri);
-        const blob = await response.blob();
-        setImageBlob(blob);
+        // Lấy base64 data trực tiếp từ ImagePicker
+        if (asset.base64) {
+          setUploadingImage(true);
+          try {
+            // Tạo data URL với MIME type phù hợp
+            const fileExtension = imageUri.split('.').pop() || 'jpg';
+            const mimeType = `image/${fileExtension}`;
+            const dataURL = `data:${mimeType};base64,${asset.base64}`;
+
+            setFormData((prev) => ({
+              ...prev,
+              imageBase64: dataURL,
+            }));
+
+            console.log('Base64 image saved successfully');
+          } finally {
+            setUploadingImage(false);
+          }
+        } else {
+          Alert.alert('Lỗi', 'Không thể lấy dữ liệu ảnh');
+        }
       }
     } catch (error) {
       console.error('Lỗi khi chọn ảnh:', error);
@@ -17853,17 +18185,36 @@ const AddInventoryItemScreen = () => {
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality: 0.7,
+        base64: true, // Bật base64 để lấy dữ liệu trực tiếp
       });
 
       if (!result.canceled && result.assets && result.assets[0]) {
-        const imageUri = result.assets[0].uri;
+        const asset = result.assets[0];
+        const imageUri = asset.uri;
         setImage(imageUri);
 
-        // Chuyển ảnh thành blob để upload
-        const response = await fetch(imageUri);
-        const blob = await response.blob();
-        setImageBlob(blob);
+        // Lấy base64 data trực tiếp từ ImagePicker
+        if (asset.base64) {
+          setUploadingImage(true);
+          try {
+            // Tạo data URL với MIME type phù hợp
+            const fileExtension = imageUri.split('.').pop() || 'jpg';
+            const mimeType = `image/${fileExtension}`;
+            const dataURL = `data:${mimeType};base64,${asset.base64}`;
+
+            setFormData((prev) => ({
+              ...prev,
+              imageBase64: dataURL,
+            }));
+
+            console.log('Base64 image saved successfully');
+          } finally {
+            setUploadingImage(false);
+          }
+        } else {
+          Alert.alert('Lỗi', 'Không thể lấy dữ liệu ảnh');
+        }
       }
     } catch (error) {
       console.error('Lỗi khi chụp ảnh:', error);
@@ -17873,23 +18224,33 @@ const AddInventoryItemScreen = () => {
 
   // Kiểm tra form trước khi lưu
   const validateForm = () => {
+    console.log('=== VALIDATEFORM ===');
+    console.log('formData để validate:', JSON.stringify(formData, null, 2));
+
     const newErrors = {};
 
     if (!formData.name.trim()) {
       newErrors.name = 'Vui lòng nhập tên vật tư';
+      console.log('Lỗi: Thiếu tên vật tư');
     }
 
     if (!formData.code.trim()) {
       newErrors.code = 'Vui lòng nhập mã vật tư';
+      console.log('Lỗi: Thiếu mã vật tư');
     }
 
     if (!formData.categoryId) {
       newErrors.categoryId = 'Vui lòng chọn danh mục';
+      console.log('Lỗi: Thiếu categoryId');
     }
 
     if (!formData.unit.trim()) {
       newErrors.unit = 'Vui lòng chọn đơn vị tính';
+      console.log('Lỗi: Thiếu đơn vị tính');
     }
+
+    console.log('Các lỗi validation:', newErrors);
+    console.log('Kết quả validation:', Object.keys(newErrors).length === 0);
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -17902,20 +18263,60 @@ const AddInventoryItemScreen = () => {
     setLoading(true);
 
     try {
-      // Thêm vật tư mới sử dụng useInventory hook để đảm bảo refresh
-      const result = await addInventoryItem(formData);
+      // Log dữ liệu trước khi gửi
+      console.log('=== DỮ LIỆU VẬT TƯ TRƯỚC KHI GỬI ===');
+      console.log('formData:', JSON.stringify(formData, null, 2));
+      console.log('selectedCategory:', selectedCategory);
+      console.log('=== END DỮ LIỆU ===');
 
-      // Nếu có hình ảnh, upload và cập nhật URL
-      if (imageBlob && result.id) {
-        await InventoryService.uploadItemImage(result.id, imageBlob);
+      // Kiểm tra dữ liệu bắt buộc
+      if (
+        !formData.name ||
+        !formData.code ||
+        !formData.categoryId ||
+        !formData.unit
+      ) {
+        const missingFields = [];
+        if (!formData.name) missingFields.push('Tên vật tư');
+        if (!formData.code) missingFields.push('Mã vật tư');
+        if (!formData.categoryId) missingFields.push('Danh mục');
+        if (!formData.unit) missingFields.push('Đơn vị tính');
+
+        throw new Error(
+          `Thiếu thông tin bắt buộc: ${missingFields.join(', ')}`
+        );
       }
+
+      // Thêm vật tư mới sử dụng useInventory hook để đảm bảo refresh
+      // Ảnh đã được lưu trực tiếp vào formData.imageBase64, không cần upload riêng
+      console.log('Bắt đầu gọi addInventoryItem...');
+      const result = await addInventoryItem(formData);
+      console.log('Kết quả addInventoryItem:', result);
 
       Alert.alert('Thành công', 'Đã thêm vật tư mới vào kho', [
         { text: 'OK', onPress: () => navigation.goBack() },
       ]);
     } catch (error) {
-      console.error('Lỗi khi lưu vật tư:', error);
-      Alert.alert('Lỗi', error.message || 'Không thể lưu vật tư');
+      console.error('=== LỖI CHI TIẾT KHI LƯU VẬT TƯ ===');
+      console.error('Error object:', error);
+      console.error('Error message:', error.message);
+      console.error('Error code:', error.code);
+      console.error('Error details:', error.details);
+      console.error('=== END LỖI CHI TIẾT ===');
+
+      let errorMessage = 'Không thể lưu vật tư';
+
+      if (error.code === 'unauthenticated') {
+        errorMessage = 'Bạn cần đăng nhập để thực hiện chức năng này';
+      } else if (error.code === 'invalid-argument') {
+        errorMessage = error.message || 'Dữ liệu không hợp lệ';
+      } else if (error.code === 'already-exists') {
+        errorMessage = error.message || 'Mã vật tư đã tồn tại';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      Alert.alert('Lỗi', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -17923,10 +18324,7 @@ const AddInventoryItemScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.BackAction onPress={() => navigation.goBack()} />
-        <Appbar.Content title="Thêm vật tư mới" />
-      </Appbar.Header>
+      {/* Đã xóa header thứ 2 - chỉ giữ lại nội dung form */}
 
       <ScrollView style={styles.scrollView}>
         {/* Thông tin cơ bản */}
@@ -18049,8 +18447,11 @@ const AddInventoryItemScreen = () => {
         <Text style={styles.sectionTitle}>Hình ảnh vật tư</Text>
 
         <View style={styles.imageContainer}>
-          {image ? (
-            <Image source={{ uri: image }} style={styles.image} />
+          {formData.imageBase64 ? (
+            <Image
+              source={{ uri: formData.imageBase64 }}
+              style={styles.image}
+            />
           ) : (
             <View style={styles.imagePlaceholder}>
               <Text style={styles.placeholderText}>Chưa có ảnh</Text>
@@ -18062,6 +18463,8 @@ const AddInventoryItemScreen = () => {
               mode="contained"
               onPress={pickImage}
               style={styles.imageButton}
+              loading={uploadingImage}
+              disabled={uploadingImage}
             >
               Chọn ảnh
             </Button>
@@ -18069,6 +18472,8 @@ const AddInventoryItemScreen = () => {
               mode="outlined"
               onPress={takePhoto}
               style={styles.imageButton}
+              loading={uploadingImage}
+              disabled={uploadingImage}
             >
               Chụp ảnh
             </Button>
@@ -23883,7 +24288,12 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 
 const CreateProposalScreen = ({ route, navigation }) => {
-  const { projectId, projectName, selectedItems } = route.params;
+  const params = route?.params || {};
+  const projectId = params.projectId;
+  const projectName = params.projectName;
+  const selectedItems = Array.isArray(params.selectedItems)
+    ? params.selectedItems
+    : [];
   const { currentUser } = useAuth();
   const [saving, setSaving] = useState(false);
 
@@ -24050,7 +24460,7 @@ const CreateProposalScreen = ({ route, navigation }) => {
       {/* Danh sách vật tư */}
       <View style={styles.materialsSection}>
         <Text style={styles.sectionTitle}>
-          Danh sách vật tư ({selectedItems.length})
+          Danh sách vật tư ({selectedItems ? selectedItems.length : 0})
         </Text>
         <View style={styles.tableHeader}>
           <Text style={[styles.headerText, { flex: 3 }]}>Tên vật tư</Text>
@@ -30260,7 +30670,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import * as Sharing from 'expo-sharing';
-import { getAuth } from 'firebase/auth';
+import { auth } from '../config/firebaseConfig';
 import { saveQuotation } from '../api/quotationService';
 import useQuotationGenerator from '../hooks/useQuotationGenerator';
 import useContractGenerator from '../hooks/useContractGenerator';
@@ -30514,7 +30924,6 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
   // Hàm tạo báo giá Excel
   const handleGenerateExcel = async () => {
     try {
-      const auth = getAuth();
       const userId = auth.currentUser?.uid;
 
       if (!userId) {
@@ -30852,42 +31261,7 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
           )}
         </TouchableOpacity>
 
-        {/* Contract generation button */}
-        <TouchableOpacity
-          style={[styles.button, { backgroundColor: '#9C27B0' }]}
-          onPress={handleGenerateContract}
-          disabled={isContractLoading}
-        >
-          {isContractLoading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <>
-              <Ionicons
-                name="document-text"
-                size={20}
-                color="white"
-                style={{ marginRight: 10 }}
-              />
-              <Text style={styles.buttonText}>Tạo Hợp Đồng</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {/* Nút Chia Sẻ Hợp Đồng (chỉ hiển thị khi có link) */}
-        {contractDocUrl && !isContractLoading && (
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#673AB7' }]}
-            onPress={() => shareContractDoc()}
-          >
-            <Ionicons
-              name="share-social"
-              size={20}
-              color="white"
-              style={{ marginRight: 10 }}
-            />
-            <Text style={styles.buttonText}>Chia Sẻ Hợp Đồng</Text>
-          </TouchableOpacity>
-        )}
+        {/* Hợp đồng chuyển sang mục riêng ở màn hình chính */}
 
         {excelUrl && (
           <TouchableOpacity
@@ -30901,6 +31275,21 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
               style={{ marginRight: 10 }}
             />
             <Text style={styles.buttonText}>Chia Sẻ Excel</Text>
+          </TouchableOpacity>
+        )}
+
+        {pdfUrl && (
+          <TouchableOpacity
+            style={[styles.button, { backgroundColor: '#3F51B5' }]}
+            onPress={sharePdfQuotation}
+          >
+            <Ionicons
+              name="share-outline"
+              size={20}
+              color="white"
+              style={{ marginRight: 10 }}
+            />
+            <Text style={styles.buttonText}>Chia Sẻ PDF</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -33018,7 +33407,6 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Image, Alert } from 'react-native';
 import {
   Text,
-  Appbar,
   Card,
   Button,
   List,
@@ -33056,7 +33444,6 @@ const InventoryItemDetailScreen = () => {
   const [transactionErrors, setTransactionErrors] = useState({});
   const [processingTransaction, setProcessingTransaction] = useState(false);
 
-  // 加载物料详情
   useEffect(() => {
     if (itemId) {
       fetchItemDetail();
@@ -33066,7 +33453,6 @@ const InventoryItemDetailScreen = () => {
     }
   }, [itemId]);
 
-  // 获取物料详情
   const fetchItemDetail = async () => {
     try {
       setLoading(true);
@@ -33080,7 +33466,6 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 确定库存状态
   const getStockStatus = () => {
     if (!itemDetail || !itemDetail.minQuantity) return 'normal';
 
@@ -33093,7 +33478,6 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 显示状态
   const renderStockStatus = () => {
     if (!itemDetail) return null;
 
@@ -33109,7 +33493,6 @@ const InventoryItemDetailScreen = () => {
     return <StatusIndicator status={status} text={statusText} />;
   };
 
-  // 打开交易对话框
   const openTransactionDialog = (type) => {
     setTransactionType(type);
     setTransactionData({
@@ -33120,14 +33503,12 @@ const InventoryItemDetailScreen = () => {
     setTransactionDialogVisible(true);
   };
 
-  // 处理交易数据变化
   const handleTransactionChange = (field, value) => {
     setTransactionData({
       ...transactionData,
       [field]: value,
     });
 
-    // 清除错误
     if (transactionErrors[field]) {
       setTransactionErrors({
         ...transactionErrors,
@@ -33136,7 +33517,6 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 验证交易表单
   const validateTransactionForm = () => {
     const newErrors = {};
     const quantity = parseFloat(transactionData.quantity);
@@ -33157,7 +33537,6 @@ const InventoryItemDetailScreen = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // 执行交易
   const handleTransaction = async () => {
     if (!validateTransactionForm()) return;
 
@@ -33171,7 +33550,6 @@ const InventoryItemDetailScreen = () => {
         throw new Error('Bạn cần đăng nhập để thực hiện giao dịch');
       }
 
-      // 准备交易数据
       const quantity = parseFloat(transactionData.quantity);
       const transaction = {
         type: transactionType,
@@ -33183,7 +33561,6 @@ const InventoryItemDetailScreen = () => {
         status: 'COMPLETED',
       };
 
-      // 计算新数量
       let newQuantity = itemDetail.stockQuantity;
       if (transactionType === 'IN') {
         newQuantity += quantity;
@@ -33191,13 +33568,10 @@ const InventoryItemDetailScreen = () => {
         newQuantity -= quantity;
       }
 
-      // 开始事务确保数据一致性
       await db.runTransaction(async (transaction) => {
-        // 保存交易
         const transactionRef = db.collection('inventory_transactions').doc();
         transaction.set(transactionRef, transaction);
 
-        // 更新库存数量
         const itemRef = db.collection('inventory').doc(itemId);
         transaction.update(itemRef, {
           stockQuantity: newQuantity,
@@ -33205,7 +33579,6 @@ const InventoryItemDetailScreen = () => {
         });
       });
 
-      // 关闭对话框并重新加载信息
       setTransactionDialogVisible(false);
       Alert.alert(
         'Thành công',
@@ -33215,7 +33588,6 @@ const InventoryItemDetailScreen = () => {
         [{ text: 'OK' }]
       );
 
-      // 刷新物料信息
       await fetchItemDetail();
     } catch (error) {
       console.error('Lỗi khi thực hiện giao dịch:', error);
@@ -33225,12 +33597,10 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 跳转到编辑页面
   const handleEdit = () => {
     navigation.navigate('EditInventoryItem', { itemId, item: itemDetail });
   };
 
-  // 处理添加到报价单
   const handleAddToQuotation = () => {
     navigation.navigate('QuotationScreen', {
       screen: 'CreateQuotation',
@@ -33238,7 +33608,6 @@ const InventoryItemDetailScreen = () => {
     });
   };
 
-  // 格式化时间戳
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
 
@@ -33252,7 +33621,6 @@ const InventoryItemDetailScreen = () => {
     });
   };
 
-  // 渲染加载页面
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -33262,7 +33630,6 @@ const InventoryItemDetailScreen = () => {
     );
   }
 
-  // 渲染错误页面
   if (error || !itemDetail) {
     return (
       <View style={styles.errorContainer}>
@@ -33283,14 +33650,9 @@ const InventoryItemDetailScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.BackAction onPress={() => navigation.goBack()} />
-        <Appbar.Content title="Chi tiết vật tư" />
-        <Appbar.Action icon="pencil" onPress={handleEdit} />
-      </Appbar.Header>
+      {/* ĐÃ BỎ Appbar.Header để tránh trùng header với navigator */}
 
       <ScrollView style={styles.scrollView}>
-        {/* 基本信息 */}
         <Card style={styles.card}>
           <Card.Content>
             {itemDetail.imageUrl ? (
@@ -33379,7 +33741,6 @@ const InventoryItemDetailScreen = () => {
           </Card.Content>
         </Card>
 
-        {/* 入库出库按钮 */}
         <View style={styles.actionButtons}>
           <Button
             mode="contained"
@@ -33400,7 +33761,6 @@ const InventoryItemDetailScreen = () => {
           </Button>
         </View>
 
-        {/* 交易历史 */}
         <Card style={styles.card}>
           <Card.Title title="Lịch sử giao dịch" />
           <Card.Content>
@@ -33456,7 +33816,6 @@ const InventoryItemDetailScreen = () => {
         </Card>
       </ScrollView>
 
-      {/* 交易对话框 */}
       <Portal>
         <Dialog
           visible={transactionDialogVisible}
@@ -33519,7 +33878,6 @@ const InventoryItemDetailScreen = () => {
         </Dialog>
       </Portal>
 
-      {/* 添加到报价按钮 */}
       <FAB
         style={styles.fab}
         icon="file-document-edit"
@@ -34311,6 +34669,7 @@ import {
   Text,
   Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   Searchbar,
   FAB,
@@ -34332,7 +34691,7 @@ import {
   useRoute,
 } from '@react-navigation/native';
 import InventoryItemCard from '../components/InventoryItemCard';
-import { TouchableOpacity } from 'react-native-gesture-handler';
+import { TouchableOpacity } from 'react-native';
 import useInventory from '../hooks/useInventory';
 import { useAuth } from '../contexts/AuthContext';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
@@ -34368,6 +34727,7 @@ const InventoryScreen = () => {
   const route = useRoute();
   const { user } = useAuth();
   const [fabOpen, setFabOpen] = useState(false);
+  const [isScreenFocused, setIsScreenFocused] = useState(false);
 
   // Xử lý tham số refresh
   useEffect(() => {
@@ -34381,31 +34741,98 @@ const InventoryScreen = () => {
     }
   }, [route.params?.refresh, navigation]);
 
+  // Sử dụng navigation listener để quản lý việc hiển thị FAB
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('InventoryScreen focused - setting isScreenFocused to true');
+      setIsScreenFocused(true);
+    });
+
+    const unsubscribeBlur = navigation.addListener('blur', () => {
+      console.log(
+        'InventoryScreen unfocused - setting isScreenFocused to false'
+      );
+      setIsScreenFocused(false);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeBlur();
+    };
+  }, [navigation]);
+
   // Lấy danh sách vật tư từ Firestore - tối ưu hiệu suất
   const fetchInventory = useCallback(async () => {
     setLoading(true);
     try {
+      console.log('=== INVENTORYSCREEN: BẮT ĐẦU FETCH INVENTORY ===');
       const inventoryRef = collection(db, 'inventory');
-      // Use 'updatedAt' for sorting, as it is more consistent across all
-      // item creation/update methods (manual and from PO).
-      const q = query(inventoryRef, orderBy('updatedAt', 'desc'));
-      const snapshot = await getDocs(q);
+
+      // Thử query với lastUpdated trước, nếu lỗi thì fallback về query không có orderBy
+      let q;
+      let snapshot;
+
+      try {
+        // Thử query với lastUpdated (cho vật tư mới thêm thủ công)
+        console.log('=== INVENTORYSCREEN: THỬ QUERY VỚI lastUpdated ===');
+        q = query(inventoryRef, orderBy('lastUpdated', 'desc'));
+        snapshot = await getDocs(q);
+        console.log('=== INVENTORYSCREEN: QUERY lastUpdated THÀNH CÔNG ===');
+      } catch (orderByError) {
+        console.log(
+          '=== INVENTORYSCREEN: QUERY lastUpdated THẤT BẠI, THỬ QUERY KHÔNG CÓ ORDERBY ==='
+        );
+        console.log('Lỗi orderBy:', orderByError.message);
+
+        // Fallback: query không có orderBy để lấy tất cả vật tư
+        q = query(inventoryRef);
+        snapshot = await getDocs(q);
+        console.log(
+          '=== INVENTORYSCREEN: QUERY KHÔNG CÓ ORDERBY THÀNH CÔNG ==='
+        );
+      }
+
+      console.log('=== INVENTORYSCREEN: KẾT QUẢ QUERY ===');
+      console.log('Số lượng documents:', snapshot.docs.length);
 
       const fetchedItems = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
 
-      setItems(fetchedItems);
+      console.log('=== INVENTORYSCREEN: DỮ LIỆU ĐÃ PARSE ===');
+      console.log('Số lượng items:', fetchedItems.length);
+      console.log('Items đầu tiên:', fetchedItems[0]);
+
+      // Sắp xếp thủ công nếu cần
+      const sortedItems = fetchedItems.sort((a, b) => {
+        // Ưu tiên lastUpdated, sau đó updatedAt, cuối cùng createdAt
+        const aTime = a.lastUpdated || a.updatedAt || a.createdAt;
+        const bTime = b.lastUpdated || b.updatedAt || b.createdAt;
+
+        if (aTime && bTime) {
+          return bTime.toDate().getTime() - aTime.toDate().getTime();
+        }
+        return 0;
+      });
+
+      console.log('=== INVENTORYSCREEN: DỮ LIỆU ĐÃ SẮP XẾP ===');
+      console.log('Số lượng items sau khi sắp xếp:', sortedItems.length);
+
+      setItems(sortedItems);
       applyFiltersAndSort(
-        fetchedItems,
+        sortedItems,
         searchQuery,
         selectedCategory,
         filterLowStock,
         sortOption
       );
+
+      console.log('=== INVENTORYSCREEN: HOÀN THÀNH FETCH ===');
     } catch (error) {
+      console.error('=== INVENTORYSCREEN: LỖI FETCH ===');
       console.error('Lỗi khi lấy dữ liệu kho:', error);
+      console.error('Error details:', error.message, error.code);
     } finally {
       setLoading(false);
     }
@@ -34787,27 +35214,56 @@ const InventoryScreen = () => {
         </View>
       )}
 
-      {/* FAB Group cho các hành động */}
-      <Portal>
-        <FAB.Group
-          open={fabOpen}
+      {/* FAB đơn giản - chỉ hiển thị khi màn hình được focus */}
+      {console.log(
+        'Rendering FAB, isScreenFocused:',
+        isScreenFocused,
+        'fabOpen:',
+        fabOpen
+      )}
+      {isScreenFocused && (
+        <FAB
           icon={fabOpen ? 'close' : 'plus'}
-          actions={[
-            {
-              icon: 'plus',
-              label: 'Thêm vật tư mới',
-              onPress: handleAddItem,
-            },
-            {
-              icon: 'file-excel',
-              label: 'Nhập từ Excel',
-              onPress: () => setImportDialogVisible(true),
-            },
-          ]}
-          onStateChange={({ open }) => setFabOpen(open)}
-          fabStyle={styles.fab}
+          style={styles.fab}
+          onPress={() => {
+            console.log('FAB pressed, current fabOpen:', fabOpen);
+            if (fabOpen) {
+              // Nếu FAB đang mở, hiển thị menu
+              setFabOpen(false);
+            } else {
+              // Nếu FAB đang đóng, mở menu
+              setFabOpen(true);
+            }
+          }}
         />
-      </Portal>
+      )}
+
+      {/* Menu cho các hành động khi FAB được mở */}
+      {isScreenFocused && fabOpen && (
+        <View style={styles.fabMenu}>
+          <TouchableOpacity
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabOpen(false);
+              handleAddItem();
+            }}
+          >
+            <Ionicons name="add" size={20} color="#fff" />
+            <Text style={styles.fabMenuText}>Thêm vật tư mới</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabOpen(false);
+              setImportDialogVisible(true);
+            }}
+          >
+            <Ionicons name="file-excel" size={20} color="#fff" />
+            <Text style={styles.fabMenuText}>Nhập từ Excel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Dialog nhập từ Google Drive */}
       <Portal>
@@ -35019,6 +35475,33 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: '#3f51b5',
+  },
+  fabMenu: {
+    position: 'absolute',
+    right: 16,
+    bottom: 80,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  fabMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+  fabMenuText: {
+    marginLeft: 12,
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
   },
   loader: {
     flex: 1,
@@ -43589,6 +44072,7 @@ import React, {
   useEffect,
   useCallback,
   useLayoutEffect,
+  useRef,
 } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -43607,6 +44091,10 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+// Google Signin imported once at top
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import app, { db } from '../config/firebaseConfig';
+import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import {
   updateTaskStatus,
   updateCustomTask,
@@ -43928,6 +44416,36 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     setStageAssignmentModalVisible(true);
   };
 
+  // Single-flight guard for generating contract
+  const isGeneratingContractRef = useRef(false);
+
+  // Helper: safely get Google access token avoiding concurrent getTokens calls
+  const getAccessTokenSafe = async () => {
+    // Ensure signed in first
+    const signedIn = await GoogleSignin.isSignedIn();
+    if (!signedIn) {
+      await GoogleSignin.signIn();
+    }
+
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { accessToken } = await GoogleSignin.getTokens();
+        if (accessToken) return accessToken;
+      } catch (e) {
+        lastErr = e;
+        const msg = String(e?.message || '');
+        if (msg.includes('previous promise did not settle')) {
+          // Small backoff before retrying
+          await new Promise((r) => setTimeout(r, 400));
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr || new Error('Không lấy được Google access token');
+  };
+
   // Hiển thị khi đang tải dữ liệu
   if (loading) {
     return (
@@ -44232,6 +44750,102 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                 )}
               </View>
               <Text style={styles.tileLabel}>Thảo luận dự án</Text>
+            </TouchableOpacity>
+
+            {/* Quản lý Hợp đồng: tạo từ báo giá mới nhất */}
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={async () => {
+                if (isGeneratingContractRef.current) return;
+                isGeneratingContractRef.current = true;
+                try {
+                  // 1) Lấy báo giá mới nhất
+                  const quotationsRef = collection(
+                    db,
+                    `projects/${project.id}/quotations`
+                  );
+                  const q = query(
+                    quotationsRef,
+                    orderBy('createdAt', 'desc'),
+                    limit(1)
+                  );
+                  const snap = await getDocs(q);
+                  const latestQuotation = snap.empty
+                    ? null
+                    : { id: snap.docs[0].id, ...snap.docs[0].data() };
+
+                  const materials =
+                    latestQuotation?.materials || project.materials || [];
+
+                  // 2) Lấy access token Google
+                  const accessToken = await getAccessTokenSafe();
+
+                  // 3) Chuẩn bị dữ liệu hợp đồng
+                  const customerData = {
+                    name: project.customerName || '',
+                    address: project.customerAddress || '',
+                    phone: project.customerPhone || '',
+                    taxCode: project.customerTaxCode || '',
+                  };
+
+                  const contractData = {
+                    companyName: customerData.name,
+                    customerAddress: customerData.address,
+                    companyPhone: customerData.phone,
+                    taxCode: customerData.taxCode,
+                    day: String(new Date().getDate()),
+                    month: String(new Date().getMonth() + 1),
+                    deliveryTime: latestQuotation?.deliveryTime || '',
+                    materials,
+                  };
+
+                  // 4) Gọi Cloud Function generateContract
+                  const functions = getFunctions(app, 'us-central1');
+                  const generateContract = httpsCallable(
+                    functions,
+                    'generateContract'
+                  );
+                  const result = await generateContract({
+                    contractData,
+                    fileName: `Hop_dong_${
+                      project.name || 'du_an'
+                    }_${Date.now()}`,
+                    projectId: project.id,
+                    accessToken,
+                  });
+
+                  const { docUrl } = result.data || {};
+                  if (docUrl) {
+                    Alert.alert('Thành công', 'Đã tạo hợp đồng. Mở tài liệu?', [
+                      { text: 'Đóng', style: 'cancel' },
+                      {
+                        text: 'Mở',
+                        onPress: () => Linking.openURL(docUrl).catch(() => {}),
+                      },
+                    ]);
+                  } else {
+                    Alert.alert(
+                      'Thông báo',
+                      'Đã tạo hợp đồng nhưng không lấy được liên kết.'
+                    );
+                  }
+                } catch (err) {
+                  console.error(
+                    'Generate contract from latest quotation failed:',
+                    err
+                  );
+                  Alert.alert('Lỗi', err.message || 'Không thể tạo hợp đồng');
+                } finally {
+                  isGeneratingContractRef.current = false;
+                }
+              }}
+            >
+              <Ionicons
+                name="document-text-outline"
+                size={22}
+                color="#2E7D32"
+              />
+              <Text style={styles.tileLabel}>Quản lý Hợp đồng</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -45599,6 +46213,28 @@ const ProjectDiscussionScreen = ({ route, navigation }) => {
     }
   };
 
+  // Hàm test notification
+  const handleTestNotification = async () => {
+    try {
+      // Gửi tin nhắn test để trigger notification
+      await addDiscussionMessage(
+        projectId,
+        '🔔 TEST NOTIFICATION - Kiểm tra push notification!',
+        user.uid,
+        user.displayName || user.email,
+        user.photoURL || null
+      );
+
+      Alert.alert(
+        'Test Notification',
+        'Đã gửi tin nhắn test! Bây giờ hãy:\n\n1. Nhấn Home để đưa app về background\n2. Hoặc tắt app hoàn toàn\n3. Chờ notification xuất hiện',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể gửi tin nhắn test. Vui lòng thử lại.');
+    }
+  };
+
   const renderMessage = ({ item }) => {
     const isOwnMessage = item.userId === user.uid;
     const isEditing = editingMessage === item.id;
@@ -45805,6 +46441,12 @@ const ProjectDiscussionScreen = ({ route, navigation }) => {
         <Text style={[styles.headerTitle, { color: theme.text }]}>
           Thảo luận dự án: {projectName}
         </Text>
+        <TouchableOpacity
+          onPress={handleTestNotification}
+          style={styles.testNotificationButton}
+        >
+          <Ionicons name="notifications" size={24} color={theme.primary} />
+        </TouchableOpacity>
       </View>
 
       {/* Messages List */}
@@ -45964,6 +46606,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     flex: 1,
+  },
+  testNotificationButton: {
+    marginLeft: 16,
+    padding: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   messagesList: {
     flex: 1,
@@ -46441,7 +47091,7 @@ const ProjectManagementScreen = ({ navigation }) => {
     },
   ];
 
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [activeFilter, setActiveFilter] = useState('in_progress');
   const [cacheByStatus, setCacheByStatus] = useState({});
 
   // Hàm tải danh sách dự án
@@ -61819,7 +62469,9 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 
 // Initialize Firebase Admin FIRST
-admin.initializeApp();
+admin.initializeApp({
+  storageBucket: 'tanyb-fe4bf.appspot.com',
+});
 
 // Export functions from other files
 export * from './materialImporter';
@@ -61842,6 +62494,7 @@ export * from './quotationExcelGenerator';
 export * from './attendanceExcelGenerator';
 export * from './processWorkAllocations';
 export * from './aggregateMonthlyReport';
+export * from './notificationTriggers';
 
 // Không export từ excelGenerator nữa vì đã có export từ quotationExcelGenerator
 
@@ -62133,10 +62786,13 @@ export interface InventoryItem {
   minQuantity?: number;
   price?: number;
   lastUpdated: admin.firestore.Timestamp;
+  updatedAt?: admin.firestore.Timestamp; // Thêm field này để tương thích
+  createdAt?: admin.firestore.Timestamp; // Thêm field này để tương thích
   locationId?: string;
   weight?: number; // Khối lượng (kg)
   material?: string; // Vật liệu
   imageUrl?: string; // URL hình ảnh
+  imageBase64?: string; // Base64 data của hình ảnh
   supplier?: string; // Nhà cung cấp chính
   properties?: { [key: string]: any }; // Thuộc tính tuỳ chỉnh
 }
@@ -62184,8 +62840,14 @@ export interface InventoryLocation {
 export const addInventoryItem = functions
   .region('asia-southeast1')
   .https.onCall(async (data: InventoryItem, context: CallableContext) => {
+    console.log('=== CLOUD FUNCTION: BẮT ĐẦU THÊM VẬT TƯ ===');
+    console.log('data nhận được:', JSON.stringify(data, null, 2));
+    console.log('context.auth:', context.auth);
+
     // Kiểm tra xác thực
     if (!context.auth) {
+      console.error('=== CLOUD FUNCTION: LỖI XÁC THỰC ===');
+      console.error('User chưa đăng nhập');
       throw new functions.https.HttpsError(
         'unauthenticated',
         'Bạn cần đăng nhập để thực hiện chức năng này.'
@@ -62193,14 +62855,23 @@ export const addInventoryItem = functions
     }
 
     try {
+      console.log('=== CLOUD FUNCTION: KIỂM TRA DỮ LIỆU ===');
       // Kiểm tra dữ liệu đầu vào
       if (!data.name || !data.code || !data.categoryId || !data.unit) {
+        console.error('=== CLOUD FUNCTION: LỖI DỮ LIỆU ===');
+        console.error('Thiếu thông tin bắt buộc:');
+        console.error('name:', data.name);
+        console.error('code:', data.code);
+        console.error('categoryId:', data.categoryId);
+        console.error('unit:', data.unit);
+
         throw new functions.https.HttpsError(
           'invalid-argument',
           'Thiếu thông tin vật tư bắt buộc.'
         );
       }
 
+      console.log('=== CLOUD FUNCTION: KIỂM TRA MÃ VẬT TƯ TRÙNG ===');
       // Kiểm tra mã vật tư đã tồn tại chưa
       const codeSnapshot = await admin
         .firestore()
@@ -62209,27 +62880,37 @@ export const addInventoryItem = functions
         .get();
 
       if (!codeSnapshot.empty) {
+        console.error('=== CLOUD FUNCTION: MÃ VẬT TƯ ĐÃ TỒN TẠI ===');
+        console.error('Mã vật tư:', data.code, 'đã tồn tại');
         throw new functions.https.HttpsError(
           'already-exists',
           'Mã vật tư đã tồn tại trong hệ thống.'
         );
       }
 
+      console.log('=== CLOUD FUNCTION: CHUẨN BỊ DỮ LIỆU ===');
       // Chuẩn bị dữ liệu để lưu
       const newItem: InventoryItem = {
         ...data,
         stockQuantity: data.stockQuantity || 0,
         lastUpdated: admin.firestore.Timestamp.now(),
+        updatedAt: admin.firestore.Timestamp.now(), // Thêm field này để tương thích
       };
+      console.log('newItem chuẩn bị lưu:', JSON.stringify(newItem, null, 2));
 
+      console.log('=== CLOUD FUNCTION: LƯU VÀO FIRESTORE ===');
       // Lưu vào Firestore
       const docRef = await admin
         .firestore()
         .collection('inventory')
         .add(newItem);
 
+      console.log('=== CLOUD FUNCTION: ĐÃ LƯU THÀNH CÔNG ===');
+      console.log('Document ID:', docRef.id);
+
       // Nếu có số lượng ban đầu > 0, tạo giao dịch nhập kho
       if (data.stockQuantity > 0) {
+        console.log('=== CLOUD FUNCTION: TẠO GIAO DỊCH NHẬP KHO ===');
         await admin.firestore().collection('inventory_transactions').add({
           type: 'IN',
           itemId: docRef.id,
@@ -62239,15 +62920,26 @@ export const addInventoryItem = functions
           userId: context.auth.uid,
           status: 'COMPLETED',
         });
+        console.log('=== CLOUD FUNCTION: ĐÃ TẠO GIAO DỊCH NHẬP KHO ===');
       }
 
-      return {
+      const result = {
         success: true,
         id: docRef.id,
         message: 'Thêm vật tư thành công',
       };
+
+      console.log('=== CLOUD FUNCTION: TRẢ VỀ KẾT QUẢ ===');
+      console.log('result:', JSON.stringify(result, null, 2));
+
+      return result;
     } catch (error: any) {
-      console.error('Lỗi thêm vật tư:', error);
+      console.error('=== CLOUD FUNCTION: LỖI CHUNG ===');
+      console.error('Error object:', error);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+      console.error('=== END LỖI CLOUD FUNCTION ===');
+
       throw new functions.https.HttpsError(
         'internal',
         `Lỗi thêm vật tư: ${error.message}`
@@ -62293,6 +62985,7 @@ export const updateInventoryItem = functions
         const updateData = {
           ...itemData,
           lastUpdated: admin.firestore.Timestamp.now(),
+          updatedAt: admin.firestore.Timestamp.now(), // Thêm field này để tương thích
         };
 
         // Cập nhật vào Firestore
@@ -62411,6 +63104,7 @@ export const createInventoryTransaction = functions
             transaction.update(itemRef, {
               stockQuantity: newQuantity,
               lastUpdated: admin.firestore.Timestamp.now(),
+              updatedAt: admin.firestore.Timestamp.now(), // Thêm field này để tương thích
             });
           } else {
             // Xử lý chuyển kho - logic phức tạp hơn có thể thêm sau
@@ -62741,6 +63435,16 @@ function isRomanNumeral(str: string): boolean {
   return romanPattern.test(str.toString().trim());
 }
 
+// Chuẩn hóa chuỗi tiếng Việt để so khớp không dấu
+function normalizeVi(str: string): string {
+  return (str || '')
+    .toString()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+}
+
 // admin đã được khởi tạo ở file index.ts chính
 
 export const importMaterialsFromDrive = functions
@@ -62783,10 +63487,12 @@ export const importMaterialsFromDrive = functions
       const worksheet = workbook.Sheets[sheetName];
       const rawData: any[][] = XLSX.utils.sheet_to_json(worksheet, {
         header: 1,
+        defval: null,
       });
 
       const parsedMaterials: any[] = [];
-      for (let i = 4; i < rawData.length; i++) {
+      // Bắt đầu từ dòng 3 (index 2) để không bỏ lỡ dòng tổng hợp đầu bảng nếu có
+      for (let i = 2; i < rawData.length; i++) {
         const row: any[] = rawData[i];
 
         // Bỏ qua hàng trống hoàn toàn
@@ -62816,6 +63522,32 @@ export const importMaterialsFromDrive = functions
           }, Is Roman: ${isRoman}, Type: ${typeof row[0]}`
         );
 
+        // Nếu là dòng tổng hợp/tổng cộng (STT La Mã hoặc tên chứa từ khoá), tạo một item đặc biệt
+        const rawName = (row[1] || '').toString();
+        const nameNormalized = normalizeVi(rawName);
+        if (
+          isRoman ||
+          nameNormalized.includes('TONG CONG') ||
+          nameNormalized.includes('TONG HOP') ||
+          nameNormalized.includes('TONG KET')
+        ) {
+          const summaryItem = {
+            stt: String(row[0] || '').trim(),
+            name: rawName,
+            material: '',
+            quyCach: '',
+            unit: String(row[6] || '').trim(),
+            quantity: parseFloat(String(row[7] || '0')) || 0,
+            weight: parseFloat(String(row[8] || '0')) || 0, // KL/cái
+            totalWeight: parseFloat(String(row[9] || '0')) || 0, // KL tổng
+            unitPrice: 0,
+            totalPrice: 0,
+            isSummary: true,
+          };
+          parsedMaterials.push(summaryItem);
+          continue; // không xử lý tiếp như vật tư thường
+        }
+
         // Đảm bảo STT được lưu dưới dạng chuỗi
         let sttValue = '';
         if (hasSTT) {
@@ -62825,19 +63557,20 @@ export const importMaterialsFromDrive = functions
         // Xử lý thông tin vật tư, mặc định giá trị là 0 hoặc chuỗi rỗng nếu không có dữ liệu
         const materialItem = {
           stt: sttValue,
-          name: row[1] || '',
+          name: rawName || '',
           material: row[2] || '',
-          quyCach: row[3] && row[4] ? `${row[3]}x${row[4]}` : '',
-          unit: row[6] || '',
+          quyCach: row[3] && row[4] ? `${row[3]}x${row[4]}` : row[3] || '',
+          unit: String(row[6] || '').trim(),
           quantity: parseFloat(String(row[7] || '0')) || 0,
-          weight: parseFloat(String(row[8] || '0')) || 0,
+          weight: parseFloat(String(row[8] || '0')) || 0, // KL/cái
+          totalWeight: parseFloat(String(row[9] || '0')) || 0, // KL tổng (cột J)
           unitPrice: 0,
           totalPrice: 0,
         };
         parsedMaterials.push(materialItem);
       }
 
-      // Trả về kết quả
+      // Trả về duy nhất mảng materials (đã bao gồm item isSummary nếu có)
       return { materials: parsedMaterials };
     } catch (error: any) {
       console.error('Error importing materials from Drive:', error);
@@ -62860,6 +63593,117 @@ export const importMaterialsFromDrive = functions
 --- END: functions\src\materialImporter.ts ---
 
 
+--- START: functions\src\notificationTriggers.ts ---
+// Trong file functions/src/notificationTriggers.ts
+import * as functions from 'firebase-functions/v1';
+import * as admin from 'firebase-admin';
+
+// Giả định admin đã được khởi tạo ở file index.ts chính
+const db = admin.firestore();
+
+export const sendDiscussionNotification = functions
+  .region('asia-southeast1')
+  .firestore.document('projectDiscussions/{messageId}')
+  .onCreate(async (snap, context) => {
+    const messageData = snap.data();
+    if (!messageData) {
+      console.log('No data associated with the event');
+      return null;
+    }
+
+    const {
+      projectId,
+      userId: senderId,
+      userName: senderName,
+      message,
+      attachments,
+    } = messageData;
+
+    // 1. Lấy thông tin dự án để hiển thị tên dự án
+    const projectRef = db.collection('projects').doc(projectId);
+    const projectDoc = await projectRef.get();
+    if (!projectDoc.exists) {
+      console.log(`Project ${projectId} not found.`);
+      return null;
+    }
+    const projectData = projectDoc.data();
+    if (!projectData) {
+      console.log(`No data for project ${projectId}.`);
+      return null;
+    }
+
+    const projectName = projectData.name || 'Một dự án';
+
+    // 2. Lấy user theo các role cụ thể thay vì chỉ workers trong dự án
+    const rolesToNotify = ['giam_doc', 'pho_giam_doc', 'ky_su', 'thuong_mai'];
+    const usersSnapshot = await db
+      .collection('users')
+      .where('role', 'in', rolesToNotify)
+      .get();
+    const userIdsByRole = usersSnapshot.docs.map((doc) => doc.id);
+
+    // 3. Lọc ra người gửi
+    const recipientsIds = userIdsByRole.filter((id: string) => id !== senderId);
+    if (recipientsIds.length === 0) {
+      console.log('No recipients to notify.');
+      return null;
+    }
+
+    // 4. Lấy FCM tokens của những người nhận
+    const usersRef = db.collection('users');
+    const tokensPromises = recipientsIds.map((id: string) =>
+      usersRef.doc(id).get()
+    );
+    const usersDocs = await Promise.all(tokensPromises);
+
+    const tokens = usersDocs
+      .map((doc) => doc.data()?.fcmToken)
+      .filter((token) => typeof token === 'string' && token.length > 0);
+
+    if (tokens.length === 0) {
+      console.log('No FCM tokens found for recipients.');
+      return null;
+    }
+
+    // 5. Tạo payload cho notification
+    let notificationBody = message || '';
+    if (attachments && attachments.length > 0) {
+      if (attachments[0].type?.startsWith('image/')) {
+        notificationBody = 'đã gửi một ảnh.';
+      } else {
+        notificationBody = 'đã gửi một tài liệu.';
+      }
+    } else {
+      // Giới hạn độ dài tin nhắn
+      if (notificationBody.length > 100) {
+        notificationBody = notificationBody.substring(0, 97) + '...';
+      }
+    }
+
+    const payload = {
+      notification: {
+        title: `Tin nhắn mới: ${projectName}`,
+        body: `${senderName}: ${notificationBody}`,
+        sound: 'default',
+      },
+      data: {
+        type: 'project_discussion',
+        projectId: projectId,
+        projectName: projectName,
+      },
+    };
+
+    // 6. Gửi notification
+    console.log(
+      `Sending notification to ${tokens.length} tokens for project ${projectName}.`
+    );
+    return admin.messaging().sendToDevice(tokens, payload);
+  });
+
+
+--- END: functions\src\notificationTriggers.ts ---
+
+
 --- START: functions\src\pdfGenerator.ts ---
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
@@ -62868,8 +63712,8 @@ import * as path from 'path';
 // Chỉ import 'googleapis' bên trong hàm khi cần
 // import { google } from 'googleapis';
 
-// Get reference to Firebase Storage
-const storage = admin.storage().bucket();
+// Firebase Storage bucket (not used after switching to Drive-only upload)
+// const storage = admin.storage().bucket();
 
 /**
  * Callable function that takes a Google Sheet ID and exports it as PDF using Google Drive API
@@ -63065,105 +63909,55 @@ export const exportSheetToPdf = functions
       // Define sanitized filename first
       const sanitizedFileName = fileName.replace(/[^a-z0-9.]/gi, '_');
 
-      // Save PDF to Google Drive folder if baogiaFolderId exists
-      if (baogiaFolderId) {
+      // Upload PDF trực tiếp lên Google Drive và trả về link, tránh phụ thuộc Firebase Storage (tránh lỗi bucket 404)
+      try {
+        const driveClient = google.drive({ version: 'v3', auth: authClient });
+        const uploadRes = await driveClient.files.create({
+          requestBody: {
+            name: `${sanitizedFileName}.pdf`,
+            mimeType: 'application/pdf',
+            parents: baogiaFolderId ? [baogiaFolderId] : undefined,
+          },
+          media: {
+            mimeType: 'application/pdf',
+            body: pdfStream,
+          },
+          fields: 'id, webViewLink, webContentLink',
+        });
+
+        const fileId = uploadRes.data.id as string;
+
+        // Mở quyền xem cho bất kỳ ai có link
         try {
-          // Upload PDF to Drive (in background, don't await)
-          const driveClient = google.drive({
-            version: 'v3',
-            auth: authClient,
+          await driveClient.permissions.create({
+            fileId,
+            requestBody: { role: 'reader', type: 'anyone' },
           });
-
-          // Clone the stream since we need to use it twice (Drive and Storage)
-          const pdfClone = require('stream').Readable.from(pdfStream);
-
-          driveClient.files
-            .create({
-              requestBody: {
-                name: `${sanitizedFileName}.pdf`,
-                mimeType: 'application/pdf',
-                parents: [baogiaFolderId],
-              },
-              media: {
-                mimeType: 'application/pdf',
-                body: pdfClone,
-              },
-            })
-            .catch((error) => {
-              console.error('Error uploading PDF to Drive:', error);
-            });
-        } catch (error) {
-          console.error('Error setting up Drive upload:', error);
-        }
-      }
-
-      // Define the destination path in Firebase Storage (keep existing functionality)
-      const destinationPath = `quotation-pdfs/${projectId}/${sanitizedFileName}.pdf`;
-      const file = storage.file(destinationPath);
-
-      // Create a write stream to Firebase Storage
-      const writeStream = file.createWriteStream({
-        metadata: {
-          contentType: 'application/pdf',
-        },
-      });
-
-      // Handle potential errors in the pipeline
-      let pipelineError: Error | null = null;
-
-      // Pipe the PDF data from Google Drive to Firebase Storage
-      pdfStream
-        .on('error', (err: Error) => {
-          pipelineError = err;
-          functions.logger.error('Error streaming PDF from Drive:', err);
-        })
-        .pipe(writeStream);
-
-      // Return a promise that resolves when the upload is complete
-      return new Promise((resolve, reject) => {
-        writeStream.on('finish', async () => {
-          if (pipelineError) {
-            reject(
-              new functions.https.HttpsError('internal', pipelineError.message)
-            );
-            return;
-          }
-
-          try {
-            // Generate a signed URL instead of making the file public
-            // This is compatible with Uniform Bucket-Level Access
-            const [signedUrl] = await file.getSignedUrl({
-              action: 'read',
-              expires: '01-01-2124', // Set a very long expiration date (e.g., 100 years)
-            });
-
-            resolve({
-              pdfUrl: signedUrl,
-              lastRow,
-              dynamicRange,
-              usedUrl: exportUrl,
-            });
-          } catch (err) {
-            functions.logger.error('Error generating signed URL:', err);
-            reject(
-              new functions.https.HttpsError(
-                'internal',
-                'Không thể tạo URL công khai cho file PDF.'
-              )
-            );
-          }
-        });
-
-        writeStream.on('error', (err) => {
-          functions.logger.error('Error writing to Firebase Storage:', err);
-          reject(
-            new functions.https.HttpsError(
-              'internal',
-              `Lỗi khi lưu file PDF: ${err.message}`
-            )
+        } catch (permErr) {
+          functions.logger.warn(
+            'Failed to set Drive file permission:',
+            permErr
           );
-        });
-      });
+        }
+
+        const pdfUrl = (uploadRes.data.webContentLink ||
+          uploadRes.data.webViewLink) as string;
+
+        return {
+          pdfUrl,
+          lastRow,
+          dynamicRange,
+          usedUrl: exportUrl,
+        };
+      } catch (uploadErr: any) {
+        functions.logger.error('Error uploading PDF to Drive:', uploadErr);
+        throw new functions.https.HttpsError(
+          'internal',
+          `Không thể upload PDF lên Google Drive: ${
+            uploadErr?.message || 'Unknown error'
+          }`
+        );
+      }
     } catch (error) {
       functions.logger.error('Error in exportSheetToPdf:', error);
       throw new functions.https.HttpsError(

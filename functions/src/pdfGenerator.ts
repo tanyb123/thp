@@ -5,8 +5,8 @@ import * as path from 'path';
 // Chỉ import 'googleapis' bên trong hàm khi cần
 // import { google } from 'googleapis';
 
-// Get reference to Firebase Storage
-const storage = admin.storage().bucket();
+// Firebase Storage bucket (not used after switching to Drive-only upload)
+// const storage = admin.storage().bucket();
 
 /**
  * Callable function that takes a Google Sheet ID and exports it as PDF using Google Drive API
@@ -202,105 +202,55 @@ export const exportSheetToPdf = functions
       // Define sanitized filename first
       const sanitizedFileName = fileName.replace(/[^a-z0-9.]/gi, '_');
 
-      // Save PDF to Google Drive folder if baogiaFolderId exists
-      if (baogiaFolderId) {
+      // Upload PDF trực tiếp lên Google Drive và trả về link, tránh phụ thuộc Firebase Storage (tránh lỗi bucket 404)
+      try {
+        const driveClient = google.drive({ version: 'v3', auth: authClient });
+        const uploadRes = await driveClient.files.create({
+          requestBody: {
+            name: `${sanitizedFileName}.pdf`,
+            mimeType: 'application/pdf',
+            parents: baogiaFolderId ? [baogiaFolderId] : undefined,
+          },
+          media: {
+            mimeType: 'application/pdf',
+            body: pdfStream,
+          },
+          fields: 'id, webViewLink, webContentLink',
+        });
+
+        const fileId = uploadRes.data.id as string;
+
+        // Mở quyền xem cho bất kỳ ai có link
         try {
-          // Upload PDF to Drive (in background, don't await)
-          const driveClient = google.drive({
-            version: 'v3',
-            auth: authClient,
+          await driveClient.permissions.create({
+            fileId,
+            requestBody: { role: 'reader', type: 'anyone' },
           });
-
-          // Clone the stream since we need to use it twice (Drive and Storage)
-          const pdfClone = require('stream').Readable.from(pdfStream);
-
-          driveClient.files
-            .create({
-              requestBody: {
-                name: `${sanitizedFileName}.pdf`,
-                mimeType: 'application/pdf',
-                parents: [baogiaFolderId],
-              },
-              media: {
-                mimeType: 'application/pdf',
-                body: pdfClone,
-              },
-            })
-            .catch((error) => {
-              console.error('Error uploading PDF to Drive:', error);
-            });
-        } catch (error) {
-          console.error('Error setting up Drive upload:', error);
-        }
-      }
-
-      // Define the destination path in Firebase Storage (keep existing functionality)
-      const destinationPath = `quotation-pdfs/${projectId}/${sanitizedFileName}.pdf`;
-      const file = storage.file(destinationPath);
-
-      // Create a write stream to Firebase Storage
-      const writeStream = file.createWriteStream({
-        metadata: {
-          contentType: 'application/pdf',
-        },
-      });
-
-      // Handle potential errors in the pipeline
-      let pipelineError: Error | null = null;
-
-      // Pipe the PDF data from Google Drive to Firebase Storage
-      pdfStream
-        .on('error', (err: Error) => {
-          pipelineError = err;
-          functions.logger.error('Error streaming PDF from Drive:', err);
-        })
-        .pipe(writeStream);
-
-      // Return a promise that resolves when the upload is complete
-      return new Promise((resolve, reject) => {
-        writeStream.on('finish', async () => {
-          if (pipelineError) {
-            reject(
-              new functions.https.HttpsError('internal', pipelineError.message)
-            );
-            return;
-          }
-
-          try {
-            // Generate a signed URL instead of making the file public
-            // This is compatible with Uniform Bucket-Level Access
-            const [signedUrl] = await file.getSignedUrl({
-              action: 'read',
-              expires: '01-01-2124', // Set a very long expiration date (e.g., 100 years)
-            });
-
-            resolve({
-              pdfUrl: signedUrl,
-              lastRow,
-              dynamicRange,
-              usedUrl: exportUrl,
-            });
-          } catch (err) {
-            functions.logger.error('Error generating signed URL:', err);
-            reject(
-              new functions.https.HttpsError(
-                'internal',
-                'Không thể tạo URL công khai cho file PDF.'
-              )
-            );
-          }
-        });
-
-        writeStream.on('error', (err) => {
-          functions.logger.error('Error writing to Firebase Storage:', err);
-          reject(
-            new functions.https.HttpsError(
-              'internal',
-              `Lỗi khi lưu file PDF: ${err.message}`
-            )
+        } catch (permErr) {
+          functions.logger.warn(
+            'Failed to set Drive file permission:',
+            permErr
           );
-        });
-      });
+        }
+
+        const pdfUrl = (uploadRes.data.webContentLink ||
+          uploadRes.data.webViewLink) as string;
+
+        return {
+          pdfUrl,
+          lastRow,
+          dynamicRange,
+          usedUrl: exportUrl,
+        };
+      } catch (uploadErr: any) {
+        functions.logger.error('Error uploading PDF to Drive:', uploadErr);
+        throw new functions.https.HttpsError(
+          'internal',
+          `Không thể upload PDF lên Google Drive: ${
+            uploadErr?.message || 'Unknown error'
+          }`
+        );
+      }
     } catch (error) {
       functions.logger.error('Error in exportSheetToPdf:', error);
       throw new functions.https.HttpsError(

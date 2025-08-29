@@ -210,6 +210,28 @@ const ProjectDiscussionScreen = ({ route, navigation }) => {
     }
   };
 
+  // Hàm test notification
+  const handleTestNotification = async () => {
+    try {
+      // Gửi tin nhắn test để trigger notification
+      await addDiscussionMessage(
+        projectId,
+        '🔔 TEST NOTIFICATION - Kiểm tra push notification!',
+        user.uid,
+        user.displayName || user.email,
+        user.photoURL || null
+      );
+
+      Alert.alert(
+        'Test Notification',
+        'Đã gửi tin nhắn test! Bây giờ hãy:\n\n1. Nhấn Home để đưa app về background\n2. Hoặc tắt app hoàn toàn\n3. Chờ notification xuất hiện',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể gửi tin nhắn test. Vui lòng thử lại.');
+    }
+  };
+
   const renderMessage = ({ item }) => {
     const isOwnMessage = item.userId === user.uid;
     const isEditing = editingMessage === item.id;
@@ -416,6 +438,12 @@ const ProjectDiscussionScreen = ({ route, navigation }) => {
         <Text style={[styles.headerTitle, { color: theme.text }]}>
           Thảo luận dự án: {projectName}
         </Text>
+        <TouchableOpacity
+          onPress={handleTestNotification}
+          style={styles.testNotificationButton}
+        >
+          <Ionicons name="notifications" size={24} color={theme.primary} />
+        </TouchableOpacity>
       </View>
 
       {/* Messages List */}
@@ -575,6 +603,14 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     flex: 1,
+  },
+  testNotificationButton: {
+    marginLeft: 16,
+    padding: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   messagesList: {
     flex: 1,

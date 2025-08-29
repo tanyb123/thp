@@ -19,6 +19,8 @@ import { auth, db } from '../config/firebaseConfig';
 import { Alert } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import messaging from '@react-native-firebase/messaging';
+import { updateUser } from '../api/userService';
 
 // Tạo context cho xác thực
 const AuthContext = createContext();
@@ -49,6 +51,28 @@ export const AuthProvider = ({ children }) => {
       unsubscribeNetInfo();
     };
   }, []);
+
+  // Hàm yêu cầu quyền và lấy FCM token
+  const requestUserPermissionAndGetToken = async (userId) => {
+    const authStatus = await messaging().requestPermission();
+    const enabled =
+      authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+      authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+    if (enabled) {
+      console.log('Authorization status:', authStatus);
+      try {
+        const fcmToken = await messaging().getToken();
+        if (fcmToken) {
+          console.log('A new FCM token has been generated:', fcmToken);
+          // Lưu token vào Firestore
+          await updateUser(userId, { fcmToken: fcmToken });
+        }
+      } catch (error) {
+        console.error('Failed to get FCM token', error);
+      }
+    }
+  };
 
   // Hàm lấy thông tin người dùng từ Firestore
   const fetchUserData = useCallback(async (userAuth) => {
@@ -114,6 +138,8 @@ export const AuthProvider = ({ children }) => {
           if (userData) {
             setCurrentUser(userData);
             setUserRole(userData.role || 'user');
+            // GỌI HÀM LẤY TOKEN Ở ĐÂY
+            requestUserPermissionAndGetToken(userAuth.uid);
           }
         } else {
           setCurrentUser(null);

@@ -56,19 +56,55 @@ export const SearchInventoryModal = ({ visible, onClose, onSelect }) => {
   const loadInventoryItems = async () => {
     setLoading(true);
     try {
+      console.log('=== SEARCHINVENTORYMODAL: BẮT ĐẦU LOAD ===');
       const inventoryRef = collection(db, 'inventory');
-      const q = query(inventoryRef, orderBy('name'), limit(100));
 
-      const snapshot = await getDocs(q);
+      let q;
+      let snapshot;
+
+      try {
+        // Thử query với orderBy name trước
+        console.log('=== SEARCHINVENTORYMODAL: THỬ QUERY VỚI ORDERBY NAME ===');
+        q = query(inventoryRef, orderBy('name'), limit(100));
+        snapshot = await getDocs(q);
+        console.log('=== SEARCHINVENTORYMODAL: QUERY ORDERBY THÀNH CÔNG ===');
+      } catch (orderByError) {
+        console.log(
+          '=== SEARCHINVENTORYMODAL: QUERY ORDERBY THẤT BẠI, THỬ QUERY KHÔNG CÓ ORDERBY ==='
+        );
+        console.log('Lỗi orderBy:', orderByError.message);
+
+        // Fallback: query không có orderBy
+        q = query(inventoryRef, limit(100));
+        snapshot = await getDocs(q);
+        console.log(
+          '=== SEARCHINVENTORYMODAL: QUERY KHÔNG CÓ ORDERBY THÀNH CÔNG ==='
+        );
+      }
+
       const inventoryItems = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
 
-      setItems(inventoryItems);
-      setFilteredItems(inventoryItems);
+      console.log('=== SEARCHINVENTORYMODAL: DỮ LIỆU ĐÃ LOAD ===');
+      console.log('Số lượng items:', inventoryItems.length);
+
+      // Sắp xếp thủ công theo tên nếu cần
+      const sortedItems = inventoryItems.sort((a, b) => {
+        const aName = (a.name || '').toLowerCase();
+        const bName = (b.name || '').toLowerCase();
+        return aName.localeCompare(bName);
+      });
+
+      setItems(sortedItems);
+      setFilteredItems(sortedItems);
+
+      console.log('=== SEARCHINVENTORYMODAL: HOÀN THÀNH LOAD ===');
     } catch (error) {
+      console.error('=== SEARCHINVENTORYMODAL: LỖI LOAD ===');
       console.error('Error loading inventory items:', error);
+      console.error('Error details:', error.message, error.code);
     } finally {
       setLoading(false);
     }

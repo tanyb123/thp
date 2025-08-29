@@ -88,85 +88,105 @@ export const useMaterialsProcessor = (project) => {
       });
 
       // 3. Xử lý kết quả trả về
-      const { materials: importedMaterials } = result.data;
+      const { materials: importedMaterials } = result.data || {};
 
       if (importedMaterials && importedMaterials.length > 0) {
+        // DEBUG: log nguyên liệu gốc
+        try {
+          console.log(
+            'Dữ liệu gốc từ backend:',
+            JSON.stringify(importedMaterials, null, 2)
+          );
+        } catch (_) {}
+
+        // Luôn giữ lại dòng tổng hợp (isSummary)
+        const filteredMaterials = importedMaterials.filter(
+          (item) =>
+            item?.isSummary ||
+            !(item?.name && item.name.toUpperCase().includes('LÊ SỸ BÌNH'))
+        );
+
+        // DEBUG: log sau khi lọc
+        try {
+          console.log(
+            'Dữ liệu sau khi lọc:',
+            JSON.stringify(filteredMaterials, null, 2)
+          );
+        } catch (_) {}
+
         // Process materials: filter out unwanted rows and mark special rows
-        const processedMaterials = importedMaterials
-          .filter(
-            (item) =>
-              !(item.name && item.name.toUpperCase().includes('LÊ SỸ BÌNH'))
-          )
-          .map((item) => {
-            const name = (item.name || '').trim().toUpperCase();
+        const processedMaterials = filteredMaterials.map((item) => {
+          // 1) Ưu tiên kiểm tra dòng tổng hợp trước tiên
+          if (item.isSummary) {
+            return {
+              ...item,
+              // Gán giá trị KL tổng (totalWeight) vào thuộc tính KL (weight)
+              // để giao diện hiển thị một cách nhất quán
+              weight: item.totalWeight || item.weight || 0,
+              selected: false,
+              isNote: false,
+              isAccessory: false,
+            };
+          }
 
-            // Check for note-like patterns or if it's mostly empty
-            const isNote =
-              /^(GHI CHÚ|\+|-|\*)/.test(name) ||
-              (item.name &&
-                !item.quantity &&
-                !item.unit &&
-                !item.material &&
-                !item.quyCach);
+          const name = (item.name || '').trim().toUpperCase();
 
-            // Check specifically for accessories
-            const isAccessory = /^(PHỤ KIỆN ĐI KÈM)/.test(name);
-
-            if (isAccessory) {
-              // Accessory: treat differently from normal notes
-              return {
-                ...item,
-                isNote: false,
-                isAccessory: true,
-                no: '', // No sequence number
-                stt: '', // No sequence number
-                quantity: '', // Keep quantity blank
-                weight: 0,
-                unitPrice: 0,
-                totalPrice: 0,
-                selected: false,
-              };
-            }
-
-            if (isNote) {
-              return {
-                ...item,
-                isNote: true,
-                no: '', // No sequence number for notes
-                stt: '', // No sequence number for notes
-                quantity: 0,
-                weight: 0,
-                unitPrice: 0,
-                totalPrice: 0,
-                selected: false,
-              };
-            }
-
-            // Tính toán lại thành tiền dựa trên đơn giá và số lượng/khối lượng
-            const quantity = parseFloat(item.quantity || 0);
-            const weight = parseFloat(item.weight || 0);
-            const unitPrice = parseFloat(item.unitPrice || 0);
-
-            let totalPrice = 0;
-            if (weight > 0) {
-              // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
-              totalPrice = quantity * weight * unitPrice;
-            } else {
-              // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
-              totalPrice = quantity * unitPrice;
-            }
-
+          // 2) Kiểm tra phụ kiện
+          const isAccessory = /^(PHỤ KIỆN ĐI KÈM)/.test(name);
+          if (isAccessory) {
             return {
               ...item,
               isNote: false,
-              selected: true,
-              // Đảm bảo STT được lưu đúng cách
-              stt: item.stt || item.no || '',
-              no: item.stt || item.no || '',
-              // Cập nhật thành tiền đã tính toán
-              totalPrice: totalPrice,
-            }; // Regular items are selected by default
-          });
+              isAccessory: true,
+              no: '',
+              stt: '',
+              quantity: '',
+              weight: 0,
+              unitPrice: 0,
+              totalPrice: 0,
+              selected: false,
+            };
+          }
+
+          // 3) Kiểm tra ghi chú
+          const isNote =
+            /^(GHI CHÚ|\+|-|\*)/.test(name) ||
+            (item.name &&
+              !item.quantity &&
+              !item.unit &&
+              !item.material &&
+              !item.quyCach);
+          if (isNote) {
+            return {
+              ...item,
+              isNote: true,
+              no: '',
+              stt: '',
+              quantity: 0,
+              weight: 0,
+              unitPrice: 0,
+              totalPrice: 0,
+              selected: false,
+            };
+          }
+
+          // 4) Vật tư thông thường: tính thành tiền
+          const quantity = parseFloat(item.quantity || 0);
+          const weight = parseFloat(item.weight || 0);
+          const unitPrice = parseFloat(item.unitPrice || 0);
+          const totalPrice =
+            weight > 0 ? quantity * weight * unitPrice : quantity * unitPrice;
+
+          return {
+            ...item,
+            isNote: false,
+            isAccessory: false,
+            selected: true,
+            stt: item.stt || item.no || '',
+            no: item.stt || item.no || '',
+            totalPrice,
+          };
+        });
 
         console.log(`Đã xử lý ${processedMaterials.length} mục sau khi lọc.`);
 
@@ -302,6 +322,12 @@ export const useMaterialsProcessor = (project) => {
       const price = parseFloat(text) || 0;
       item.unitPrice = price;
 
+      // Dòng tổng hợp: thành tiền = đơn giá
+      if (item.isSummary) {
+        item.totalPrice = price;
+        return newMaterials;
+      }
+
       // Calculate total price based on whether weight exists
       const quantity = parseFloat(item.quantity || 0);
       const weight = parseFloat(item.weight || 0);
@@ -355,14 +381,11 @@ export const useMaterialsProcessor = (project) => {
             const unitPrice = parseFloat(item.unitPrice || 0);
 
             // Tính toán lại thành tiền theo logic của QuotationScreen
-            let totalPrice = 0;
-            if (weight > 0) {
-              // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
-              totalPrice = quantity * weight * unitPrice;
-            } else {
-              // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
-              totalPrice = quantity * unitPrice;
-            }
+            const totalPrice = item.isSummary
+              ? unitPrice
+              : weight > 0
+              ? quantity * weight * unitPrice
+              : quantity * unitPrice;
 
             return {
               ...item,
@@ -433,14 +456,11 @@ export const useMaterialsProcessor = (project) => {
               const weight = parseFloat(existingItem.weight || 0);
               const unitPrice = parseFloat(existingItem.unitPrice || 0);
 
-              let totalPrice = 0;
-              if (weight > 0) {
-                // Nếu có khối lượng: thành tiền = số lượng × khối lượng × đơn giá
-                totalPrice = quantity * weight * unitPrice;
-              } else {
-                // Nếu không có khối lượng: thành tiền = số lượng × đơn giá
-                totalPrice = quantity * unitPrice;
-              }
+              const totalPrice = existingItem.isSummary
+                ? unitPrice
+                : weight > 0
+                ? quantity * weight * unitPrice
+                : quantity * unitPrice;
 
               return {
                 ...existingItem, // Giữ nguyên tất cả dữ liệu cũ
@@ -478,6 +498,17 @@ export const useMaterialsProcessor = (project) => {
     }
 
     const processed = rawData.map((item) => {
+      // Dòng tổng hợp: KL hiển thị = totalWeight (nếu có), thành tiền = đơn giá
+      if (item.isSummary) {
+        return {
+          ...item,
+          weight: item.totalWeight || item.weight || 0,
+          totalPrice: parseFloat(item.unitPrice || 0),
+          selected: false,
+          isNote: false,
+        };
+      }
+
       // Check if the item is a note
       if (item.isNote) {
         return {

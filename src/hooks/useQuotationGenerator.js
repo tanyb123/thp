@@ -2,7 +2,8 @@ import { useState } from 'react';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import app, { functions as firebaseFunctions } from '../config/firebaseConfig';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { saveQuotation } from '../api/quotationService';
 
@@ -191,9 +192,8 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       }
 
       // Call cloud function to generate Excel file (with user token)
-      const functions = getFunctions(undefined, 'asia-southeast1');
       const generateExcelFunc = httpsCallable(
-        functions,
+        firebaseFunctions,
         'generateExcelQuotation'
       );
       const result = await generateExcelFunc({
@@ -219,6 +219,13 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
         pdfUrl: pdfUrl || excelUrl, // Using the PDF URL if available, otherwise Excel URL
         createdBy: quotationData.createdBy,
       });
+
+      // Offer PDF share if available
+      if (pdfUrl) {
+        try {
+          await Sharing.shareAsync(pdfUrl);
+        } catch (_) {}
+      }
 
       return { excelUrl, pdfUrl, spreadsheetId };
     } catch (error) {
@@ -248,9 +255,9 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
       // Get Google access token
       const { accessToken } = await GoogleSignin.getTokens();
 
-      // Call the new cloud function to export sheet to PDF
-      const functions = getFunctions(); // us-central1 default
-      const exportToPdfFunc = httpsCallable(functions, 'exportSheetToPdf');
+      // Call the PDF function deployed in us-central1
+      const functionsUS = getFunctions(app, 'us-central1');
+      const exportToPdfFunc = httpsCallable(functionsUS, 'exportSheetToPdf');
 
       const result = await exportToPdfFunc({
         spreadsheetId,
@@ -297,6 +304,20 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
     } catch (error) {
       console.error('Error sharing Excel quotation:', error);
       Alert.alert('Lỗi', 'Không thể chia sẻ báo giá Excel: ' + error.message);
+    }
+  };
+
+  // Quick share PDF helper if needed elsewhere
+  const sharePdf = async () => {
+    if (!pdfUrl) {
+      Alert.alert('Lỗi', 'Chưa có file báo giá PDF để chia sẻ.');
+      return;
+    }
+    try {
+      await Sharing.shareAsync(pdfUrl);
+    } catch (error) {
+      console.error('Error sharing PDF:', error);
+      Alert.alert('Lỗi', 'Không thể chia sẻ PDF: ' + error.message);
     }
   };
 
@@ -369,6 +390,7 @@ const useQuotationGenerator = ({ projectId, customerData, materials }) => {
     generateExcelQuotation,
     convertExcelToPdf,
     shareExcelQuotation,
+    sharePdf,
     sharePdfQuotation,
     isLoading,
     isPdfLoading,

@@ -14,11 +14,26 @@ const InventoryService = {
    */
   async addInventoryItem(itemData) {
     try {
+      console.log('=== INVENTORYSERVICE: BẮT ĐẦU THÊM VẬT TƯ ===');
+      console.log('itemData nhận được:', JSON.stringify(itemData, null, 2));
+
       const addInventoryItemFn = httpsCallable(functions, 'addInventoryItem');
+      console.log('=== INVENTORYSERVICE: GỌI CLOUD FUNCTION ===');
+
       const result = await addInventoryItemFn(itemData);
+      console.log('=== INVENTORYSERVICE: KẾT QUẢ TỪ CLOUD FUNCTION ===');
+      console.log('result:', result);
+      console.log('result.data:', result.data);
+
       return result.data;
     } catch (error) {
-      console.error('Lỗi thêm vật tư:', error);
+      console.error('=== INVENTORYSERVICE: LỖI THÊM VẬT TƯ ===');
+      console.error('Error object:', error);
+      console.error('Error message:', error.message);
+      console.error('Error code:', error.code);
+      console.error('Error details:', error.details);
+      console.error('=== END LỖI INVENTORYSERVICE ===');
+
       throw error;
     }
   },

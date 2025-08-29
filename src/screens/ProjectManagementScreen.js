@@ -175,7 +175,7 @@ const ProjectManagementScreen = ({ navigation }) => {
     },
   ];
 
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [activeFilter, setActiveFilter] = useState('in_progress');
   const [cacheByStatus, setCacheByStatus] = useState({});
 
   // Hàm tải danh sách dự án

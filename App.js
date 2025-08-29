@@ -5,6 +5,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { UIManager, Platform } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { Provider as PaperProvider } from 'react-native-paper';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from './src/contexts/AuthContext';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import { AIChatProvider } from './src/contexts/AIChatContext';
@@ -54,16 +55,18 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <PaperProvider>
-        <AuthProvider>
-          <ThemeProvider>
-            <AIChatProvider>
-              <AppNavigator />
-            </AIChatProvider>
-          </ThemeProvider>
-        </AuthProvider>
-      </PaperProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <PaperProvider>
+          <AuthProvider>
+            <ThemeProvider>
+              <AIChatProvider>
+                <AppNavigator />
+              </AIChatProvider>
+            </ThemeProvider>
+          </AuthProvider>
+        </PaperProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

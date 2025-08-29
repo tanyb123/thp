@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Alert } from 'react-native';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable } from 'firebase/functions';
+import { functions as firebaseFunctions } from '../config/firebaseConfig';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import {
   collection,
@@ -135,9 +136,8 @@ const useDeliveryNoteGenerator = ({ projectId }) => {
         accessToken ? 'Valid token' : 'No token'
       );
 
-      const functions = getFunctions();
       const generateExcelFunc = httpsCallable(
-        functions,
+        firebaseFunctions,
         'generateDeliveryNoteExcel'
       );
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Share, Alert, Linking } from 'react-native';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import app from '../config/firebaseConfig';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 /**
@@ -68,7 +69,7 @@ const useContractGenerator = ({
       const contractData = formatContractData();
 
       // Call cloud function to generate contract
-      const functions = getFunctions();
+      const functions = getFunctions(app, 'us-central1');
       const generateContractFunc = httpsCallable(functions, 'generateContract');
 
       const result = await generateContractFunc({

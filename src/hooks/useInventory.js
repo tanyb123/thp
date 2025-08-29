@@ -20,6 +20,8 @@ const useInventory = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('=== USEINVENTORY: BẮT ĐẦU FETCH INVENTORY ITEMS ===');
+
       // Khởi tạo truy vấn
       let query = firebase.firestore().collection('inventory');
 
@@ -33,7 +35,11 @@ const useInventory = () => {
       }
 
       // Thực hiện truy vấn
+      console.log('=== USEINVENTORY: THỰC HIỆN QUERY ===');
       const snapshot = await query.get();
+
+      console.log('=== USEINVENTORY: KẾT QUẢ QUERY ===');
+      console.log('Số lượng documents:', snapshot.docs.length);
 
       // Lấy dữ liệu từ kết quả
       const items = snapshot.docs.map((doc) => ({
@@ -41,18 +47,44 @@ const useInventory = () => {
         ...doc.data(),
       }));
 
+      console.log('=== USEINVENTORY: DỮ LIỆU ĐÃ PARSE ===');
+      console.log('Số lượng items:', items.length);
+      if (items.length > 0) {
+        console.log('Item đầu tiên:', JSON.stringify(items[0], null, 2));
+      }
+
+      // Sắp xếp theo thời gian (mới nhất trước)
+      const sortedItems = items.sort((a, b) => {
+        // Ưu tiên lastUpdated, sau đó updatedAt, cuối cùng createdAt
+        const aTime = a.lastUpdated || a.updatedAt || a.createdAt;
+        const bTime = b.lastUpdated || b.updatedAt || b.createdAt;
+
+        if (aTime && bTime) {
+          return bTime.toDate().getTime() - aTime.toDate().getTime();
+        }
+        return 0;
+      });
+
+      console.log('=== USEINVENTORY: DỮ LIỆU ĐÃ SẮP XẾP ===');
+      console.log('Số lượng items sau khi sắp xếp:', sortedItems.length);
+
       // Áp dụng bộ lọc tồn kho nếu có
       const filteredItems = filters.lowStock
-        ? items.filter(
+        ? sortedItems.filter(
             (item) =>
               item.stockQuantity <= (item.minQuantity || 0) &&
               item.minQuantity > 0
           )
-        : items;
+        : sortedItems;
+
+      console.log('=== USEINVENTORY: DỮ LIỆU SAU KHI LỌC ===');
+      console.log('Số lượng items sau khi lọc:', filteredItems.length);
 
       setInventoryItems(filteredItems);
     } catch (err) {
+      console.error('=== USEINVENTORY: LỖI FETCH ===');
       console.error('Lỗi khi lấy danh sách vật tư:', err);
+      console.error('Error details:', err.message, err.code);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -101,7 +133,7 @@ const useInventory = () => {
   }, []);
 
   /**
-   * Thêm vật tư mới
+   * Thêm vật tư mới vào kho
    * @param {Object} itemData - Thông tin vật tư
    * @returns {Promise<Object>} - Kết quả thao tác
    */
@@ -109,12 +141,27 @@ const useInventory = () => {
     setLoading(true);
     setError(null);
     try {
+      console.log('=== USEINVENTORY: BẮT ĐẦU THÊM VẬT TƯ ===');
+      console.log('itemData nhận được:', JSON.stringify(itemData, null, 2));
+
       const result = await InventoryService.addInventoryItem(itemData);
+      console.log('=== USEINVENTORY: KẾT QUẢ TỪ INVENTORYSERVICE ===');
+      console.log('result:', result);
+
       // Refresh danh sách nếu thành công
+      console.log('=== USEINVENTORY: BẮT ĐẦU REFRESH DANH SÁCH ===');
       await fetchInventoryItems();
+      console.log('=== USEINVENTORY: HOÀN THÀNH REFRESH DANH SÁCH ===');
+
       return result;
     } catch (err) {
-      console.error('Lỗi khi thêm vật tư:', err);
+      console.error('=== USEINVENTORY: LỖI KHI THÊM VẬT TƯ ===');
+      console.error('Error object:', err);
+      console.error('Error message:', err.message);
+      console.error('Error code:', err.code);
+      console.error('Error details:', err.details);
+      console.error('=== END LỖI USEINVENTORY ===');
+
       setError(err.message);
       throw err;
     } finally {

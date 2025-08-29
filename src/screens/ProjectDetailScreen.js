@@ -4,6 +4,7 @@ import React, {
   useEffect,
   useCallback,
   useLayoutEffect,
+  useRef,
 } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -20,8 +21,13 @@ import {
   Platform,
   FlatList,
   Linking,
+  Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+// Google Signin imported once at top
+import { httpsCallable, getFunctions } from 'firebase/functions';
+import app, { db } from '../config/firebaseConfig';
+import { collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import {
   updateTaskStatus,
   updateCustomTask,
@@ -343,6 +349,36 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     setStageAssignmentModalVisible(true);
   };
 
+  // Single-flight guard for generating contract
+  const isGeneratingContractRef = useRef(false);
+
+  // Helper: safely get Google access token avoiding concurrent getTokens calls
+  const getAccessTokenSafe = async () => {
+    // Ensure signed in first
+    const signedIn = await GoogleSignin.isSignedIn();
+    if (!signedIn) {
+      await GoogleSignin.signIn();
+    }
+
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { accessToken } = await GoogleSignin.getTokens();
+        if (accessToken) return accessToken;
+      } catch (e) {
+        lastErr = e;
+        const msg = String(e?.message || '');
+        if (msg.includes('previous promise did not settle')) {
+          // Small backoff before retrying
+          await new Promise((r) => setTimeout(r, 400));
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw lastErr || new Error('Không lấy được Google access token');
+  };
+
   // Hiển thị khi đang tải dữ liệu
   if (loading) {
     return (
@@ -647,6 +683,132 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                 )}
               </View>
               <Text style={styles.tileLabel}>Thảo luận dự án</Text>
+            </TouchableOpacity>
+
+            {/* Quản lý Hợp đồng: tạo từ báo giá mới nhất */}
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={async () => {
+                if (isGeneratingContractRef.current) return;
+                isGeneratingContractRef.current = true;
+                try {
+                  // 1) Lấy báo giá mới nhất
+                  const quotationsRef = collection(
+                    db,
+                    `projects/${project.id}/quotations`
+                  );
+                  const q = query(
+                    quotationsRef,
+                    orderBy('createdAt', 'desc'),
+                    limit(1)
+                  );
+                  const snap = await getDocs(q);
+                  const latestQuotation = snap.empty
+                    ? null
+                    : { id: snap.docs[0].id, ...snap.docs[0].data() };
+
+                  const materials =
+                    latestQuotation?.materials || project.materials || [];
+
+                  // 2) Lấy access token Google
+                  const accessToken = await getAccessTokenSafe();
+
+                  // 3) Chuẩn bị dữ liệu hợp đồng
+                  const customerData = {
+                    name: project.customerName || '',
+                    address: project.customerAddress || '',
+                    phone: project.customerPhone || '',
+                    taxCode: project.customerTaxCode || '',
+                  };
+
+                  const contractData = {
+                    companyName: customerData.name,
+                    customerAddress: customerData.address,
+                    companyPhone: customerData.phone,
+                    taxCode: customerData.taxCode,
+                    day: String(new Date().getDate()),
+                    month: String(new Date().getMonth() + 1),
+                    deliveryTime: latestQuotation?.deliveryTime || '',
+                    materials,
+                  };
+
+                  // 4) Gọi Cloud Function generateContract
+                  const functions = getFunctions(app, 'us-central1');
+                  const generateContract = httpsCallable(
+                    functions,
+                    'generateContract'
+                  );
+                  const result = await generateContract({
+                    contractData,
+                    fileName: `Hop_dong_${
+                      project.name || 'du_an'
+                    }_${Date.now()}`,
+                    projectId: project.id,
+                    accessToken,
+                  });
+
+                  const { docUrl } = result.data || {};
+                  if (docUrl) {
+                    Alert.alert('Thành công', 'Đã tạo hợp đồng. Mở tài liệu?', [
+                      { text: 'Đóng', style: 'cancel' },
+                      {
+                        text: 'Mở',
+                        onPress: () => Linking.openURL(docUrl).catch(() => {}),
+                      },
+                    ]);
+                  } else {
+                    Alert.alert(
+                      'Thông báo',
+                      'Đã tạo hợp đồng nhưng không lấy được liên kết.'
+                    );
+                  }
+                } catch (err) {
+                  console.error(
+                    'Generate contract from latest quotation failed:',
+                    err
+                  );
+                  Alert.alert('Lỗi', err.message || 'Không thể tạo hợp đồng');
+                } finally {
+                  isGeneratingContractRef.current = false;
+                }
+              }}
+            >
+              <Ionicons
+                name="document-text-outline"
+                size={22}
+                color="#2E7D32"
+              />
+              <Text style={styles.tileLabel}>Quản lý Hợp đồng</Text>
+            </TouchableOpacity>
+
+            {/* Chia sẻ Link Theo dõi */}
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={async () => {
+                try {
+                  if (!project.publicTrackingToken) {
+                    Alert.alert(
+                      'Thông báo',
+                      'Dự án này chưa có token theo dõi. Vui lòng liên hệ quản trị viên.'
+                    );
+                    return;
+                  }
+
+                  const trackingUrl = `https://thp-tracker.netlify.app/track?token=${project.publicTrackingToken}`;
+
+                  await Share.share({
+                    message: `Theo dõi tiến độ dự án "${project.name}" của THP:\n\n${trackingUrl}\n\nLink này cho phép bạn xem tiến độ dự án theo thời gian thực mà không cần đăng nhập.`,
+                    title: `Theo dõi dự án: ${project.name}`,
+                    url: trackingUrl,
+                  });
+                } catch (error) {
+                  console.error('Error sharing tracking link:', error);
+                  Alert.alert('Lỗi', 'Không thể chia sẻ link theo dõi');
+                }
+              }}
+            >
+              <Ionicons name="share-social-outline" size={22} color="#2E7D32" />
+              <Text style={styles.tileLabel}>Chia sẻ Link Theo dõi</Text>
             </TouchableOpacity>
           </View>
         </View>

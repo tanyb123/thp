@@ -17,7 +17,12 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 
 const CreateProposalScreen = ({ route, navigation }) => {
-  const { projectId, projectName, selectedItems } = route.params;
+  const params = route?.params || {};
+  const projectId = params.projectId;
+  const projectName = params.projectName;
+  const selectedItems = Array.isArray(params.selectedItems)
+    ? params.selectedItems
+    : [];
   const { currentUser } = useAuth();
   const [saving, setSaving] = useState(false);
 
@@ -184,7 +189,7 @@ const CreateProposalScreen = ({ route, navigation }) => {
       {/* Danh sách vật tư */}
       <View style={styles.materialsSection}>
         <Text style={styles.sectionTitle}>
-          Danh sách vật tư ({selectedItems.length})
+          Danh sách vật tư ({selectedItems ? selectedItems.length : 0})
         </Text>
         <View style={styles.tableHeader}>
           <Text style={[styles.headerText, { flex: 3 }]}>Tên vật tư</Text>

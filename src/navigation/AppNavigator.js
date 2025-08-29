@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, View, TouchableOpacity } from 'react-native';
+import { Text, View, TouchableOpacity, Alert } from 'react-native';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -10,6 +10,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import messaging from '@react-native-firebase/messaging';
+import { useEffect, useState } from 'react';
+import { collection, where, query, onSnapshot } from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
 
 // Import các màn hình
 import LoginScreen from '../screens/LoginScreen';
@@ -96,6 +100,11 @@ import WorkAllocationScreen from '../screens/WorkAllocationScreen';
 
 // Import AI Chat screen
 import AIChatScreen from '../screens/AIChatScreen';
+
+// Import Worker screens
+import WorkerAttendanceScreen from '../screens/WorkerAttendanceScreen';
+import LeaveRequestScreen from '../screens/LeaveRequestScreen';
+import AdvanceSalaryScreen from '../screens/AdvanceSalaryScreen';
 
 // Import Project Discussion screen
 import ProjectDiscussionScreen from '../screens/ProjectDiscussionScreen';
@@ -253,6 +262,13 @@ const InventoryStackNavigator = () => {
         component={AddInventoryItemScreen}
         options={({ navigation }) => ({
           title: 'Thêm Vật Tư Mới',
+          headerTitleAlign: 'center', // Căn giữa hoàn toàn
+          headerTitleStyle: {
+            textAlign: 'center',
+            flex: 1,
+            marginLeft: -60, // Tăng khoảng cách để căn giữa tốt hơn
+            marginRight: -20, // Thêm margin bên phải để cân bằng
+          },
           headerLeft: () => (
             <TouchableOpacity
               onPress={() => navigation.navigate('InventoryMain')}
@@ -333,6 +349,8 @@ const Tab = createBottomTabNavigator();
 const MainTabNavigator = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+  const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
 
   // Check if user has director role - support both English and Vietnamese role names
   const isDirector = ['director', 'Giám đốc', 'giam_doc'].includes(user?.role);
@@ -351,6 +369,28 @@ const MainTabNavigator = () => {
     'Can Access Inventory:',
     canAccessInventory
   );
+
+  // Realtime badge for pending approval requests
+  useEffect(() => {
+    const leaveQ = query(
+      collection(db, 'leave_requests'),
+      where('status', '==', 'pending')
+    );
+    const advQ = query(
+      collection(db, 'advance_requests'),
+      where('status', '==', 'pending')
+    );
+    const un1 = onSnapshot(leaveQ, (snap) => {
+      setPendingLeaveCount(snap.size || 0);
+    });
+    const un2 = onSnapshot(advQ, (snap) => {
+      setPendingAdvanceCount(snap.size || 0);
+    });
+    return () => {
+      un1();
+      un2();
+    };
+  }, []);
 
   return (
     <Tab.Navigator
@@ -428,11 +468,28 @@ const MainTabNavigator = () => {
           headerShown: false,
         }}
       />
-      {!canManageAttendance && (
+      {canManageAttendance ? (
+        <Tab.Screen
+          name="Attendance"
+          component={AttendanceScreen}
+          options={{ title: 'Chấm công', headerShown: false }}
+        />
+      ) : (
         <Tab.Screen
           name="Tasks"
           component={TaskReportScreen}
-          options={{ title: 'Báo cáo', headerShown: false }}
+          options={{
+            title: 'Báo cáo',
+            headerShown: false,
+            tabBarBadge:
+              pendingLeaveCount + pendingAdvanceCount > 0
+                ? pendingLeaveCount + pendingAdvanceCount
+                : undefined,
+            tabBarBadgeStyle: {
+              backgroundColor: '#E53935',
+              color: '#fff',
+            },
+          }}
         />
       )}
 
@@ -482,6 +539,61 @@ const AppNavigator = () => {
       notification: theme.primary,
     },
   };
+
+  // Xử lý FCM notifications
+  useEffect(() => {
+    // Xử lý khi app đang chạy (foreground)
+    const unsubscribeOnMessage = messaging().onMessage(
+      async (remoteMessage) => {
+        console.log('FCM Message received in foreground:', remoteMessage);
+        Alert.alert(
+          remoteMessage.notification.title,
+          remoteMessage.notification.body
+        );
+      }
+    );
+
+    // Xử lý khi người dùng nhấn vào notification (app đang ở background)
+    messaging().onNotificationOpenedApp((remoteMessage) => {
+      console.log(
+        'Notification caused app to open from background:',
+        remoteMessage
+      );
+      const { projectId, projectName } = remoteMessage.data;
+      if (projectId) {
+        // Cần navigation reference để điều hướng
+        // Tạm thời chỉ log ra
+        console.log('Should navigate to ProjectDiscussion with:', {
+          projectId,
+          projectName,
+        });
+      }
+    });
+
+    // Kiểm tra nếu app được mở từ trạng thái tắt (killed)
+    messaging()
+      .getInitialNotification()
+      .then((remoteMessage) => {
+        if (remoteMessage) {
+          console.log(
+            'Notification caused app to open from quit state:',
+            remoteMessage
+          );
+          const { projectId, projectName } = remoteMessage.data;
+          if (projectId) {
+            // Cần một cơ chế để điều hướng sau khi app đã sẵn sàng
+            // Ví dụ: lưu vào một state global và điều hướng sau
+            // Tạm thời chỉ log ra
+            console.log('Should navigate to ProjectDiscussion with:', {
+              projectId,
+              projectName,
+            });
+          }
+        }
+      });
+
+    return unsubscribeOnMessage;
+  }, []);
 
   // Hiển thị màn hình loading nếu đang kiểm tra trạng thái đăng nhập
   if (loadingAuth) {
@@ -613,10 +725,7 @@ const AppNavigator = () => {
 
             {/* Thêm các màn hình quản lý kho */}
             <Stack.Screen name="Inventory" component={InventoryScreen} />
-            <Stack.Screen
-              name="AddInventoryItem"
-              component={AddInventoryItemScreen}
-            />
+            {/* Đã xóa duplicate AddInventoryItem - chỉ giữ trong InventoryStackNavigator */}
             <Stack.Screen
               name="EditInventoryItem"
               component={EditInventoryItemScreen}
@@ -728,6 +837,23 @@ const AppNavigator = () => {
             <Stack.Screen
               name="CustomIconDebug"
               component={CustomIconDebug}
+              options={{ headerShown: false }}
+            />
+
+            {/* Worker Screens */}
+            <Stack.Screen
+              name="WorkerAttendance"
+              component={WorkerAttendanceScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="LeaveRequest"
+              component={LeaveRequestScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="AdvanceSalary"
+              component={AdvanceSalaryScreen}
               options={{ headerShown: false }}
             />
           </>

@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, ScrollView, Image, Alert } from 'react-native';
 import {
   Text,
-  Appbar,
   Card,
   Button,
   List,
@@ -40,7 +39,6 @@ const InventoryItemDetailScreen = () => {
   const [transactionErrors, setTransactionErrors] = useState({});
   const [processingTransaction, setProcessingTransaction] = useState(false);
 
-  // 加载物料详情
   useEffect(() => {
     if (itemId) {
       fetchItemDetail();
@@ -50,7 +48,6 @@ const InventoryItemDetailScreen = () => {
     }
   }, [itemId]);
 
-  // 获取物料详情
   const fetchItemDetail = async () => {
     try {
       setLoading(true);
@@ -64,7 +61,6 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 确定库存状态
   const getStockStatus = () => {
     if (!itemDetail || !itemDetail.minQuantity) return 'normal';
 
@@ -77,7 +73,6 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 显示状态
   const renderStockStatus = () => {
     if (!itemDetail) return null;
 
@@ -93,7 +88,6 @@ const InventoryItemDetailScreen = () => {
     return <StatusIndicator status={status} text={statusText} />;
   };
 
-  // 打开交易对话框
   const openTransactionDialog = (type) => {
     setTransactionType(type);
     setTransactionData({
@@ -104,14 +98,12 @@ const InventoryItemDetailScreen = () => {
     setTransactionDialogVisible(true);
   };
 
-  // 处理交易数据变化
   const handleTransactionChange = (field, value) => {
     setTransactionData({
       ...transactionData,
       [field]: value,
     });
 
-    // 清除错误
     if (transactionErrors[field]) {
       setTransactionErrors({
         ...transactionErrors,
@@ -120,7 +112,6 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 验证交易表单
   const validateTransactionForm = () => {
     const newErrors = {};
     const quantity = parseFloat(transactionData.quantity);
@@ -141,7 +132,6 @@ const InventoryItemDetailScreen = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // 执行交易
   const handleTransaction = async () => {
     if (!validateTransactionForm()) return;
 
@@ -155,7 +145,6 @@ const InventoryItemDetailScreen = () => {
         throw new Error('Bạn cần đăng nhập để thực hiện giao dịch');
       }
 
-      // 准备交易数据
       const quantity = parseFloat(transactionData.quantity);
       const transaction = {
         type: transactionType,
@@ -167,7 +156,6 @@ const InventoryItemDetailScreen = () => {
         status: 'COMPLETED',
       };
 
-      // 计算新数量
       let newQuantity = itemDetail.stockQuantity;
       if (transactionType === 'IN') {
         newQuantity += quantity;
@@ -175,13 +163,10 @@ const InventoryItemDetailScreen = () => {
         newQuantity -= quantity;
       }
 
-      // 开始事务确保数据一致性
       await db.runTransaction(async (transaction) => {
-        // 保存交易
         const transactionRef = db.collection('inventory_transactions').doc();
         transaction.set(transactionRef, transaction);
 
-        // 更新库存数量
         const itemRef = db.collection('inventory').doc(itemId);
         transaction.update(itemRef, {
           stockQuantity: newQuantity,
@@ -189,7 +174,6 @@ const InventoryItemDetailScreen = () => {
         });
       });
 
-      // 关闭对话框并重新加载信息
       setTransactionDialogVisible(false);
       Alert.alert(
         'Thành công',
@@ -199,7 +183,6 @@ const InventoryItemDetailScreen = () => {
         [{ text: 'OK' }]
       );
 
-      // 刷新物料信息
       await fetchItemDetail();
     } catch (error) {
       console.error('Lỗi khi thực hiện giao dịch:', error);
@@ -209,12 +192,10 @@ const InventoryItemDetailScreen = () => {
     }
   };
 
-  // 跳转到编辑页面
   const handleEdit = () => {
     navigation.navigate('EditInventoryItem', { itemId, item: itemDetail });
   };
 
-  // 处理添加到报价单
   const handleAddToQuotation = () => {
     navigation.navigate('QuotationScreen', {
       screen: 'CreateQuotation',
@@ -222,7 +203,6 @@ const InventoryItemDetailScreen = () => {
     });
   };
 
-  // 格式化时间戳
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return '';
 
@@ -236,7 +216,6 @@ const InventoryItemDetailScreen = () => {
     });
   };
 
-  // 渲染加载页面
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -246,7 +225,6 @@ const InventoryItemDetailScreen = () => {
     );
   }
 
-  // 渲染错误页面
   if (error || !itemDetail) {
     return (
       <View style={styles.errorContainer}>
@@ -267,14 +245,9 @@ const InventoryItemDetailScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Appbar.Header>
-        <Appbar.BackAction onPress={() => navigation.goBack()} />
-        <Appbar.Content title="Chi tiết vật tư" />
-        <Appbar.Action icon="pencil" onPress={handleEdit} />
-      </Appbar.Header>
+      {/* ĐÃ BỎ Appbar.Header để tránh trùng header với navigator */}
 
       <ScrollView style={styles.scrollView}>
-        {/* 基本信息 */}
         <Card style={styles.card}>
           <Card.Content>
             {itemDetail.imageUrl ? (
@@ -363,7 +336,6 @@ const InventoryItemDetailScreen = () => {
           </Card.Content>
         </Card>
 
-        {/* 入库出库按钮 */}
         <View style={styles.actionButtons}>
           <Button
             mode="contained"
@@ -384,7 +356,6 @@ const InventoryItemDetailScreen = () => {
           </Button>
         </View>
 
-        {/* 交易历史 */}
         <Card style={styles.card}>
           <Card.Title title="Lịch sử giao dịch" />
           <Card.Content>
@@ -440,7 +411,6 @@ const InventoryItemDetailScreen = () => {
         </Card>
       </ScrollView>
 
-      {/* 交易对话框 */}
       <Portal>
         <Dialog
           visible={transactionDialogVisible}
@@ -503,7 +473,6 @@ const InventoryItemDetailScreen = () => {
         </Dialog>
       </Portal>
 
-      {/* 添加到报价按钮 */}
       <FAB
         style={styles.fab}
         icon="file-document-edit"

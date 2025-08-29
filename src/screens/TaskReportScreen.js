@@ -20,8 +20,15 @@ import {
   orderBy,
   doc,
   getDoc,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
+import {
+  fetchPendingLeaveRequests,
+  fetchPendingAdvanceRequests,
+  updateLeaveRequestStatus,
+  updateAdvanceRequestStatus,
+} from '../api/requestService';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -120,9 +127,12 @@ const TaskReportScreen = ({ navigation }) => {
   const [myTasks, setMyTasks] = useState([]);
   const [staffPendingTasks, setStaffPendingTasks] = useState([]);
   const [staffCompletedTasks, setStaffCompletedTasks] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [pendingLeave, setPendingLeave] = useState([]);
+  const [pendingAdvance, setPendingAdvance] = useState([]);
 
   // State for manager tabs
-  const [activeManagerView, setActiveManagerView] = useState('my_tasks'); // 'my_tasks', 'staff_pending', 'staff_completed'
+  const [activeManagerView, setActiveManagerView] = useState('my_tasks'); // 'my_tasks', 'staff_pending', 'staff_completed', 'requests'
 
   // States for Staff View
   const [tasks, setTasks] = useState([]);
@@ -132,6 +142,13 @@ const TaskReportScreen = ({ navigation }) => {
   const isManager = ['giam_doc', 'pho_giam_doc', 'admin'].includes(
     currentUser?.role
   );
+
+  const formatDateSafe = (value) => {
+    if (!value) return '';
+    const d = value.toDate ? value.toDate() : new Date(value);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('vi-VN');
+  };
 
   const fetchManagerTasks = async () => {
     setLoading(true);
@@ -174,6 +191,15 @@ const TaskReportScreen = ({ navigation }) => {
           ...doc.data(),
         }))
       );
+
+      // 4. Initial pending requests (leave + advance)
+      const [leaveReqs, advanceReqs] = await Promise.all([
+        fetchPendingLeaveRequests(),
+        fetchPendingAdvanceRequests(),
+      ]);
+      setPendingLeave(leaveReqs);
+      setPendingAdvance(advanceReqs);
+      setPendingRequests([...leaveReqs, ...advanceReqs]);
     } catch (err) {
       console.error('Error fetching manager tasks:', err);
       setError('Không thể tải báo cáo công việc.');
@@ -181,6 +207,46 @@ const TaskReportScreen = ({ navigation }) => {
       setLoading(false);
     }
   };
+
+  // Realtime badges for pending requests
+  useEffect(() => {
+    if (!isManager) return;
+    const leaveQ = query(
+      collection(db, 'leave_requests'),
+      where('status', '==', 'pending')
+    );
+    const advQ = query(
+      collection(db, 'advance_requests'),
+      where('status', '==', 'pending')
+    );
+
+    const un1 = onSnapshot(leaveQ, (snap) => {
+      const items = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        requestType: 'leave',
+      }));
+      setPendingLeave(items);
+    });
+    const un2 = onSnapshot(advQ, (snap) => {
+      const items = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        requestType: 'advance',
+      }));
+      setPendingAdvance(items);
+    });
+    return () => {
+      un1();
+      un2();
+    };
+  }, [isManager]);
+
+  useEffect(() => {
+    if (isManager) {
+      setPendingRequests([...(pendingLeave || []), ...(pendingAdvance || [])]);
+    }
+  }, [pendingLeave, pendingAdvance, isManager]);
 
   const fetchStaffTasks = async () => {
     setLoading(true);
@@ -330,6 +396,128 @@ const TaskReportScreen = ({ navigation }) => {
   if (isManager) {
     const renderManagerContent = () => {
       switch (activeManagerView) {
+        case 'requests':
+          return (
+            <View>
+              {pendingRequests.length === 0 ? (
+                <View style={styles.emptySection}>
+                  <Text style={{ color: theme.textSecondary }}>
+                    Không có yêu cầu nào đang chờ.
+                  </Text>
+                </View>
+              ) : (
+                pendingRequests.map((req) => (
+                  <View
+                    key={req.id}
+                    style={[styles.card, { backgroundColor: theme.card }]}
+                  >
+                    <View style={styles.cardHeader}>
+                      <Text style={[styles.taskLabel, { color: theme.text }]}>
+                        {req.requestType === 'leave'
+                          ? 'Xin nghỉ phép'
+                          : 'Xin ứng lương'}
+                      </Text>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          { backgroundColor: 'rgba(241, 196, 15, 0.2)' },
+                        ]}
+                      >
+                        <Text style={[styles.statusText, { color: '#F39C12' }]}>
+                          Chờ duyệt
+                        </Text>
+                      </View>
+                    </View>
+                    <View>
+                      <Text
+                        style={{ color: theme.textSecondary, marginBottom: 4 }}
+                      >
+                        Nhân viên: {req.userName || req.userId}
+                      </Text>
+                      {req.requestType === 'leave' ? (
+                        <Text style={{ color: theme.textSecondary }}>
+                          Từ ngày {formatDateSafe(req.startDate)} đến{' '}
+                          {formatDateSafe(req.endDate)} - Lý do: {req.reason}
+                        </Text>
+                      ) : (
+                        <Text style={{ color: theme.textSecondary }}>
+                          Số tiền:{' '}
+                          {Intl.NumberFormat('vi-VN', {
+                            style: 'currency',
+                            currency: 'VND',
+                          }).format(req.amount)}{' '}
+                          - Lý do: {req.reason}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: 'row', marginTop: 12 }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.managerTab,
+                          { backgroundColor: '#27AE60', flex: 0 },
+                        ]}
+                        onPress={async () => {
+                          try {
+                            // Optimistic remove to tránh full-screen reload
+                            setPendingRequests((list) =>
+                              list.filter((r) => r.id !== req.id)
+                            );
+                            if (req.requestType === 'leave') {
+                              await updateLeaveRequestStatus(
+                                req.id,
+                                'approved'
+                              );
+                            } else {
+                              await updateAdvanceRequestStatus(
+                                req.id,
+                                'approved'
+                              );
+                            }
+                          } catch (e) {
+                            console.warn('Approve failed', e);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                          Duyệt
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.managerTab,
+                          { backgroundColor: '#E74C3C', flex: 0 },
+                        ]}
+                        onPress={async () => {
+                          try {
+                            setPendingRequests((list) =>
+                              list.filter((r) => r.id !== req.id)
+                            );
+                            if (req.requestType === 'leave') {
+                              await updateLeaveRequestStatus(
+                                req.id,
+                                'rejected'
+                              );
+                            } else {
+                              await updateAdvanceRequestStatus(
+                                req.id,
+                                'rejected'
+                              );
+                            }
+                          } catch (e) {
+                            console.warn('Reject failed', e);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                          Từ chối
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          );
         case 'staff_pending':
           return renderTaskList(staffPendingTasks);
         case 'staff_completed':
@@ -409,6 +597,48 @@ const TaskReportScreen = ({ navigation }) => {
             >
               Đã Hoàn Thành
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.managerTab,
+              { backgroundColor: theme.card },
+              activeManagerView === 'requests' && {
+                backgroundColor: theme.primary,
+              },
+            ]}
+            onPress={() => setActiveManagerView('requests')}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text
+                style={[
+                  styles.managerTabText,
+                  { color: theme.text },
+                  activeManagerView === 'requests' && { color: '#FFFFFF' },
+                ]}
+              >
+                Yêu cầu
+              </Text>
+              {pendingRequests.length > 0 && (
+                <View
+                  style={{
+                    marginLeft: 6,
+                    minWidth: 20,
+                    paddingHorizontal: 6,
+                    height: 20,
+                    borderRadius: 10,
+                    backgroundColor: '#E53935',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text
+                    style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}
+                  >
+                    {pendingRequests.length}
+                  </Text>
+                </View>
+              )}
+            </View>
           </TouchableOpacity>
         </View>
 

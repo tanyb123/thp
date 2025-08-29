@@ -6,6 +6,11 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 
@@ -171,3 +176,111 @@ export const getAttendanceStatus = (attendanceDoc) => {
   if (attendanceDoc.clockIn && attendanceDoc.clockOut) return 'clocked_out';
   return 'none';
 };
+/**
+ * Get attendance history for a user by month and year
+ * @param {string} userId
+ * @param {number} year
+ * @param {number} month (1-12)
+ * @returns {Array} Array of attendance records
+ */
+export const getAttendanceHistory = async (userId, year, month) => {
+  try {
+    // Tạo range date cho tháng
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0); // Ngày cuối cùng của tháng
+
+    // Format dates để tìm documents
+    const startDateStr = formatDate(startDate);
+    const endDateStr = formatDate(endDate);
+
+    // Tạo query để lấy tất cả attendance records trong tháng
+    const attendanceRef = collection(db, 'attendance');
+
+    // Lấy tất cả documents và filter theo date range
+    const querySnapshot = await getDocs(attendanceRef);
+    const attendanceRecords = [];
+
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+
+      // Kiểm tra xem document có thuộc user này không
+      if (data.userId === userId || doc.id.startsWith(userId + '_')) {
+        // Trích xuất ngày từ document ID (format: userId_YYYY-MM-DD)
+        let docDate = data.date;
+        if (!docDate && doc.id.includes('_')) {
+          const datePart = doc.id.split('_')[1];
+          if (datePart && datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            docDate = datePart;
+          }
+        }
+
+        // Kiểm tra xem document có thuộc tháng cần tìm không
+        if (docDate && docDate >= startDateStr && docDate <= endDateStr) {
+          attendanceRecords.push({
+            id: doc.id,
+            ...data,
+            clockIn: data.clockIn,
+            clockOut: data.clockOut,
+            overtime: data.overtime || 0,
+            date: docDate,
+          });
+        }
+      }
+    });
+
+    // Sắp xếp theo ngày
+    attendanceRecords.sort((a, b) => a.date.localeCompare(b.date));
+
+    return attendanceRecords;
+  } catch (error) {
+    console.error('Error getting attendance history:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get attendance summary for a user by month and year
+ * @param {string} userId
+ * @param {number} year
+ * @param {number} month (1-12)
+ * @returns {Object} Summary object with total days, hours, overtime
+ */
+export const getAttendanceSummary = async (userId, year, month) => {
+  try {
+    const history = await getAttendanceHistory(userId, year, month);
+
+    const summary = {
+      totalDays: history.length,
+      totalHours: 0,
+      totalOvertime: 0,
+      averageHoursPerDay: 0,
+    };
+
+    history.forEach((record) => {
+      if (record.clockIn && record.clockOut) {
+        const startTime = record.clockIn.toDate
+          ? record.clockIn.toDate()
+          : new Date(record.clockIn);
+        const endTime = record.clockOut.toDate
+          ? record.clockOut.toDate()
+          : new Date(record.clockOut);
+        const hours = (endTime - startTime) / (1000 * 60 * 60);
+        summary.totalHours += hours;
+      }
+
+      if (record.overtime) {
+        summary.totalOvertime += record.overtime;
+      }
+    });
+
+    if (summary.totalDays > 0) {
+      summary.averageHoursPerDay = summary.totalHours / summary.totalDays;
+    }
+
+    return summary;
+  } catch (error) {
+    console.error('Error getting attendance summary:', error);
+    throw error;
+  }
+};
+

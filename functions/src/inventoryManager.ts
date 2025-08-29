@@ -14,10 +14,13 @@ export interface InventoryItem {
   minQuantity?: number;
   price?: number;
   lastUpdated: admin.firestore.Timestamp;
+  updatedAt?: admin.firestore.Timestamp; // Thêm field này để tương thích
+  createdAt?: admin.firestore.Timestamp; // Thêm field này để tương thích
   locationId?: string;
   weight?: number; // Khối lượng (kg)
   material?: string; // Vật liệu
   imageUrl?: string; // URL hình ảnh
+  imageBase64?: string; // Base64 data của hình ảnh
   supplier?: string; // Nhà cung cấp chính
   properties?: { [key: string]: any }; // Thuộc tính tuỳ chỉnh
 }
@@ -65,8 +68,14 @@ export interface InventoryLocation {
 export const addInventoryItem = functions
   .region('asia-southeast1')
   .https.onCall(async (data: InventoryItem, context: CallableContext) => {
+    console.log('=== CLOUD FUNCTION: BẮT ĐẦU THÊM VẬT TƯ ===');
+    console.log('data nhận được:', JSON.stringify(data, null, 2));
+    console.log('context.auth:', context.auth);
+
     // Kiểm tra xác thực
     if (!context.auth) {
+      console.error('=== CLOUD FUNCTION: LỖI XÁC THỰC ===');
+      console.error('User chưa đăng nhập');
       throw new functions.https.HttpsError(
         'unauthenticated',
         'Bạn cần đăng nhập để thực hiện chức năng này.'
@@ -74,14 +83,23 @@ export const addInventoryItem = functions
     }
 
     try {
+      console.log('=== CLOUD FUNCTION: KIỂM TRA DỮ LIỆU ===');
       // Kiểm tra dữ liệu đầu vào
       if (!data.name || !data.code || !data.categoryId || !data.unit) {
+        console.error('=== CLOUD FUNCTION: LỖI DỮ LIỆU ===');
+        console.error('Thiếu thông tin bắt buộc:');
+        console.error('name:', data.name);
+        console.error('code:', data.code);
+        console.error('categoryId:', data.categoryId);
+        console.error('unit:', data.unit);
+
         throw new functions.https.HttpsError(
           'invalid-argument',
           'Thiếu thông tin vật tư bắt buộc.'
         );
       }
 
+      console.log('=== CLOUD FUNCTION: KIỂM TRA MÃ VẬT TƯ TRÙNG ===');
       // Kiểm tra mã vật tư đã tồn tại chưa
       const codeSnapshot = await admin
         .firestore()
@@ -90,27 +108,37 @@ export const addInventoryItem = functions
         .get();
 
       if (!codeSnapshot.empty) {
+        console.error('=== CLOUD FUNCTION: MÃ VẬT TƯ ĐÃ TỒN TẠI ===');
+        console.error('Mã vật tư:', data.code, 'đã tồn tại');
         throw new functions.https.HttpsError(
           'already-exists',
           'Mã vật tư đã tồn tại trong hệ thống.'
         );
       }
 
+      console.log('=== CLOUD FUNCTION: CHUẨN BỊ DỮ LIỆU ===');
       // Chuẩn bị dữ liệu để lưu
       const newItem: InventoryItem = {
         ...data,
         stockQuantity: data.stockQuantity || 0,
         lastUpdated: admin.firestore.Timestamp.now(),
+        updatedAt: admin.firestore.Timestamp.now(), // Thêm field này để tương thích
       };
+      console.log('newItem chuẩn bị lưu:', JSON.stringify(newItem, null, 2));
 
+      console.log('=== CLOUD FUNCTION: LƯU VÀO FIRESTORE ===');
       // Lưu vào Firestore
       const docRef = await admin
         .firestore()
         .collection('inventory')
         .add(newItem);
 
+      console.log('=== CLOUD FUNCTION: ĐÃ LƯU THÀNH CÔNG ===');
+      console.log('Document ID:', docRef.id);
+
       // Nếu có số lượng ban đầu > 0, tạo giao dịch nhập kho
       if (data.stockQuantity > 0) {
+        console.log('=== CLOUD FUNCTION: TẠO GIAO DỊCH NHẬP KHO ===');
         await admin.firestore().collection('inventory_transactions').add({
           type: 'IN',
           itemId: docRef.id,
@@ -120,15 +148,26 @@ export const addInventoryItem = functions
           userId: context.auth.uid,
           status: 'COMPLETED',
         });
+        console.log('=== CLOUD FUNCTION: ĐÃ TẠO GIAO DỊCH NHẬP KHO ===');
       }
 
-      return {
+      const result = {
         success: true,
         id: docRef.id,
         message: 'Thêm vật tư thành công',
       };
+
+      console.log('=== CLOUD FUNCTION: TRẢ VỀ KẾT QUẢ ===');
+      console.log('result:', JSON.stringify(result, null, 2));
+
+      return result;
     } catch (error: any) {
-      console.error('Lỗi thêm vật tư:', error);
+      console.error('=== CLOUD FUNCTION: LỖI CHUNG ===');
+      console.error('Error object:', error);
+      console.error('Error message:', error.message);
+      console.error('Error stack:', error.stack);
+      console.error('=== END LỖI CLOUD FUNCTION ===');
+
       throw new functions.https.HttpsError(
         'internal',
         `Lỗi thêm vật tư: ${error.message}`
@@ -174,6 +213,7 @@ export const updateInventoryItem = functions
         const updateData = {
           ...itemData,
           lastUpdated: admin.firestore.Timestamp.now(),
+          updatedAt: admin.firestore.Timestamp.now(), // Thêm field này để tương thích
         };
 
         // Cập nhật vào Firestore
@@ -292,6 +332,7 @@ export const createInventoryTransaction = functions
             transaction.update(itemRef, {
               stockQuantity: newQuantity,
               lastUpdated: admin.firestore.Timestamp.now(),
+              updatedAt: admin.firestore.Timestamp.now(), // Thêm field này để tương thích
             });
           } else {
             // Xử lý chuyển kho - logic phức tạp hơn có thể thêm sau

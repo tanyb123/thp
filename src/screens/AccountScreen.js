@@ -12,6 +12,7 @@ import {
   UIManager,
   Platform,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -287,6 +288,34 @@ const AccountScreen = ({ navigation }) => {
             title="Chuyển tài khoản Google"
             onPress={switchGoogleAccount}
             color="#4285F4"
+          />
+          <SettingItem
+            icon="location-outline"
+            title="Địa chỉ Xưởng ngoài (Xưởng 1)"
+            onPress={async () => {
+              await Clipboard.setStringAsync(
+                'https://www.google.com/maps/place/X%C6%B0%E1%BB%9Fng+CK+MT+-+T%C3%A2n+H%C3%B2a+Ph%C3%A1t+1/@10.7782508,106.5291403,12z/data=!4m10!1m2!2m1!1zY8ahIGtow60gdMOibiBow7JhIHBow6F0!3m6!1s0x3175290ffa823bfb:0x23c923d5a8d1a031!8m2!3d10.8614882!4d106.6831661!15sChhjxqEga2jDrSB0w6JuIGjDsmEgcGjDoXSSARVtZWNoYW5pY2FsX2NvbnRyYWN0b3KqAVAKDS9nLzExc2s2djkwODYQATIfEAEiG23AjuWtNDJVRipKVSAA9Rbpkjo81fIfZYNOsDIcEAIiGGPGoSBraMOtIHTDom4gaMOyYSBwaMOhdOABAA!16s%2Fg%2F11h6gd6mg4?entry=ttu&g_ep=EgoyMDI1MDgxOS4wIKXMDSoASAFQAw%3D%3D'
+              );
+              Alert.alert(
+                'Đã sao chép',
+                'Liên kết địa chỉ Xưởng 1 đã được copy'
+              );
+            }}
+            color={theme.primary}
+          />
+          <SettingItem
+            icon="location-outline"
+            title="Địa chỉ Xưởng trong (Xưởng 2)"
+            onPress={async () => {
+              await Clipboard.setStringAsync(
+                'https://www.google.com/maps/place/102+%C4%90.+Th%E1%BA%A1nh+L%E1%BB%99c+15,+Th%E1%BA%A1nh+L%E1%BB%99c,+Qu%E1%BA%ADn+12,+H%E1%BB%93+Ch%C3%AD+Minh,+Vi%E1%BB%87t+Nam/@10.8675172,106.6876414,17z/data=!3m1!4b1!4m5!3m4!1s0x3175282515d55d23:0xdf8406f9ca9fa24a!8m2!3d10.8675119!4d106.6902163?entry=ttu&g_ep=EgoyMDI1MDgxOS4wIKXMDSoASAFQAw%3D%3D'
+              );
+              Alert.alert(
+                'Đã sao chép',
+                'Liên kết địa chỉ Xưởng 2 đã được copy'
+              );
+            }}
+            color={theme.primary}
           />
           {(userRole === 'giam_doc' || userRole === 'admin') && (
             <>

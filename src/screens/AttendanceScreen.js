@@ -46,6 +46,7 @@ const AttendanceScreen = ({ navigation }) => {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
+  const [savingTarget, setSavingTarget] = useState(null); // 'present' | 'overtime' | 'export' | null
   const [attMap, setAttMap] = useState({}); // uid -> attendance doc
   const [showAddModal, setShowAddModal] = useState(false);
   const [newName, setNewName] = useState('');
@@ -132,6 +133,7 @@ const AttendanceScreen = ({ navigation }) => {
   const togglePresent = async (emp) => {
     try {
       setSavingId(emp.uid);
+      setSavingTarget('present');
       const current = attMap[emp.uid]?.present || false;
       const updated = await setPresence(emp.uid, !current, selectedDate);
       setAttMap((prev) => ({ ...prev, [emp.uid]: updated }));
@@ -140,6 +142,7 @@ const AttendanceScreen = ({ navigation }) => {
       Alert.alert('Lỗi', 'Không thể cập nhật');
     } finally {
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -170,7 +173,8 @@ const AttendanceScreen = ({ navigation }) => {
     try {
       // Use a temporary state to show loading indicators on each row
       const tempIds = employees.map((e) => e.uid);
-      setSavingId('all'); // Special marker for "all saving"
+      setSavingId('present_all'); // Special marker for bulk present
+      setSavingTarget('present');
       const promises = employees.map((emp) =>
         setPresence(emp.uid, true, selectedDate)
       );
@@ -192,17 +196,20 @@ const AttendanceScreen = ({ navigation }) => {
       });
       setAttMap(newAttMap);
       setSavingId(null);
+      setSavingTarget(null);
     } catch (err) {
       console.error(err);
       Alert.alert('Lỗi', 'Không thể cập nhật tất cả');
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
   // Add markAllOvertime function
   const markAllOvertime = async () => {
     try {
-      setSavingId('all');
+      setSavingId('overtime_all');
+      setSavingTarget('overtime');
       const promises = employees.map((emp) =>
         addOvertime(emp.uid, DEFAULT_OVERTIME_HOURS, selectedDate)
       );
@@ -224,10 +231,12 @@ const AttendanceScreen = ({ navigation }) => {
       });
       setAttMap(newAttMap);
       setSavingId(null);
+      setSavingTarget(null);
     } catch (err) {
       console.error(err);
       Alert.alert('Lỗi', 'Không thể cập nhật tăng ca');
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -235,6 +244,7 @@ const AttendanceScreen = ({ navigation }) => {
   const toggleOvertime = async (emp) => {
     try {
       setSavingId(emp.uid);
+      setSavingTarget('overtime');
       const current = attMap[emp.uid]?.overtime || 0;
       const newValue = current > 0 ? 0 : DEFAULT_OVERTIME_HOURS;
       const updated = await addOvertime(emp.uid, newValue, selectedDate);
@@ -244,6 +254,7 @@ const AttendanceScreen = ({ navigation }) => {
       Alert.alert('Lỗi', 'Không thể cập nhật tăng ca');
     } finally {
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -281,6 +292,7 @@ const AttendanceScreen = ({ navigation }) => {
   const exportToExcel = async () => {
     try {
       setSavingId('export');
+      setSavingTarget('export');
 
       // Get current year and month from selectedDate
       const year = selectedDate.getFullYear();
@@ -308,6 +320,7 @@ const AttendanceScreen = ({ navigation }) => {
                 if (!accessToken) {
                   Alert.alert('Lỗi', 'Không thể lấy Google access token');
                   setSavingId(null);
+                  setSavingTarget(null);
                   return;
                 }
 
@@ -338,16 +351,24 @@ const AttendanceScreen = ({ navigation }) => {
                 Alert.alert('Lỗi', `Không thể xuất Excel: ${error.message}`);
               } finally {
                 setSavingId(null);
+                setSavingTarget(null);
               }
             },
           },
         ],
-        { cancelable: true, onDismiss: () => setSavingId(null) }
+        {
+          cancelable: true,
+          onDismiss: () => {
+            setSavingId(null);
+            setSavingTarget(null);
+          },
+        }
       );
     } catch (error) {
       console.error('Export Excel prepare error:', error);
       Alert.alert('Lỗi', 'Không thể chuẩn bị xuất Excel');
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -402,7 +423,12 @@ const AttendanceScreen = ({ navigation }) => {
     const attendance = attMap[item.uid];
     const present = attendance?.present;
     const overtime = attendance?.overtime || 0;
-    const isSaving = savingId === item.uid || savingId === 'all';
+    const isSavingPresent =
+      (savingId === item.uid && savingTarget === 'present') ||
+      savingId === 'present_all';
+    const isSavingOvertime =
+      (savingId === item.uid && savingTarget === 'overtime') ||
+      savingId === 'overtime_all';
 
     return (
       <View
@@ -445,10 +471,10 @@ const AttendanceScreen = ({ navigation }) => {
         <View style={styles.attendanceActions}>
           <TouchableOpacity
             onPress={() => !isAccountant && togglePresent(item)}
-            disabled={isSaving || isAccountant}
+            disabled={isSavingPresent || isAccountant}
             style={styles.checkButton}
           >
-            {isSaving ? (
+            {isSavingPresent ? (
               <ActivityIndicator size="small" color={theme.primary} />
             ) : (
               <Ionicons
@@ -462,10 +488,10 @@ const AttendanceScreen = ({ navigation }) => {
           <View style={styles.overtimeActionContainer}>
             <TouchableOpacity
               onPress={() => !isAccountant && toggleOvertime(item)}
-              disabled={isSaving || isAccountant}
+              disabled={isSavingOvertime || isAccountant}
               style={styles.checkButtonOvertime}
             >
-              {isSaving ? (
+              {isSavingOvertime ? (
                 <ActivityIndicator
                   size="small"
                   color={theme.success || '#4CAF50'}

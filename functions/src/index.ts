@@ -13,7 +13,9 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 
 // Initialize Firebase Admin FIRST
-admin.initializeApp();
+admin.initializeApp({
+  storageBucket: 'tanyb-fe4bf.appspot.com',
+});
 
 // Export functions from other files
 export * from './materialImporter';
@@ -36,6 +38,8 @@ export * from './quotationExcelGenerator';
 export * from './attendanceExcelGenerator';
 export * from './processWorkAllocations';
 export * from './aggregateMonthlyReport';
+export * from './notificationTriggers';
+export * from './publicApi';
 
 // Không export từ excelGenerator nữa vì đã có export từ quotationExcelGenerator
 

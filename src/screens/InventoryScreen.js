@@ -7,6 +7,7 @@ import {
   Text,
   Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import {
   Searchbar,
   FAB,
@@ -28,7 +29,7 @@ import {
   useRoute,
 } from '@react-navigation/native';
 import InventoryItemCard from '../components/InventoryItemCard';
-import { TouchableOpacity } from 'react-native-gesture-handler';
+import { TouchableOpacity } from 'react-native';
 import useInventory from '../hooks/useInventory';
 import { useAuth } from '../contexts/AuthContext';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
@@ -64,6 +65,7 @@ const InventoryScreen = () => {
   const route = useRoute();
   const { user } = useAuth();
   const [fabOpen, setFabOpen] = useState(false);
+  const [isScreenFocused, setIsScreenFocused] = useState(false);
 
   // Xử lý tham số refresh
   useEffect(() => {
@@ -77,31 +79,98 @@ const InventoryScreen = () => {
     }
   }, [route.params?.refresh, navigation]);
 
+  // Sử dụng navigation listener để quản lý việc hiển thị FAB
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('InventoryScreen focused - setting isScreenFocused to true');
+      setIsScreenFocused(true);
+    });
+
+    const unsubscribeBlur = navigation.addListener('blur', () => {
+      console.log(
+        'InventoryScreen unfocused - setting isScreenFocused to false'
+      );
+      setIsScreenFocused(false);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeBlur();
+    };
+  }, [navigation]);
+
   // Lấy danh sách vật tư từ Firestore - tối ưu hiệu suất
   const fetchInventory = useCallback(async () => {
     setLoading(true);
     try {
+      console.log('=== INVENTORYSCREEN: BẮT ĐẦU FETCH INVENTORY ===');
       const inventoryRef = collection(db, 'inventory');
-      // Use 'updatedAt' for sorting, as it is more consistent across all
-      // item creation/update methods (manual and from PO).
-      const q = query(inventoryRef, orderBy('updatedAt', 'desc'));
-      const snapshot = await getDocs(q);
+
+      // Thử query với lastUpdated trước, nếu lỗi thì fallback về query không có orderBy
+      let q;
+      let snapshot;
+
+      try {
+        // Thử query với lastUpdated (cho vật tư mới thêm thủ công)
+        console.log('=== INVENTORYSCREEN: THỬ QUERY VỚI lastUpdated ===');
+        q = query(inventoryRef, orderBy('lastUpdated', 'desc'));
+        snapshot = await getDocs(q);
+        console.log('=== INVENTORYSCREEN: QUERY lastUpdated THÀNH CÔNG ===');
+      } catch (orderByError) {
+        console.log(
+          '=== INVENTORYSCREEN: QUERY lastUpdated THẤT BẠI, THỬ QUERY KHÔNG CÓ ORDERBY ==='
+        );
+        console.log('Lỗi orderBy:', orderByError.message);
+
+        // Fallback: query không có orderBy để lấy tất cả vật tư
+        q = query(inventoryRef);
+        snapshot = await getDocs(q);
+        console.log(
+          '=== INVENTORYSCREEN: QUERY KHÔNG CÓ ORDERBY THÀNH CÔNG ==='
+        );
+      }
+
+      console.log('=== INVENTORYSCREEN: KẾT QUẢ QUERY ===');
+      console.log('Số lượng documents:', snapshot.docs.length);
 
       const fetchedItems = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
 
-      setItems(fetchedItems);
+      console.log('=== INVENTORYSCREEN: DỮ LIỆU ĐÃ PARSE ===');
+      console.log('Số lượng items:', fetchedItems.length);
+      console.log('Items đầu tiên:', fetchedItems[0]);
+
+      // Sắp xếp thủ công nếu cần
+      const sortedItems = fetchedItems.sort((a, b) => {
+        // Ưu tiên lastUpdated, sau đó updatedAt, cuối cùng createdAt
+        const aTime = a.lastUpdated || a.updatedAt || a.createdAt;
+        const bTime = b.lastUpdated || b.updatedAt || b.createdAt;
+
+        if (aTime && bTime) {
+          return bTime.toDate().getTime() - aTime.toDate().getTime();
+        }
+        return 0;
+      });
+
+      console.log('=== INVENTORYSCREEN: DỮ LIỆU ĐÃ SẮP XẾP ===');
+      console.log('Số lượng items sau khi sắp xếp:', sortedItems.length);
+
+      setItems(sortedItems);
       applyFiltersAndSort(
-        fetchedItems,
+        sortedItems,
         searchQuery,
         selectedCategory,
         filterLowStock,
         sortOption
       );
+
+      console.log('=== INVENTORYSCREEN: HOÀN THÀNH FETCH ===');
     } catch (error) {
+      console.error('=== INVENTORYSCREEN: LỖI FETCH ===');
       console.error('Lỗi khi lấy dữ liệu kho:', error);
+      console.error('Error details:', error.message, error.code);
     } finally {
       setLoading(false);
     }
@@ -483,27 +552,56 @@ const InventoryScreen = () => {
         </View>
       )}
 
-      {/* FAB Group cho các hành động */}
-      <Portal>
-        <FAB.Group
-          open={fabOpen}
+      {/* FAB đơn giản - chỉ hiển thị khi màn hình được focus */}
+      {console.log(
+        'Rendering FAB, isScreenFocused:',
+        isScreenFocused,
+        'fabOpen:',
+        fabOpen
+      )}
+      {isScreenFocused && (
+        <FAB
           icon={fabOpen ? 'close' : 'plus'}
-          actions={[
-            {
-              icon: 'plus',
-              label: 'Thêm vật tư mới',
-              onPress: handleAddItem,
-            },
-            {
-              icon: 'file-excel',
-              label: 'Nhập từ Excel',
-              onPress: () => setImportDialogVisible(true),
-            },
-          ]}
-          onStateChange={({ open }) => setFabOpen(open)}
-          fabStyle={styles.fab}
+          style={styles.fab}
+          onPress={() => {
+            console.log('FAB pressed, current fabOpen:', fabOpen);
+            if (fabOpen) {
+              // Nếu FAB đang mở, hiển thị menu
+              setFabOpen(false);
+            } else {
+              // Nếu FAB đang đóng, mở menu
+              setFabOpen(true);
+            }
+          }}
         />
-      </Portal>
+      )}
+
+      {/* Menu cho các hành động khi FAB được mở */}
+      {isScreenFocused && fabOpen && (
+        <View style={styles.fabMenu}>
+          <TouchableOpacity
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabOpen(false);
+              handleAddItem();
+            }}
+          >
+            <Ionicons name="add" size={20} color="#fff" />
+            <Text style={styles.fabMenuText}>Thêm vật tư mới</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabOpen(false);
+              setImportDialogVisible(true);
+            }}
+          >
+            <Ionicons name="file-excel" size={20} color="#fff" />
+            <Text style={styles.fabMenuText}>Nhập từ Excel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Dialog nhập từ Google Drive */}
       <Portal>
@@ -715,6 +813,33 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: '#3f51b5',
+  },
+  fabMenu: {
+    position: 'absolute',
+    right: 16,
+    bottom: 80,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 8,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  fabMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+  fabMenuText: {
+    marginLeft: 12,
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
   },
   loader: {
     flex: 1,

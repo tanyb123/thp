@@ -17,7 +17,6 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import ProductionService from '../api/productionService';
 import { getProjects } from '../api/projectService';
-import { getStageIcon, loadCustomIcons } from '../utils/stageIcons';
 
 const { width } = Dimensions.get('window');
 
@@ -56,7 +55,6 @@ const StarboardScreen = ({ navigation }) => {
   const [factoryStatus, setFactoryStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [forceUpdate, setForceUpdate] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Toggle fullscreen mode
@@ -122,6 +120,11 @@ const StarboardScreen = ({ navigation }) => {
 
         // Setup real-time subscription for factory status
         unsubscribe = ProductionService.subscribeLiveFactoryStatus((status) => {
+          console.log(
+            'Real-time factory status update:',
+            status.length,
+            'workers'
+          );
           setFactoryStatus(status);
           setLoading(false);
         });
@@ -147,8 +150,19 @@ const StarboardScreen = ({ navigation }) => {
       const [projectsData, factoryStatusData] = await Promise.all([
         getProjects(),
         ProductionService.getLiveFactoryStatus(),
-        loadCustomIcons(), // Load custom icons
       ]);
+
+      console.log(
+        'StarboardScreen - Total projects loaded:',
+        projectsData.length
+      );
+      console.log(
+        'StarboardScreen - All project statuses:',
+        projectsData.map((p) => ({ name: p.name, status: p.status }))
+      );
+
+      // Tạm thời hiển thị tất cả dự án để debug
+      console.log('StarboardScreen - Showing ALL projects for debugging');
 
       // Chỉ hiển thị các dự án đang thực hiện - kiểm tra nhiều trạng thái có thể
       const activeProjects = projectsData.filter((project) => {
@@ -163,6 +177,15 @@ const StarboardScreen = ({ navigation }) => {
         );
       });
 
+      console.log(
+        'StarboardScreen - Active projects (filtered):',
+        activeProjects.length
+      );
+      console.log(
+        'StarboardScreen - Active projects details:',
+        activeProjects.map((p) => ({ name: p.name, status: p.status }))
+      );
+
       // Tạm thời hiển thị tất cả dự án để debug
       setProjects(projectsData);
       setFactoryStatus(factoryStatusData);
@@ -176,23 +199,12 @@ const StarboardScreen = ({ navigation }) => {
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadData();
-    setForceUpdate((prev) => prev + 1); // Force component re-render
     setRefreshing(false);
   };
 
-  // Get stage status based on project data and factory status
+  // Get stage status based on factory status
   const getStageStatus = (projectId, stageId) => {
-    // First, get the actual stage status from project data
-    const project = projects.find((p) => p.id === projectId);
-    if (project && project.workflowStages) {
-      const stage = project.workflowStages.find((s) => s.stageId === stageId);
-      if (stage && stage.status) {
-        // Return the actual status from project data
-        return stage.status;
-      }
-    }
-
-    // Fallback: Check if any worker is currently working on this stage
+    // Check if any worker is currently working on this stage
     const workingWorker = factoryStatus.find(
       (worker) =>
         worker.status === 'working' &&
@@ -204,7 +216,8 @@ const StarboardScreen = ({ navigation }) => {
       return 'in_progress';
     }
 
-    // Default to pending if no status found
+    // For now, we'll assume other stages are pending
+    // In a real app, you'd check completion status from project data
     return 'pending';
   };
 
@@ -214,9 +227,15 @@ const StarboardScreen = ({ navigation }) => {
     const project = projects.find((p) => p.id === projectId);
     const projectName = project?.name;
 
+    console.log('=== DEBUG getProjectWorkers ===');
+    console.log('Looking for projectId:', projectId);
+    console.log('Project name:', projectName);
+    console.log('factoryStatus:', factoryStatus);
+
     const workingWorkers = factoryStatus.filter(
       (worker) => worker.status === 'working'
     );
+    console.log('Working workers:', workingWorkers);
 
     const projectWorkers = factoryStatus.filter((worker) => {
       const isWorking = worker.status === 'working';
@@ -230,8 +249,20 @@ const StarboardScreen = ({ navigation }) => {
         worker.currentTask?.projectName === projectName ||
         worker.currentTask?.project === projectName;
 
+      console.log(`Worker ${worker.workerName || worker.workerId}:`, {
+        isWorking,
+        hasCurrentTask,
+        currentTask: worker.currentTask,
+        projectMatches,
+        'currentTask.projectName': worker.currentTask?.projectName,
+        'looking for projectName': projectName,
+      });
+
       return isWorking && hasCurrentTask && projectMatches;
     });
+
+    console.log('Final project workers:', projectWorkers);
+    console.log('=== END DEBUG ===');
 
     return projectWorkers;
   };
@@ -249,9 +280,42 @@ const StarboardScreen = ({ navigation }) => {
     return Math.round((completedStages / project.workflowStages.length) * 100);
   };
 
-  // Get icon for process type - sử dụng từ file stageIcons.js
-  const getProcessIcon = (processKey, isCompleted = false) => {
-    return getStageIcon(processKey, isCompleted);
+  // Get icon for process type
+  const getProcessIcon = (processKey) => {
+    const iconMap = {
+      // Cắt
+      laser_cutting: 'flash',
+      plasma_cutting: 'flash-outline',
+      cutting: 'cut',
+
+      // Hàn
+      welding: 'flame',
+      arc_welding: 'flame-outline',
+      han: 'flame',
+
+      // Sơn
+      painting: 'brush',
+      spray_painting: 'brush-outline',
+      son: 'brush',
+
+      // Gia công
+      machining: 'build',
+      drilling: 'ellipse',
+      milling: 'settings',
+
+      // Lắp ráp
+      assembly: 'construct',
+      lap_rap: 'construct-outline',
+
+      // Kiểm tra
+      inspection: 'checkmark-circle',
+      quality_check: 'shield-checkmark',
+
+      // Mặc định
+      default: 'ellipse',
+    };
+
+    return iconMap[processKey] || iconMap['default'];
   };
 
   // Render task icon với responsive sizing
@@ -262,53 +326,32 @@ const StarboardScreen = ({ navigation }) => {
     let borderColor = '#9E9E9E';
     let showTick = false;
 
-    // 🆕 No background fill - transparent/white only
-    let backgroundColor = '#FFFFFF'; // Always white background
-
     switch (status) {
       case 'completed':
-        iconColor = '#9E9E9E'; // Gray icon, no fill
-        borderColor = '#4CAF50'; // Green border
-        backgroundColor = '#FFFFFF'; // 🆕 No green fill
-        showTick = true; // Keep green checkmark
+        iconColor = '#4CAF50';
+        borderColor = '#4CAF50';
+        showTick = true;
         break;
       case 'in_progress':
-        iconColor = '#9E9E9E'; // Gray icon, no fill
-        borderColor = '#FFC107'; // Yellow border
-        backgroundColor = '#FFFFFF'; // 🆕 No yellow fill
+        iconColor = '#FFC107';
+        borderColor = '#FFC107';
         break;
       case 'pending':
       default:
-        iconColor = '#9E9E9E'; // Gray icon
-        borderColor = '#E0E0E0'; // Light gray border
-        backgroundColor = '#FFFFFF'; // White background
+        iconColor = '#9E9E9E';
+        borderColor = '#E0E0E0';
         break;
     }
 
-    // Kiểm tra trạng thái hoàn thành
-    const isCompleted = status === 'completed';
+    const iconName = getProcessIcon(stage.processKey);
 
-    const iconData = getProcessIcon(stage.processKey, isCompleted);
-
-    // Responsive sizing - 🆕 Increased icon sizes
-    const iconSize = isLandscapeMode ? 40 : 50; // Increased from 32/40 to 40/50
-    const iconIconSize = isLandscapeMode ? 20 : 25; // Increased from 16/20 to 20/25
-
-    // Check icon type
-    const isCustomIcon =
-      typeof iconData === 'object' && iconData.type === 'custom';
-    const isAssetIcon =
-      typeof iconData === 'object' && iconData.type === 'asset';
-    const iconName =
-      isCustomIcon || isAssetIcon
-        ? null
-        : typeof iconData === 'object'
-        ? iconData.data
-        : iconData;
+    // Responsive sizing
+    const iconSize = isLandscapeMode ? 32 : 40;
+    const iconIconSize = isLandscapeMode ? 16 : 20;
 
     return (
       <View
-        key={`${stage.stageId}-${forceUpdate}-${isCompleted}`}
+        key={stage.stageId}
         style={[
           styles.taskIconContainer,
           isLandscapeMode && styles.taskIconContainerLandscape,
@@ -319,7 +362,6 @@ const StarboardScreen = ({ navigation }) => {
             styles.taskIcon,
             {
               borderColor: borderColor,
-              backgroundColor: backgroundColor, // 🆕 Always white - no color fill
               borderWidth: status === 'in_progress' ? 3 : 1,
               width: iconSize,
               height: iconSize,
@@ -328,37 +370,7 @@ const StarboardScreen = ({ navigation }) => {
             isLandscapeMode && styles.taskIconLandscape,
           ]}
         >
-          {isCustomIcon ? (
-            <Image
-              source={{ uri: iconData.data.uri }}
-              style={{
-                width: iconIconSize,
-                height: iconIconSize,
-                resizeMode: 'contain',
-                borderRadius: 2,
-              }}
-              onError={(error) => {
-                console.error('Error loading custom icon in starboard:', error);
-              }}
-            />
-          ) : isAssetIcon ? (
-            <Image
-              key={`icon-${stage.stageId}-${isCompleted}-${iconData.data}`}
-              source={iconData.data}
-              style={{
-                width: iconIconSize,
-                height: iconIconSize,
-                resizeMode: 'contain',
-                borderRadius: 2,
-                tintColor:
-                  stage.processKey === 'painting' || stage.processKey === 'son'
-                    ? undefined
-                    : iconColor,
-              }}
-            />
-          ) : (
-            <Ionicons name={iconName} size={iconIconSize} color={iconColor} />
-          )}
+          <Ionicons name={iconName} size={iconIconSize} color={iconColor} />
           {showTick && (
             <View
               style={[
@@ -374,7 +386,12 @@ const StarboardScreen = ({ navigation }) => {
             </View>
           )}
         </View>
-        {/* 🚫 Removed stage name text - icons only */}
+        {/* Hiển thị tên stage trong landscape mode */}
+        {isLandscapeMode && (
+          <Text style={styles.stageNameText} numberOfLines={1}>
+            {stage.processName || stage.processKey}
+          </Text>
+        )}
       </View>
     );
   };
@@ -484,8 +501,8 @@ const StarboardScreen = ({ navigation }) => {
           >
             {project.name}
           </Text>
-          {/* 🆕 Hiển thị customer name trong cả portrait và landscape mode */}
-          {project.customerName && (
+          {/* Hiển thị customer name trong landscape mode */}
+          {isLandscape && project.customerName && (
             <Text
               style={[styles.customerName, { color: theme.textSecondary }]}
               numberOfLines={1}
@@ -676,7 +693,7 @@ const styles = StyleSheet.create({
   },
 
   headerTitle: {
-    fontSize: 22, // 🆕 Increased from 20 to 22
+    fontSize: 20,
     fontWeight: 'bold',
   },
   headerRight: {
@@ -688,13 +705,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   listContainer: {
-    padding: 24, // 🆕 Increased from 18 to 24 (more outer spacing)
+    padding: 16,
   },
   projectRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 32, // 🆕 Increased from 24 to 32 (more inner spacing)
-    marginBottom: 16, // 🆕 Increased from 8 to 16 (more spacing between rows)
+    padding: 20,
+    marginBottom: 2,
     borderWidth: 1,
     borderRadius: 8,
   },
@@ -703,7 +720,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
   },
   projectName: {
-    fontSize: 22, // 🆕 Increased from 18 to 22 (larger project names)
+    fontSize: 16,
     fontWeight: '600',
   },
   taskIconsContainer: {
@@ -736,7 +753,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   noStagesText: {
-    fontSize: 14, // 🆕 Increased from 12 to 14
+    fontSize: 12,
     fontStyle: 'italic',
   },
   workersContainer: {
@@ -786,7 +803,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   noWorkersText: {
-    fontSize: 14, // 🆕 Increased from 12 to 14
+    fontSize: 12,
     fontStyle: 'italic',
   },
   emptyContainer: {
@@ -796,7 +813,7 @@ const styles = StyleSheet.create({
     paddingVertical: 64,
   },
   emptyText: {
-    fontSize: 18, // 🆕 Increased from 16 to 18
+    fontSize: 16,
     marginTop: 16,
     textAlign: 'center',
   },
@@ -825,7 +842,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   customerName: {
-    fontSize: 14, // 🆕 Increased from 11 to 14 (larger customer name)
+    fontSize: 11,
     marginTop: 2,
     fontStyle: 'italic',
   },
@@ -843,7 +860,12 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
   },
-  // 🚫 Removed stageNameText style - no longer needed
+  stageNameText: {
+    fontSize: 8,
+    color: '#666',
+    textAlign: 'center',
+    maxWidth: 32,
+  },
   moreStagesIndicator: {
     backgroundColor: '#E0E0E0',
     borderRadius: 16,

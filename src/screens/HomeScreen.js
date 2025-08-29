@@ -36,11 +36,14 @@ const HomeScreen = ({ navigation }) => {
   const [attendance, setAttendance] = useState(null);
   const [attLoading, setAttLoading] = useState(true);
 
-  const ROLE_CAN_ATTEND = ['ke_toan'];
+  const ROLE_CAN_ATTEND = ['ke_toan', 'cong_nhan'];
 
   const canUseAttendance = ROLE_CAN_ATTEND.includes(
     (user?.role || '').toLowerCase()
   );
+
+  // Kiểm tra role công nhân để hiển thị các chức năng đặc biệt
+  const isWorker = (user?.role || '').toLowerCase() === 'cong_nhan';
 
   const loadAttendance = async () => {
     if (!user?.uid || !canUseAttendance) {
@@ -320,6 +323,90 @@ const HomeScreen = ({ navigation }) => {
                 )}
               </>
             )}
+          </View>
+        </View>
+      )}
+
+      {/* Menu chức năng cho công nhân */}
+      {isWorker && (
+        <View style={{ paddingHorizontal: 16, marginBottom: 20 }}>
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: 'bold',
+              color: theme.text,
+              marginBottom: 16,
+            }}
+          >
+            Chức năng công nhân
+          </Text>
+
+          <View style={styles.workerMenuGrid}>
+            <TouchableOpacity
+              style={[
+                styles.workerMenuCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+              onPress={() => navigation.navigate('WorkerAttendance')}
+            >
+              <View
+                style={[styles.workerMenuIcon, { backgroundColor: '#4CAF50' }]}
+              >
+                <Ionicons name="time-outline" size={24} color="#fff" />
+              </View>
+              <Text style={[styles.workerMenuText, { color: theme.text }]}>
+                Xem chấm công
+              </Text>
+              <Text
+                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
+              >
+                Xem lịch sử và thống kê
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.workerMenuCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+              onPress={() => navigation.navigate('LeaveRequest')}
+            >
+              <View
+                style={[styles.workerMenuIcon, { backgroundColor: '#FF9800' }]}
+              >
+                <Ionicons name="calendar-outline" size={24} color="#fff" />
+              </View>
+              <Text style={[styles.workerMenuText, { color: theme.text }]}>
+                Xin nghỉ phép
+              </Text>
+              <Text
+                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
+              >
+                Đăng ký và theo dõi
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.workerMenuCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+              onPress={() => navigation.navigate('AdvanceSalary')}
+            >
+              <View
+                style={[styles.workerMenuIcon, { backgroundColor: '#2196F3' }]}
+              >
+                <Ionicons name="cash-outline" size={24} color="#fff" />
+              </View>
+              <Text style={[styles.workerMenuText, { color: theme.text }]}>
+                Xin ứng lương
+              </Text>
+              <Text
+                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
+              >
+                Yêu cầu và theo dõi
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -1015,6 +1102,44 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  // Styles cho menu chức năng công nhân
+  workerMenuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  workerMenuCard: {
+    width: '48%',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  workerMenuIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  workerMenuText: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  workerMenuDesc: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });
 

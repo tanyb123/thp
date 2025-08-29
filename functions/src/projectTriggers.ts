@@ -6,6 +6,7 @@ import {
 import * as admin from 'firebase-admin';
 import { google } from 'googleapis';
 import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 const db = admin.firestore();
 const ROOT_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX'; // Baogia root folder ID
@@ -90,11 +91,15 @@ export const onProjectCreate = onDocumentCreated(
         `Created subfolders: baogia (${baogiaFolder.id}) and hopdong (${hopdongFolder.id})`
       );
 
-      // Step 6: Update project document with folder IDs
+      // Step 6: Create public tracking token
+      const publicTrackingToken = uuidv4().replace(/-/g, '');
+
+      // Step 7: Update project document with folder IDs and tracking token
       await db.collection('projects').doc(projectId).update({
         driveFolderId: projectFolder.id,
         driveFolderUrl: projectFolder.webViewLink,
         driveCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        publicTrackingToken: publicTrackingToken,
       });
 
       console.log(
