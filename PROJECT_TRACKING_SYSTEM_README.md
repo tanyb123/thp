@@ -137,7 +137,7 @@ git push -u origin main
 
 **Bước 3**: Tùy chỉnh domain
 
-- Đổi tên miền phụ: `thp-tracker.netlify.app`
+- Đổi tên miền phụ: `tanhoaphat.netlify.app`
 - Tùy chọn: Thêm domain tùy chỉnh `tracker.thp.com.vn`
 
 ## Thành Phần 3: Mobile App Integration
@@ -157,7 +157,7 @@ import { Share } from 'react-native';
   style={styles.tileButton}
   onPress={async () => {
     // Logic chia sẻ link theo dõi
-    const trackingUrl = `https://thp-tracker.netlify.app/track?token=${project.publicTrackingToken}`;
+    const trackingUrl = `https://tanhoaphat.netlify.app/track?token=${project.publicTrackingToken}`;
     await Share.share({
       message: `Theo dõi tiến độ dự án "${project.name}"...`,
       title: `Theo dõi dự án: ${project.name}`,
@@ -181,7 +181,7 @@ import { Share } from 'react-native';
 ### 2. Chia sẻ link theo dõi
 
 1. Quản lý nhấn nút "Chia sẻ Link Theo dõi"
-2. Mobile App tạo URL: `https://thp-tracker.netlify.app/track?token=ABC123...`
+2. Mobile App tạo URL: `https://tanhoaphat.netlify.app/track?token=ABC123...`
 3. Sử dụng Share API để chia sẻ qua Zalo, Email, v.v.
 
 ### 3. Khách hàng xem tiến độ

@@ -57,8 +57,8 @@ Trong tab "Environment variables":
 
 1. Vào tab "Domain management"
 2. Click "Change site name"
-3. Đặt tên: `thp-tracker` hoặc tên bạn muốn
-4. URL sẽ là: `https://thp-tracker.netlify.app`
+3. Đặt tên: `tanhoaphat` hoặc tên bạn muốn
+4. URL sẽ là: `https://tanhoaphat.netlify.app`
 
 ### 4.2. Tùy chỉnh domain tùy chỉnh (tùy chọn)
 
@@ -76,7 +76,7 @@ Trong tab "Environment variables":
 
 ### 5.2. Test website
 
-1. Mở URL: `https://thp-tracker.netlify.app`
+1. Mở URL: `https://tanhoaphat.netlify.app`
 2. Test với token hợp lệ: `?token=test123`
 3. Kiểm tra responsive trên mobile
 
