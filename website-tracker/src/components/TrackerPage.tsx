@@ -34,7 +34,7 @@ const TrackerPage: React.FC = () => {
           return;
         }
 
-        // TODO: Replace with actual Cloud Function URL after deployment
+        // Cloud Function URL for project tracking
         const apiUrl = `https://asia-southeast1-tanyb-fe4bf.cloudfunctions.net/getProjectStatusByToken?token=${token}`;
 
         const response = await fetch(apiUrl);

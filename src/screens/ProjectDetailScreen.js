@@ -794,7 +794,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                     return;
                   }
 
-                  const trackingUrl = `https://thp-tracker.netlify.app/track?token=${project.publicTrackingToken}`;
+                  const trackingUrl = `https://tanhoaphat.netlify.app/track?token=${project.publicTrackingToken}`;
 
                   await Share.share({
                     message: `Theo dõi tiến độ dự án "${project.name}" của THP:\n\n${trackingUrl}\n\nLink này cho phép bạn xem tiến độ dự án theo thời gian thực mà không cần đăng nhập.`,
