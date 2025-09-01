@@ -24,6 +24,7 @@ import {
   getAttendanceStatus,
 } from '../api/attendanceService';
 import { useAuth } from '../contexts/AuthContext';
+import WorkerFeaturesMenu from '../components/WorkerFeaturesMenu';
 
 const HomeScreen = ({ navigation }) => {
   const { theme, isDarkMode } = useTheme();
@@ -36,14 +37,19 @@ const HomeScreen = ({ navigation }) => {
   const [attendance, setAttendance] = useState(null);
   const [attLoading, setAttLoading] = useState(true);
 
-  const ROLE_CAN_ATTEND = ['ke_toan', 'cong_nhan'];
+  const ROLE_CAN_ATTEND = ['ke_toan', 'cong_nhan', 'ky_su'];
 
   const canUseAttendance = ROLE_CAN_ATTEND.includes(
     (user?.role || '').toLowerCase()
   );
 
-  // Kiểm tra role công nhân để hiển thị các chức năng đặc biệt
+  // Kiểm tra role để hiển thị các chức năng đặc biệt
   const isWorker = (user?.role || '').toLowerCase() === 'cong_nhan';
+  const isEngineer = (user?.role || '').toLowerCase() === 'ky_su';
+  const isAccountant = (user?.role || '').toLowerCase() === 'ke_toan';
+
+  // Các role có thể sử dụng chức năng chấm công, nghỉ phép, ứng lương
+  const canUseWorkerFeatures = isWorker || isEngineer || isAccountant;
 
   const loadAttendance = async () => {
     if (!user?.uid || !canUseAttendance) {
@@ -211,7 +217,14 @@ const HomeScreen = ({ navigation }) => {
                 marginBottom: 8,
               }}
             >
-              Chấm Công
+              Chấm Công -{' '}
+              {isWorker
+                ? 'Công nhân'
+                : isEngineer
+                ? 'Kỹ sư'
+                : isAccountant
+                ? 'Kế toán'
+                : 'Nhân viên'}
             </Text>
             {user?.role === 'ke_toan' ? (
               <TouchableOpacity
@@ -228,6 +241,101 @@ const HomeScreen = ({ navigation }) => {
                   Xem Bảng Chấm Công
                 </Text>
               </TouchableOpacity>
+            ) : user?.role === 'ky_su' ? (
+              <>
+                {attLoading ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : (
+                  <>
+                    {(() => {
+                      const status = getAttendanceStatus(attendance);
+                      if (status === 'none') {
+                        return (
+                          <TouchableOpacity
+                            style={getAttBtnStyle(theme)}
+                            onPress={handleClockIn}
+                          >
+                            <Ionicons
+                              name="log-in-outline"
+                              size={20}
+                              color="#fff"
+                              style={{ marginRight: 6 }}
+                            />
+                            <Text style={{ color: '#fff', fontWeight: '600' }}>
+                              Chấm Công Vào
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      }
+                      if (status === 'clocked_in') {
+                        return (
+                          <>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 8 }}
+                            >
+                              Vào lúc:{' '}
+                              {attendance.clockIn.toDate().toLocaleTimeString()}
+                            </Text>
+                            <TouchableOpacity
+                              style={getAttBtnStyle(theme)}
+                              onPress={handleClockOut}
+                            >
+                              <Ionicons
+                                name="log-out-outline"
+                                size={20}
+                                color="#fff"
+                                style={{ marginRight: 6 }}
+                              />
+                              <Text
+                                style={{ color: '#fff', fontWeight: '600' }}
+                              >
+                                Chấm Công Ra
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        );
+                      }
+                      if (status === 'clocked_out') {
+                        return (
+                          <>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 4 }}
+                            >
+                              Vào lúc:{' '}
+                              {attendance.clockIn.toDate().toLocaleTimeString()}
+                            </Text>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 8 }}
+                            >
+                              Ra lúc:{' '}
+                              {attendance.clockOut
+                                .toDate()
+                                .toLocaleTimeString()}
+                            </Text>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 8 }}
+                            >
+                              Tăng ca: {attendance.overtime || 0} giờ
+                            </Text>
+                            <View style={{ flexDirection: 'row' }}>
+                              {[1, 2, 3].map((h) => (
+                                <TouchableOpacity
+                                  key={h}
+                                  style={getOvertimeBtnStyle(theme)}
+                                  onPress={() => handleAddOvertime(h)}
+                                >
+                                  <Text style={{ color: '#fff' }}>+{h}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          </>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </>
+                )}
+              </>
             ) : (
               <>
                 {attLoading ? (
@@ -327,88 +435,12 @@ const HomeScreen = ({ navigation }) => {
         </View>
       )}
 
-      {/* Menu chức năng cho công nhân */}
-      {isWorker && (
-        <View style={{ paddingHorizontal: 16, marginBottom: 20 }}>
-          <Text
-            style={{
-              fontSize: 18,
-              fontWeight: 'bold',
-              color: theme.text,
-              marginBottom: 16,
-            }}
-          >
-            Chức năng công nhân
-          </Text>
-
-          <View style={styles.workerMenuGrid}>
-            <TouchableOpacity
-              style={[
-                styles.workerMenuCard,
-                { backgroundColor: theme.card, borderColor: theme.border },
-              ]}
-              onPress={() => navigation.navigate('WorkerAttendance')}
-            >
-              <View
-                style={[styles.workerMenuIcon, { backgroundColor: '#4CAF50' }]}
-              >
-                <Ionicons name="time-outline" size={24} color="#fff" />
-              </View>
-              <Text style={[styles.workerMenuText, { color: theme.text }]}>
-                Xem chấm công
-              </Text>
-              <Text
-                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
-              >
-                Xem lịch sử và thống kê
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.workerMenuCard,
-                { backgroundColor: theme.card, borderColor: theme.border },
-              ]}
-              onPress={() => navigation.navigate('LeaveRequest')}
-            >
-              <View
-                style={[styles.workerMenuIcon, { backgroundColor: '#FF9800' }]}
-              >
-                <Ionicons name="calendar-outline" size={24} color="#fff" />
-              </View>
-              <Text style={[styles.workerMenuText, { color: theme.text }]}>
-                Xin nghỉ phép
-              </Text>
-              <Text
-                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
-              >
-                Đăng ký và theo dõi
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.workerMenuCard,
-                { backgroundColor: theme.card, borderColor: theme.border },
-              ]}
-              onPress={() => navigation.navigate('AdvanceSalary')}
-            >
-              <View
-                style={[styles.workerMenuIcon, { backgroundColor: '#2196F3' }]}
-              >
-                <Ionicons name="cash-outline" size={24} color="#fff" />
-              </View>
-              <Text style={[styles.workerMenuText, { color: theme.text }]}>
-                Xin ứng lương
-              </Text>
-              <Text
-                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
-              >
-                Yêu cầu và theo dõi
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+      {/* Menu chức năng cho công nhân, kỹ sư, kế toán */}
+      {canUseWorkerFeatures && (
+        <WorkerFeaturesMenu
+          userRole={user?.role}
+          onNavigate={(screen) => navigation.navigate(screen)}
+        />
       )}
 
       {loading ? (
@@ -782,6 +814,51 @@ const HomeScreen = ({ navigation }) => {
             <Ionicons name="chevron-forward" size={20} color="#999" />
           </TouchableOpacity>
 
+          {/* Quản lý lương - Chỉ hiển thị cho kế toán */}
+          {isAccountant && (
+            <>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => navigation.navigate('FixedFeesManagement')}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: '#9C27B0' }]}>
+                  <Ionicons name="settings-outline" size={24} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuText}>Quản lý phí cố định</Text>
+                  <Text
+                    style={[styles.menuDescription, { color: theme.textMuted }]}
+                  >
+                    Cài đặt BHXH, phụ cấp, khấu trừ cố định
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#999" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => navigation.navigate('SalarySlipCreation')}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: '#4CAF50' }]}>
+                  <Ionicons
+                    name="document-text-outline"
+                    size={24}
+                    color="#fff"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuText}>Tạo phiếu lương</Text>
+                  <Text
+                    style={[styles.menuDescription, { color: theme.textMuted }]}
+                  >
+                    Tạo và xuất phiếu lương Excel vào Google Drive
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#999" />
+              </TouchableOpacity>
+            </>
+          )}
+
           {/* Test Role - Hiển thị role hiện tại */}
           <TouchableOpacity
             style={styles.menuItem}
@@ -1102,44 +1179,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontWeight: 'bold',
     textAlign: 'center',
-  },
-  // Styles cho menu chức năng công nhân
-  workerMenuGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  workerMenuCard: {
-    width: '48%',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  workerMenuIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  workerMenuText: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  workerMenuDesc: {
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 16,
   },
 });
 

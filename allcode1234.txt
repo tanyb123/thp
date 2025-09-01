@@ -665,6 +665,11 @@ import {
   setDoc,
   updateDoc,
   serverTimestamp,
+  collection,
+  query,
+  where,
+  getDocs,
+  orderBy,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 
@@ -830,6 +835,114 @@ export const getAttendanceStatus = (attendanceDoc) => {
   if (attendanceDoc.clockIn && attendanceDoc.clockOut) return 'clocked_out';
   return 'none';
 };
+/**
+ * Get attendance history for a user by month and year
+ * @param {string} userId
+ * @param {number} year
+ * @param {number} month (1-12)
+ * @returns {Array} Array of attendance records
+ */
+export const getAttendanceHistory = async (userId, year, month) => {
+  try {
+    // Tạo range date cho tháng
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 0); // Ngày cuối cùng của tháng
+
+    // Format dates để tìm documents
+    const startDateStr = formatDate(startDate);
+    const endDateStr = formatDate(endDate);
+
+    // Tạo query để lấy tất cả attendance records trong tháng
+    const attendanceRef = collection(db, 'attendance');
+
+    // Lấy tất cả documents và filter theo date range
+    const querySnapshot = await getDocs(attendanceRef);
+    const attendanceRecords = [];
+
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+
+      // Kiểm tra xem document có thuộc user này không
+      if (data.userId === userId || doc.id.startsWith(userId + '_')) {
+        // Trích xuất ngày từ document ID (format: userId_YYYY-MM-DD)
+        let docDate = data.date;
+        if (!docDate && doc.id.includes('_')) {
+          const datePart = doc.id.split('_')[1];
+          if (datePart && datePart.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            docDate = datePart;
+          }
+        }
+
+        // Kiểm tra xem document có thuộc tháng cần tìm không
+        if (docDate && docDate >= startDateStr && docDate <= endDateStr) {
+          attendanceRecords.push({
+            id: doc.id,
+            ...data,
+            clockIn: data.clockIn,
+            clockOut: data.clockOut,
+            overtime: data.overtime || 0,
+            date: docDate,
+          });
+        }
+      }
+    });
+
+    // Sắp xếp theo ngày
+    attendanceRecords.sort((a, b) => a.date.localeCompare(b.date));
+
+    return attendanceRecords;
+  } catch (error) {
+    console.error('Error getting attendance history:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get attendance summary for a user by month and year
+ * @param {string} userId
+ * @param {number} year
+ * @param {number} month (1-12)
+ * @returns {Object} Summary object with total days, hours, overtime
+ */
+export const getAttendanceSummary = async (userId, year, month) => {
+  try {
+    const history = await getAttendanceHistory(userId, year, month);
+
+    const summary = {
+      totalDays: history.length,
+      totalHours: 0,
+      totalOvertime: 0,
+      averageHoursPerDay: 0,
+    };
+
+    history.forEach((record) => {
+      if (record.clockIn && record.clockOut) {
+        const startTime = record.clockIn.toDate
+          ? record.clockIn.toDate()
+          : new Date(record.clockIn);
+        const endTime = record.clockOut.toDate
+          ? record.clockOut.toDate()
+          : new Date(record.clockOut);
+        const hours = (endTime - startTime) / (1000 * 60 * 60);
+        summary.totalHours += hours;
+      }
+
+      if (record.overtime) {
+        summary.totalOvertime += record.overtime;
+      }
+    });
+
+    if (summary.totalDays > 0) {
+      summary.averageHoursPerDay = summary.totalHours / summary.totalDays;
+    }
+
+    return summary;
+  } catch (error) {
+    console.error('Error getting attendance summary:', error);
+    throw error;
+  }
+};
+
 
 
 --- END: src\api\attendanceService.js ---
@@ -5070,6 +5183,150 @@ export const getQuotationById = async (projectId, quotationId) => {
 --- END: src\api\quotationService.js ---
 
 
+--- START: src\api\requestService.js ---
+// src/api/requestService.js
+import {
+  collection,
+  addDoc,
+  serverTimestamp,
+  query,
+  where,
+  getDocs,
+  orderBy,
+  updateDoc,
+  doc,
+} from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
+
+// --- Leave Requests ---
+export const submitLeaveRequest = async ({
+  userId,
+  userName,
+  type,
+  startDate,
+  endDate,
+  reason,
+}) => {
+  const colRef = collection(db, 'leave_requests');
+  const payload = {
+    userId,
+    userName: userName || '',
+    type,
+    startDate,
+    endDate,
+    reason,
+    status: 'pending',
+    submittedAt: serverTimestamp(),
+  };
+  const docRef = await addDoc(colRef, payload);
+  return { id: docRef.id, ...payload };
+};
+
+export const fetchPendingLeaveRequests = async () => {
+  const colRef = collection(db, 'leave_requests');
+  const q = query(
+    colRef,
+    where('status', '==', 'pending'),
+    orderBy('submittedAt', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({
+    id: d.id,
+    ...d.data(),
+    requestType: 'leave',
+  }));
+};
+
+export const fetchLeaveRequestsByUser = async (userId) => {
+  const colRef = collection(db, 'leave_requests');
+  const q = query(colRef, where('userId', '==', userId));
+  const snap = await getDocs(q);
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  // Sort by submittedAt desc on client to avoid composite index requirement
+  items.sort((a, b) => {
+    const ta = a.submittedAt?.toMillis ? a.submittedAt.toMillis() : 0;
+    const tb = b.submittedAt?.toMillis ? b.submittedAt.toMillis() : 0;
+    return tb - ta;
+  });
+  return items;
+};
+
+export const updateLeaveRequestStatus = async (
+  id,
+  status,
+  managerNote = ''
+) => {
+  const ref = doc(db, 'leave_requests', id);
+  await updateDoc(ref, { status, managerNote, decidedAt: serverTimestamp() });
+};
+
+// --- Advance Salary Requests ---
+export const submitAdvanceSalaryRequest = async ({
+  userId,
+  userName,
+  amount,
+  reason,
+  requestDate,
+  expectedPaymentDate,
+}) => {
+  const colRef = collection(db, 'advance_requests');
+  const payload = {
+    userId,
+    userName: userName || '',
+    amount,
+    reason,
+    requestDate,
+    expectedPaymentDate,
+    status: 'pending',
+    submittedAt: serverTimestamp(),
+  };
+  const docRef = await addDoc(colRef, payload);
+  return { id: docRef.id, ...payload };
+};
+
+export const fetchPendingAdvanceRequests = async () => {
+  const colRef = collection(db, 'advance_requests');
+  const q = query(
+    colRef,
+    where('status', '==', 'pending'),
+    orderBy('submittedAt', 'desc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({
+    id: d.id,
+    ...d.data(),
+    requestType: 'advance',
+  }));
+};
+
+export const updateAdvanceRequestStatus = async (
+  id,
+  status,
+  managerNote = ''
+) => {
+  const ref = doc(db, 'advance_requests', id);
+  await updateDoc(ref, { status, managerNote, decidedAt: serverTimestamp() });
+};
+
+export const fetchAdvanceRequestsByUser = async (userId) => {
+  const colRef = collection(db, 'advance_requests');
+  const q = query(colRef, where('userId', '==', userId));
+  const snap = await getDocs(q);
+  const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  items.sort((a, b) => {
+    const ta = a.submittedAt?.toMillis ? a.submittedAt.toMillis() : 0;
+    const tb = b.submittedAt?.toMillis ? b.submittedAt.toMillis() : 0;
+    return tb - ta;
+  });
+  return items;
+};
+
+
+
+
+--- END: src\api\requestService.js ---
+
+
 --- START: src\api\supplierService.js ---
 // src/api/supplierService.js
 import { db } from '../config/firebaseConfig';
@@ -7308,6 +7565,21 @@ const styles = StyleSheet.create({
 });
 
 export default CustomIconDebug;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -10418,6 +10690,21 @@ const styles = StyleSheet.create({
 });
 
 export default TestComponent;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -15638,7 +15925,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import messaging from '@react-native-firebase/messaging';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { collection, where, query, onSnapshot } from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
 
 // Import các màn hình
 import LoginScreen from '../screens/LoginScreen';
@@ -15725,6 +16014,11 @@ import WorkAllocationScreen from '../screens/WorkAllocationScreen';
 
 // Import AI Chat screen
 import AIChatScreen from '../screens/AIChatScreen';
+
+// Import Worker screens
+import WorkerAttendanceScreen from '../screens/WorkerAttendanceScreen';
+import LeaveRequestScreen from '../screens/LeaveRequestScreen';
+import AdvanceSalaryScreen from '../screens/AdvanceSalaryScreen';
 
 // Import Project Discussion screen
 import ProjectDiscussionScreen from '../screens/ProjectDiscussionScreen';
@@ -15969,6 +16263,8 @@ const Tab = createBottomTabNavigator();
 const MainTabNavigator = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const [pendingLeaveCount, setPendingLeaveCount] = useState(0);
+  const [pendingAdvanceCount, setPendingAdvanceCount] = useState(0);
 
   // Check if user has director role - support both English and Vietnamese role names
   const isDirector = ['director', 'Giám đốc', 'giam_doc'].includes(user?.role);
@@ -15987,6 +16283,28 @@ const MainTabNavigator = () => {
     'Can Access Inventory:',
     canAccessInventory
   );
+
+  // Realtime badge for pending approval requests
+  useEffect(() => {
+    const leaveQ = query(
+      collection(db, 'leave_requests'),
+      where('status', '==', 'pending')
+    );
+    const advQ = query(
+      collection(db, 'advance_requests'),
+      where('status', '==', 'pending')
+    );
+    const un1 = onSnapshot(leaveQ, (snap) => {
+      setPendingLeaveCount(snap.size || 0);
+    });
+    const un2 = onSnapshot(advQ, (snap) => {
+      setPendingAdvanceCount(snap.size || 0);
+    });
+    return () => {
+      un1();
+      un2();
+    };
+  }, []);
 
   return (
     <Tab.Navigator
@@ -16064,11 +16382,28 @@ const MainTabNavigator = () => {
           headerShown: false,
         }}
       />
-      {!canManageAttendance && (
+      {canManageAttendance ? (
+        <Tab.Screen
+          name="Attendance"
+          component={AttendanceScreen}
+          options={{ title: 'Chấm công', headerShown: false }}
+        />
+      ) : (
         <Tab.Screen
           name="Tasks"
           component={TaskReportScreen}
-          options={{ title: 'Báo cáo', headerShown: false }}
+          options={{
+            title: 'Báo cáo',
+            headerShown: false,
+            tabBarBadge:
+              pendingLeaveCount + pendingAdvanceCount > 0
+                ? pendingLeaveCount + pendingAdvanceCount
+                : undefined,
+            tabBarBadgeStyle: {
+              backgroundColor: '#E53935',
+              color: '#fff',
+            },
+          }}
         />
       )}
 
@@ -16418,6 +16753,23 @@ const AppNavigator = () => {
               component={CustomIconDebug}
               options={{ headerShown: false }}
             />
+
+            {/* Worker Screens */}
+            <Stack.Screen
+              name="WorkerAttendance"
+              component={WorkerAttendanceScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="LeaveRequest"
+              component={LeaveRequestScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="AdvanceSalary"
+              component={AdvanceSalaryScreen}
+              options={{ headerShown: false }}
+            />
           </>
         ) : (
           // Người dùng chưa đăng nhập
@@ -16453,6 +16805,7 @@ import {
   UIManager,
   Platform,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
@@ -16728,6 +17081,34 @@ const AccountScreen = ({ navigation }) => {
             title="Chuyển tài khoản Google"
             onPress={switchGoogleAccount}
             color="#4285F4"
+          />
+          <SettingItem
+            icon="location-outline"
+            title="Địa chỉ Xưởng ngoài (Xưởng 1)"
+            onPress={async () => {
+              await Clipboard.setStringAsync(
+                'https://www.google.com/maps/place/X%C6%B0%E1%BB%9Fng+CK+MT+-+T%C3%A2n+H%C3%B2a+Ph%C3%A1t+1/@10.7782508,106.5291403,12z/data=!4m10!1m2!2m1!1zY8ahIGtow60gdMOibiBow7JhIHBow6F0!3m6!1s0x3175290ffa823bfb:0x23c923d5a8d1a031!8m2!3d10.8614882!4d106.6831661!15sChhjxqEga2jDrSB0w6JuIGjDsmEgcGjDoXSSARVtZWNoYW5pY2FsX2NvbnRyYWN0b3KqAVAKDS9nLzExc2s2djkwODYQATIfEAEiG23AjuWtNDJVRipKVSAA9Rbpkjo81fIfZYNOsDIcEAIiGGPGoSBraMOtIHTDom4gaMOyYSBwaMOhdOABAA!16s%2Fg%2F11h6gd6mg4?entry=ttu&g_ep=EgoyMDI1MDgxOS4wIKXMDSoASAFQAw%3D%3D'
+              );
+              Alert.alert(
+                'Đã sao chép',
+                'Liên kết địa chỉ Xưởng 1 đã được copy'
+              );
+            }}
+            color={theme.primary}
+          />
+          <SettingItem
+            icon="location-outline"
+            title="Địa chỉ Xưởng trong (Xưởng 2)"
+            onPress={async () => {
+              await Clipboard.setStringAsync(
+                'https://www.google.com/maps/place/102+%C4%90.+Th%E1%BA%A1nh+L%E1%BB%99c+15,+Th%E1%BA%A1nh+L%E1%BB%99c,+Qu%E1%BA%ADn+12,+H%E1%BB%93+Ch%C3%AD+Minh,+Vi%E1%BB%87t+Nam/@10.8675172,106.6876414,17z/data=!3m1!4b1!4m5!3m4!1s0x3175282515d55d23:0xdf8406f9ca9fa24a!8m2!3d10.8675119!4d106.6902163?entry=ttu&g_ep=EgoyMDI1MDgxOS4wIKXMDSoASAFQAw%3D%3D'
+              );
+              Alert.alert(
+                'Đã sao chép',
+                'Liên kết địa chỉ Xưởng 2 đã được copy'
+              );
+            }}
+            color={theme.primary}
           />
           {(userRole === 'giam_doc' || userRole === 'admin') && (
             <>
@@ -20001,6 +20382,838 @@ export default AddSupplierScreen;
 --- END: src\screens\AddSupplierScreen.js ---
 
 
+--- START: src\screens\AdvanceSalaryScreen.js ---
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+  TextInput,
+  Modal,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  submitAdvanceSalaryRequest,
+  fetchAdvanceRequestsByUser,
+} from '../api/requestService';
+
+const AdvanceSalaryScreen = ({ navigation }) => {
+  const { theme, isDarkMode } = useTheme();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [advanceRequests, setAdvanceRequests] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+
+  // Form state
+  const [amount, setAmount] = useState('');
+  const [reason, setReason] = useState('');
+  const [requestDate, setRequestDate] = useState(new Date());
+  const [expectedPaymentDate, setExpectedPaymentDate] = useState(new Date());
+
+  useEffect(() => {
+    loadAdvanceRequests();
+  }, []);
+
+  const loadAdvanceRequests = async () => {
+    try {
+      setLoading(true);
+      if (!user?.uid) return;
+      const requests = await fetchAdvanceRequestsByUser(user.uid);
+      setAdvanceRequests(requests);
+    } catch (error) {
+      console.error('Lỗi khi tải đơn xin ứng lương:', error);
+      Alert.alert('Lỗi', 'Không thể tải danh sách đơn xin ứng lương');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'pending':
+        return 'Chờ duyệt';
+      case 'approved':
+        return 'Đã duyệt';
+      case 'rejected':
+        return 'Từ chối';
+      default:
+        return 'Không xác định';
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'pending':
+        return '#FF9800';
+      case 'approved':
+        return '#4CAF50';
+      case 'rejected':
+        return '#F44336';
+      default:
+        return '#9E9E9E';
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) return '';
+    const d = date.toDate ? date.toDate() : new Date(date);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('vi-VN');
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+    }).format(amount);
+  };
+
+  const handleSubmitAdvanceRequest = async () => {
+    if (!amount.trim() || isNaN(parseFloat(amount))) {
+      Alert.alert('Lỗi', 'Vui lòng nhập số tiền hợp lệ');
+      return;
+    }
+
+    if (!reason.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập lý do ứng lương');
+      return;
+    }
+
+    const amountValue = parseFloat(amount);
+    if (amountValue <= 0) {
+      Alert.alert('Lỗi', 'Số tiền phải lớn hơn 0');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await submitAdvanceSalaryRequest({
+        userId: user.uid,
+        userName: user?.displayName || user?.email || '',
+        amount: amountValue,
+        reason,
+        requestDate,
+        expectedPaymentDate,
+      });
+
+      Alert.alert(
+        'Thành công',
+        'Đơn xin ứng lương đã được gửi và đang chờ duyệt'
+      );
+      setShowForm(false);
+      resetForm();
+      await loadAdvanceRequests();
+    } catch (error) {
+      console.error('Lỗi khi gửi đơn xin ứng lương:', error);
+      Alert.alert('Lỗi', 'Không thể gửi đơn xin ứng lương');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setAmount('');
+    setReason('');
+    setRequestDate(new Date());
+    setExpectedPaymentDate(new Date());
+  };
+
+  const getTotalRequested = () => {
+    return advanceRequests.reduce((total, request) => {
+      return total + request.amount;
+    }, 0);
+  };
+
+  const getTotalApproved = () => {
+    return advanceRequests
+      .filter((request) => request.status === 'approved')
+      .reduce((total, request) => {
+        return total + (request.approvedAmount || request.amount);
+      }, 0);
+  };
+
+  const getTotalPending = () => {
+    return advanceRequests
+      .filter((request) => request.status === 'pending')
+      .reduce((total, request) => {
+        return total + request.amount;
+      }, 0);
+  };
+
+  if (loading && advanceRequests.length === 0) {
+    return (
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
+        <StatusBar
+          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+          backgroundColor={theme.background}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+            Đang tải dữ liệu...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
+
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: theme.card }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>
+          Xin Ứng Lương
+        </Text>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => setShowForm(true)}
+        >
+          <Ionicons name="add" size={24} color={theme.primary} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Thống kê */}
+        <View
+          style={[
+            styles.statsCard,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <Text style={[styles.statsTitle, { color: theme.text }]}>
+            Thống kê ứng lương
+          </Text>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: theme.primary }]}>
+                {formatCurrency(getTotalApproved())}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Đã duyệt
+              </Text>
+            </View>
+
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: '#FF9800' }]}>
+                {formatCurrency(getTotalPending())}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Chờ duyệt
+              </Text>
+            </View>
+
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: '#2196F3' }]}>
+                {formatCurrency(getTotalRequested())}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Tổng yêu cầu
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Danh sách đơn xin ứng lương */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            Lịch sử đơn xin ứng lương
+          </Text>
+
+          {advanceRequests.length > 0 ? (
+            advanceRequests.map((request) => (
+              <View
+                key={request.id}
+                style={[
+                  styles.requestCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <View style={styles.requestHeader}>
+                  <View style={styles.amountInfo}>
+                    <Ionicons
+                      name="cash-outline"
+                      size={20}
+                      color={theme.primary}
+                    />
+                    <Text style={[styles.amountText, { color: theme.text }]}>
+                      {formatCurrency(request.amount)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: getStatusColor(request.status) },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>
+                      {getStatusLabel(request.status)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.requestDetails}>
+                  <View style={styles.reasonRow}>
+                    <Ionicons
+                      name="chatbubble-outline"
+                      size={16}
+                      color={theme.textSecondary}
+                    />
+                    <Text style={[styles.reasonText, { color: theme.text }]}>
+                      {request.reason}
+                    </Text>
+                  </View>
+
+                  <View style={styles.dateRow}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={16}
+                      color={theme.textSecondary}
+                    />
+                    <Text
+                      style={[styles.dateText, { color: theme.textSecondary }]}
+                    >
+                      Ngày yêu cầu: {formatDate(request.requestDate)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.dateRow}>
+                    <Ionicons
+                      name="time-outline"
+                      size={16}
+                      color={theme.textSecondary}
+                    />
+                    <Text
+                      style={[styles.dateText, { color: theme.textSecondary }]}
+                    >
+                      Dự kiến chi: {formatDate(request.expectedPaymentDate)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.submittedRow}>
+                    <Ionicons
+                      name="time-outline"
+                      size={16}
+                      color={theme.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.submittedText,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Gửi lúc: {formatDate(request.submittedAt)}
+                    </Text>
+                  </View>
+
+                  {request.status === 'approved' && request.approvedAmount && (
+                    <View style={styles.approvedRow}>
+                      <Ionicons
+                        name="checkmark-circle-outline"
+                        size={16}
+                        color={theme.primary}
+                      />
+                      <Text
+                        style={[styles.approvedText, { color: theme.primary }]}
+                      >
+                        Số tiền được duyệt:{' '}
+                        {formatCurrency(request.approvedAmount)}
+                      </Text>
+                    </View>
+                  )}
+
+                  {request.status === 'rejected' && request.rejectionReason && (
+                    <View style={styles.rejectedRow}>
+                      <Ionicons
+                        name="close-circle-outline"
+                        size={16}
+                        color={theme.error}
+                      />
+                      <Text
+                        style={[styles.rejectedText, { color: theme.error }]}
+                      >
+                        Lý do từ chối: {request.rejectionReason}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            ))
+          ) : (
+            <View
+              style={[
+                styles.emptyCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+            >
+              <Ionicons name="cash-outline" size={48} color={theme.textMuted} />
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
+                Chưa có đơn xin ứng lương nào
+              </Text>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Modal form xin ứng lương */}
+      <Modal
+        visible={showForm}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[styles.modalContent, { backgroundColor: theme.background }]}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>
+                Đăng ký ứng lương
+              </Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowForm(false)}
+              >
+                <Ionicons name="close" size={24} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.formScroll}>
+              {/* Số tiền */}
+              <View style={styles.formSection}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Số tiền ứng lương (VND)
+                </Text>
+                <TextInput
+                  style={[
+                    styles.amountInput,
+                    {
+                      backgroundColor: theme.card,
+                      borderColor: theme.border,
+                      color: theme.text,
+                    },
+                  ]}
+                  placeholder="Nhập số tiền..."
+                  placeholderTextColor={theme.textMuted}
+                  value={amount}
+                  onChangeText={setAmount}
+                  keyboardType="numeric"
+                />
+                {amount && !isNaN(parseFloat(amount)) && (
+                  <Text
+                    style={[
+                      styles.amountPreview,
+                      { color: theme.textSecondary },
+                    ]}
+                  >
+                    {formatCurrency(parseFloat(amount))}
+                  </Text>
+                )}
+              </View>
+
+              {/* Lý do */}
+              <View style={styles.formSection}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Lý do ứng lương
+                </Text>
+                <TextInput
+                  style={[
+                    styles.reasonInput,
+                    {
+                      backgroundColor: theme.card,
+                      borderColor: theme.border,
+                      color: theme.text,
+                    },
+                  ]}
+                  placeholder="Nhập lý do ứng lương..."
+                  placeholderTextColor={theme.textMuted}
+                  value={reason}
+                  onChangeText={setReason}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Thông tin tổng quan */}
+              <View
+                style={[
+                  styles.summaryInfo,
+                  { backgroundColor: theme.cardBackground },
+                ]}
+              >
+                <Text style={[styles.summaryInfoTitle, { color: theme.text }]}>
+                  Tổng quan
+                </Text>
+                <Text
+                  style={[
+                    styles.summaryInfoText,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Số tiền yêu cầu:{' '}
+                  {amount ? formatCurrency(parseFloat(amount)) : '0 VND'}
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Nút gửi */}
+            <View style={styles.formActions}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => setShowForm(false)}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.text }]}>
+                  Hủy
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  { backgroundColor: theme.primary },
+                ]}
+                onPress={handleSubmitAdvanceRequest}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Gửi đơn</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  addButton: {
+    padding: 4,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  statsCard: {
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  statsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  requestCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  requestHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  amountInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  amountText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'white',
+  },
+  requestDetails: {
+    gap: 8,
+  },
+  reasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  reasonText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateText: {
+    fontSize: 14,
+  },
+  submittedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  submittedText: {
+    fontSize: 12,
+  },
+  approvedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  approvedText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  rejectedRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  rejectedText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  emptyCard: {
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  emptyText: {
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    minHeight: '80%',
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  formScroll: {
+    padding: 20,
+  },
+  formSection: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  amountInput: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  amountPreview: {
+    fontSize: 14,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  reasonInput: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 16,
+    minHeight: 100,
+  },
+  dateDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 12,
+  },
+  dateDisplayText: {
+    fontSize: 16,
+  },
+  summaryInfo: {
+    padding: 16,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  summaryInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  summaryInfoText: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  formActions: {
+    flexDirection: 'row',
+    padding: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  submitButton: {
+    flex: 2,
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+  },
+});
+
+export default AdvanceSalaryScreen;
+
+
+
+
+--- END: src\screens\AdvanceSalaryScreen.js ---
+
+
 --- START: src\screens\AIChatScreen.js ---
 import React, { useState, useEffect } from 'react';
 import {
@@ -20745,6 +21958,7 @@ const AttendanceScreen = ({ navigation }) => {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
+  const [savingTarget, setSavingTarget] = useState(null); // 'present' | 'overtime' | 'export' | null
   const [attMap, setAttMap] = useState({}); // uid -> attendance doc
   const [showAddModal, setShowAddModal] = useState(false);
   const [newName, setNewName] = useState('');
@@ -20831,6 +22045,7 @@ const AttendanceScreen = ({ navigation }) => {
   const togglePresent = async (emp) => {
     try {
       setSavingId(emp.uid);
+      setSavingTarget('present');
       const current = attMap[emp.uid]?.present || false;
       const updated = await setPresence(emp.uid, !current, selectedDate);
       setAttMap((prev) => ({ ...prev, [emp.uid]: updated }));
@@ -20839,6 +22054,7 @@ const AttendanceScreen = ({ navigation }) => {
       Alert.alert('Lỗi', 'Không thể cập nhật');
     } finally {
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -20869,7 +22085,8 @@ const AttendanceScreen = ({ navigation }) => {
     try {
       // Use a temporary state to show loading indicators on each row
       const tempIds = employees.map((e) => e.uid);
-      setSavingId('all'); // Special marker for "all saving"
+      setSavingId('present_all'); // Special marker for bulk present
+      setSavingTarget('present');
       const promises = employees.map((emp) =>
         setPresence(emp.uid, true, selectedDate)
       );
@@ -20891,17 +22108,20 @@ const AttendanceScreen = ({ navigation }) => {
       });
       setAttMap(newAttMap);
       setSavingId(null);
+      setSavingTarget(null);
     } catch (err) {
       console.error(err);
       Alert.alert('Lỗi', 'Không thể cập nhật tất cả');
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
   // Add markAllOvertime function
   const markAllOvertime = async () => {
     try {
-      setSavingId('all');
+      setSavingId('overtime_all');
+      setSavingTarget('overtime');
       const promises = employees.map((emp) =>
         addOvertime(emp.uid, DEFAULT_OVERTIME_HOURS, selectedDate)
       );
@@ -20923,10 +22143,12 @@ const AttendanceScreen = ({ navigation }) => {
       });
       setAttMap(newAttMap);
       setSavingId(null);
+      setSavingTarget(null);
     } catch (err) {
       console.error(err);
       Alert.alert('Lỗi', 'Không thể cập nhật tăng ca');
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -20934,6 +22156,7 @@ const AttendanceScreen = ({ navigation }) => {
   const toggleOvertime = async (emp) => {
     try {
       setSavingId(emp.uid);
+      setSavingTarget('overtime');
       const current = attMap[emp.uid]?.overtime || 0;
       const newValue = current > 0 ? 0 : DEFAULT_OVERTIME_HOURS;
       const updated = await addOvertime(emp.uid, newValue, selectedDate);
@@ -20943,6 +22166,7 @@ const AttendanceScreen = ({ navigation }) => {
       Alert.alert('Lỗi', 'Không thể cập nhật tăng ca');
     } finally {
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -20980,6 +22204,7 @@ const AttendanceScreen = ({ navigation }) => {
   const exportToExcel = async () => {
     try {
       setSavingId('export');
+      setSavingTarget('export');
 
       // Get current year and month from selectedDate
       const year = selectedDate.getFullYear();
@@ -21007,6 +22232,7 @@ const AttendanceScreen = ({ navigation }) => {
                 if (!accessToken) {
                   Alert.alert('Lỗi', 'Không thể lấy Google access token');
                   setSavingId(null);
+                  setSavingTarget(null);
                   return;
                 }
 
@@ -21037,16 +22263,24 @@ const AttendanceScreen = ({ navigation }) => {
                 Alert.alert('Lỗi', `Không thể xuất Excel: ${error.message}`);
               } finally {
                 setSavingId(null);
+                setSavingTarget(null);
               }
             },
           },
         ],
-        { cancelable: true, onDismiss: () => setSavingId(null) }
+        {
+          cancelable: true,
+          onDismiss: () => {
+            setSavingId(null);
+            setSavingTarget(null);
+          },
+        }
       );
     } catch (error) {
       console.error('Export Excel prepare error:', error);
       Alert.alert('Lỗi', 'Không thể chuẩn bị xuất Excel');
       setSavingId(null);
+      setSavingTarget(null);
     }
   };
 
@@ -21101,7 +22335,12 @@ const AttendanceScreen = ({ navigation }) => {
     const attendance = attMap[item.uid];
     const present = attendance?.present;
     const overtime = attendance?.overtime || 0;
-    const isSaving = savingId === item.uid || savingId === 'all';
+    const isSavingPresent =
+      (savingId === item.uid && savingTarget === 'present') ||
+      savingId === 'present_all';
+    const isSavingOvertime =
+      (savingId === item.uid && savingTarget === 'overtime') ||
+      savingId === 'overtime_all';
 
     return (
       <View
@@ -21144,10 +22383,10 @@ const AttendanceScreen = ({ navigation }) => {
         <View style={styles.attendanceActions}>
           <TouchableOpacity
             onPress={() => !isAccountant && togglePresent(item)}
-            disabled={isSaving || isAccountant}
+            disabled={isSavingPresent || isAccountant}
             style={styles.checkButton}
           >
-            {isSaving ? (
+            {isSavingPresent ? (
               <ActivityIndicator size="small" color={theme.primary} />
             ) : (
               <Ionicons
@@ -21161,10 +22400,10 @@ const AttendanceScreen = ({ navigation }) => {
           <View style={styles.overtimeActionContainer}>
             <TouchableOpacity
               onPress={() => !isAccountant && toggleOvertime(item)}
-              disabled={isSaving || isAccountant}
+              disabled={isSavingOvertime || isAccountant}
               style={styles.checkButtonOvertime}
             >
-              {isSaving ? (
+              {isSavingOvertime ? (
                 <ActivityIndicator
                   size="small"
                   color={theme.success || '#4CAF50'}
@@ -30832,6 +32071,9 @@ const FinalizeQuotationScreen = ({ route, navigation }) => {
     shareExcelQuotation,
     isLoading: isExcelLoading,
     excelUrl,
+    pdfUrl,
+    sharePdfQuotation,
+    isPdfLoading,
   } = useQuotationGenerator({
     projectId,
     customerData,
@@ -32075,11 +33317,14 @@ const HomeScreen = ({ navigation }) => {
   const [attendance, setAttendance] = useState(null);
   const [attLoading, setAttLoading] = useState(true);
 
-  const ROLE_CAN_ATTEND = ['ke_toan'];
+  const ROLE_CAN_ATTEND = ['ke_toan', 'cong_nhan'];
 
   const canUseAttendance = ROLE_CAN_ATTEND.includes(
     (user?.role || '').toLowerCase()
   );
+
+  // Kiểm tra role công nhân để hiển thị các chức năng đặc biệt
+  const isWorker = (user?.role || '').toLowerCase() === 'cong_nhan';
 
   const loadAttendance = async () => {
     if (!user?.uid || !canUseAttendance) {
@@ -32359,6 +33604,90 @@ const HomeScreen = ({ navigation }) => {
                 )}
               </>
             )}
+          </View>
+        </View>
+      )}
+
+      {/* Menu chức năng cho công nhân */}
+      {isWorker && (
+        <View style={{ paddingHorizontal: 16, marginBottom: 20 }}>
+          <Text
+            style={{
+              fontSize: 18,
+              fontWeight: 'bold',
+              color: theme.text,
+              marginBottom: 16,
+            }}
+          >
+            Chức năng công nhân
+          </Text>
+
+          <View style={styles.workerMenuGrid}>
+            <TouchableOpacity
+              style={[
+                styles.workerMenuCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+              onPress={() => navigation.navigate('WorkerAttendance')}
+            >
+              <View
+                style={[styles.workerMenuIcon, { backgroundColor: '#4CAF50' }]}
+              >
+                <Ionicons name="time-outline" size={24} color="#fff" />
+              </View>
+              <Text style={[styles.workerMenuText, { color: theme.text }]}>
+                Xem chấm công
+              </Text>
+              <Text
+                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
+              >
+                Xem lịch sử và thống kê
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.workerMenuCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+              onPress={() => navigation.navigate('LeaveRequest')}
+            >
+              <View
+                style={[styles.workerMenuIcon, { backgroundColor: '#FF9800' }]}
+              >
+                <Ionicons name="calendar-outline" size={24} color="#fff" />
+              </View>
+              <Text style={[styles.workerMenuText, { color: theme.text }]}>
+                Xin nghỉ phép
+              </Text>
+              <Text
+                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
+              >
+                Đăng ký và theo dõi
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.workerMenuCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+              onPress={() => navigation.navigate('AdvanceSalary')}
+            >
+              <View
+                style={[styles.workerMenuIcon, { backgroundColor: '#2196F3' }]}
+              >
+                <Ionicons name="cash-outline" size={24} color="#fff" />
+              </View>
+              <Text style={[styles.workerMenuText, { color: theme.text }]}>
+                Xin ứng lương
+              </Text>
+              <Text
+                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
+              >
+                Yêu cầu và theo dõi
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       )}
@@ -33054,6 +34383,44 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  // Styles cho menu chức năng công nhân
+  workerMenuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  workerMenuCard: {
+    width: '48%',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  workerMenuIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  workerMenuText: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  workerMenuDesc: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });
 
@@ -36576,6 +37943,918 @@ export default KioskScreen;
 
 
 --- END: src\screens\KioskScreen.js ---
+
+
+--- START: src\screens\LeaveRequestScreen.js ---
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+  TextInput,
+  Modal,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import {
+  submitLeaveRequest,
+  fetchLeaveRequestsByUser,
+} from '../api/requestService';
+
+const LeaveRequestScreen = ({ navigation }) => {
+  const { theme, isDarkMode } = useTheme();
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(false);
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+
+  // Form state
+  const [leaveType, setLeaveType] = useState('annual');
+  const [startDate, setStartDate] = useState(new Date());
+  const [endDate, setEndDate] = useState(new Date());
+  const [reason, setReason] = useState('');
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  useEffect(() => {
+    loadLeaveRequests();
+  }, []);
+
+  const loadLeaveRequests = async () => {
+    try {
+      setLoading(true);
+      if (!user?.uid) return;
+      const requests = await fetchLeaveRequestsByUser(user.uid);
+      setLeaveRequests(requests);
+    } catch (error) {
+      console.error('Lỗi khi tải đơn xin nghỉ:', error);
+      Alert.alert('Lỗi', 'Không thể tải danh sách đơn xin nghỉ');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getLeaveTypeLabel = (type) => {
+    switch (type) {
+      case 'annual':
+        return 'Nghỉ phép năm';
+      case 'sick':
+        return 'Nghỉ ốm';
+      case 'personal':
+        return 'Nghỉ việc riêng';
+      case 'maternity':
+        return 'Nghỉ thai sản';
+      default:
+        return 'Khác';
+    }
+  };
+
+  const getLeaveTypeIcon = (type) => {
+    switch (type) {
+      case 'annual':
+        return 'beach-outline';
+      case 'sick':
+        return 'medical-outline';
+      case 'personal':
+        return 'person-outline';
+      case 'maternity':
+        return 'heart-outline';
+      default:
+        return 'calendar-outline';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'pending':
+        return 'Chờ duyệt';
+      case 'approved':
+        return 'Đã duyệt';
+      case 'rejected':
+        return 'Từ chối';
+      default:
+        return 'Không xác định';
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'pending':
+        return '#FF9800';
+      case 'approved':
+        return '#4CAF50';
+      case 'rejected':
+        return '#F44336';
+      default:
+        return '#9E9E9E';
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) return '';
+    const d = date.toDate ? date.toDate() : new Date(date);
+    return d.toLocaleDateString('vi-VN');
+  };
+
+  const calculateDays = (start, end) => {
+    const s = start?.toDate ? start.toDate() : new Date(start);
+    const e = end?.toDate ? end.toDate() : new Date(end);
+    const diffTime = Math.abs(e - s);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays + 1; // Include both start and end date
+  };
+
+  const handleSubmitLeaveRequest = async () => {
+    if (!reason.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập lý do nghỉ phép');
+      return;
+    }
+
+    // Cho phép nghỉ 1 ngày: endDate có thể bằng startDate
+    if (endDate < startDate) {
+      Alert.alert('Lỗi', 'Ngày kết thúc không được trước ngày bắt đầu');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await submitLeaveRequest({
+        userId: user.uid,
+        userName: user?.displayName || user?.email || '',
+        type: leaveType,
+        startDate,
+        endDate,
+        reason,
+      });
+
+      Alert.alert(
+        'Thành công',
+        'Đơn xin nghỉ phép đã được gửi và đang chờ duyệt'
+      );
+      setShowForm(false);
+      resetForm();
+      await loadLeaveRequests();
+    } catch (error) {
+      console.error('Lỗi khi gửi đơn xin nghỉ:', error);
+      Alert.alert('Lỗi', 'Không thể gửi đơn xin nghỉ phép');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetForm = () => {
+    setLeaveType('annual');
+    setStartDate(new Date());
+    setEndDate(new Date());
+    setReason('');
+  };
+
+  const onStartDateChange = (event, selectedDate) => {
+    setShowStartPicker(false);
+    if (selectedDate) {
+      setStartDate(selectedDate);
+      // Nếu ngày bắt đầu sau ngày kết thúc hiện tại thì cập nhật ngày kết thúc = ngày bắt đầu (nghỉ 1 ngày)
+      if (selectedDate > endDate) {
+        setEndDate(selectedDate);
+      }
+    }
+  };
+
+  const onEndDateChange = (event, selectedDate) => {
+    setShowEndPicker(false);
+    if (selectedDate) {
+      setEndDate(selectedDate);
+    }
+  };
+
+  if (loading && leaveRequests.length === 0) {
+    return (
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
+        <StatusBar
+          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+          backgroundColor={theme.background}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+            Đang tải dữ liệu...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
+
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: theme.card }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>
+          Xin Nghỉ Phép
+        </Text>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => setShowForm(true)}
+        >
+          <Ionicons name="add" size={24} color={theme.primary} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Thống kê */}
+        <View
+          style={[
+            styles.statsCard,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <Text style={[styles.statsTitle, { color: theme.text }]}>
+            Thống kê nghỉ phép
+          </Text>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: theme.primary }]}>
+                {leaveRequests.filter((r) => r.status === 'approved').length}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Đã duyệt
+              </Text>
+            </View>
+
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: '#FF9800' }]}>
+                {leaveRequests.filter((r) => r.status === 'pending').length}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Chờ duyệt
+              </Text>
+            </View>
+
+            <View style={styles.statItem}>
+              <Text style={[styles.statValue, { color: '#F44336' }]}>
+                {leaveRequests.filter((r) => r.status === 'rejected').length}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Từ chối
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Danh sách đơn xin nghỉ */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            Lịch sử đơn xin nghỉ
+          </Text>
+
+          {leaveRequests.length > 0 ? (
+            leaveRequests.map((request) => (
+              <View
+                key={request.id}
+                style={[
+                  styles.requestCard,
+                  { backgroundColor: theme.card, borderColor: theme.border },
+                ]}
+              >
+                <View style={styles.requestHeader}>
+                  <View style={styles.requestType}>
+                    <Ionicons
+                      name={getLeaveTypeIcon(request.type)}
+                      size={20}
+                      color={theme.primary}
+                    />
+                    <Text
+                      style={[styles.requestTypeText, { color: theme.text }]}
+                    >
+                      {getLeaveTypeLabel(request.type)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.statusBadge,
+                      { backgroundColor: getStatusColor(request.status) },
+                    ]}
+                  >
+                    <Text style={styles.statusText}>
+                      {getStatusLabel(request.status)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.requestDetails}>
+                  <View style={styles.dateRow}>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={16}
+                      color={theme.textSecondary}
+                    />
+                    <Text
+                      style={[styles.dateText, { color: theme.textSecondary }]}
+                    >
+                      {formatDate(request.startDate)} -{' '}
+                      {formatDate(request.endDate)}
+                    </Text>
+                    <Text style={[styles.daysText, { color: theme.primary }]}>
+                      ({calculateDays(request.startDate, request.endDate)} ngày)
+                    </Text>
+                  </View>
+
+                  <View style={styles.reasonRow}>
+                    <Ionicons
+                      name="chatbubble-outline"
+                      size={16}
+                      color={theme.textSecondary}
+                    />
+                    <Text style={[styles.reasonText, { color: theme.text }]}>
+                      {request.reason}
+                    </Text>
+                  </View>
+
+                  <View style={styles.submittedRow}>
+                    <Ionicons
+                      name="time-outline"
+                      size={16}
+                      color={theme.textSecondary}
+                    />
+                    <Text
+                      style={[
+                        styles.submittedText,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Gửi lúc: {formatDate(request.submittedAt)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))
+          ) : (
+            <View
+              style={[
+                styles.emptyCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+            >
+              <Ionicons
+                name="document-outline"
+                size={48}
+                color={theme.textMuted}
+              />
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
+                Chưa có đơn xin nghỉ nào
+              </Text>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Modal form xin nghỉ phép */}
+      <Modal
+        visible={showForm}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowForm(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[styles.modalContent, { backgroundColor: theme.background }]}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>
+                Đăng ký nghỉ phép
+              </Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowForm(false)}
+              >
+                <Ionicons name="close" size={24} color={theme.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.formScroll}>
+              {/* Loại nghỉ phép */}
+              <View style={styles.formSection}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Loại nghỉ phép
+                </Text>
+                <View style={styles.typeSelector}>
+                  {[
+                    {
+                      key: 'annual',
+                      label: 'Nghỉ phép năm',
+                      icon: 'beach-outline',
+                    },
+                    { key: 'sick', label: 'Nghỉ ốm', icon: 'medical-outline' },
+                    {
+                      key: 'personal',
+                      label: 'Việc riêng',
+                      icon: 'person-outline',
+                    },
+                    {
+                      key: 'maternity',
+                      label: 'Thai sản',
+                      icon: 'heart-outline',
+                    },
+                  ].map((type) => (
+                    <TouchableOpacity
+                      key={type.key}
+                      style={[
+                        styles.typeOption,
+                        {
+                          backgroundColor:
+                            leaveType === type.key ? theme.primary : theme.card,
+                          borderColor: theme.border,
+                        },
+                      ]}
+                      onPress={() => setLeaveType(type.key)}
+                    >
+                      <Ionicons
+                        name={type.icon}
+                        size={20}
+                        color={leaveType === type.key ? '#fff' : theme.text}
+                      />
+                      <Text
+                        style={[
+                          styles.typeOptionText,
+                          {
+                            color: leaveType === type.key ? '#fff' : theme.text,
+                          },
+                        ]}
+                      >
+                        {type.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Ngày bắt đầu */}
+              <View style={styles.formSection}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Ngày bắt đầu
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.dateInput,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => setShowStartPicker(true)}
+                >
+                  <Ionicons
+                    name="calendar-outline"
+                    size={20}
+                    color={theme.textSecondary}
+                  />
+                  <Text style={[styles.dateInputText, { color: theme.text }]}>
+                    {formatDate(startDate)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Ngày kết thúc */}
+              <View style={styles.formSection}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Ngày kết thúc
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.dateInput,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => setShowEndPicker(true)}
+                >
+                  <Ionicons
+                    name="calendar-outline"
+                    size={20}
+                    color={theme.textSecondary}
+                  />
+                  <Text style={[styles.dateInputText, { color: theme.text }]}>
+                    {formatDate(endDate)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Lý do */}
+              <View style={styles.formSection}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Lý do nghỉ phép
+                </Text>
+                <TextInput
+                  style={[
+                    styles.reasonInput,
+                    {
+                      backgroundColor: theme.card,
+                      borderColor: theme.border,
+                      color: theme.text,
+                    },
+                  ]}
+                  placeholder="Nhập lý do nghỉ phép..."
+                  placeholderTextColor={theme.textMuted}
+                  value={reason}
+                  onChangeText={setReason}
+                  multiline
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* Thông tin tổng quan */}
+              <View
+                style={[
+                  styles.summaryInfo,
+                  { backgroundColor: theme.cardBackground },
+                ]}
+              >
+                <Text style={[styles.summaryInfoTitle, { color: theme.text }]}>
+                  Tổng quan
+                </Text>
+                <Text
+                  style={[
+                    styles.summaryInfoText,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Số ngày nghỉ: {calculateDays(startDate, endDate)} ngày
+                </Text>
+                <Text
+                  style={[
+                    styles.summaryInfoText,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Loại: {getLeaveTypeLabel(leaveType)}
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Nút gửi */}
+            <View style={styles.formActions}>
+              <TouchableOpacity
+                style={[styles.cancelButton, { borderColor: theme.border }]}
+                onPress={() => setShowForm(false)}
+              >
+                <Text style={[styles.cancelButtonText, { color: theme.text }]}>
+                  Hủy
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.submitButton,
+                  { backgroundColor: theme.primary },
+                ]}
+                onPress={handleSubmitLeaveRequest}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.submitButtonText}>Gửi đơn</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Date Pickers */}
+      {showStartPicker && (
+        <DateTimePicker
+          value={startDate}
+          mode="date"
+          display="default"
+          onChange={onStartDateChange}
+          minimumDate={new Date()}
+        />
+      )}
+
+      {showEndPicker && (
+        <DateTimePicker
+          value={endDate}
+          mode="date"
+          display="default"
+          onChange={onEndDateChange}
+          minimumDate={startDate}
+        />
+      )}
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  addButton: {
+    padding: 4,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  statsCard: {
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  statsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  statItem: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  requestCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  requestHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  requestType: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  requestTypeText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'white',
+  },
+  requestDetails: {
+    gap: 8,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateText: {
+    fontSize: 14,
+  },
+  daysText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  reasonRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  reasonText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  submittedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  submittedText: {
+    fontSize: 12,
+  },
+  emptyCard: {
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  emptyText: {
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    minHeight: '80%',
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  formScroll: {
+    padding: 20,
+  },
+  formSection: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  typeSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  typeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 6,
+    minWidth: '45%',
+  },
+  typeOptionText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 12,
+  },
+  dateInputText: {
+    fontSize: 16,
+  },
+  reasonInput: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 16,
+    minHeight: 100,
+  },
+  summaryInfo: {
+    padding: 16,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  summaryInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  summaryInfoText: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  formActions: {
+    flexDirection: 'row',
+    padding: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  submitButton: {
+    flex: 2,
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#fff',
+  },
+});
+
+export default LeaveRequestScreen;
+
+
+
+
+--- END: src\screens\LeaveRequestScreen.js ---
 
 
 --- START: src\screens\LoginScreen.js ---
@@ -44089,6 +46368,7 @@ import {
   Platform,
   FlatList,
   Linking,
+  Share,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 // Google Signin imported once at top
@@ -44846,6 +47126,36 @@ const ProjectDetailScreen = ({ route, navigation }) => {
                 color="#2E7D32"
               />
               <Text style={styles.tileLabel}>Quản lý Hợp đồng</Text>
+            </TouchableOpacity>
+
+            {/* Chia sẻ Link Theo dõi */}
+            <TouchableOpacity
+              style={styles.tileButton}
+              onPress={async () => {
+                try {
+                  if (!project.publicTrackingToken) {
+                    Alert.alert(
+                      'Thông báo',
+                      'Dự án này chưa có token theo dõi. Vui lòng liên hệ quản trị viên.'
+                    );
+                    return;
+                  }
+
+                  const trackingUrl = `https://tanhoaphat.netlify.app/track?token=${project.publicTrackingToken}`;
+
+                  await Share.share({
+                    message: `Theo dõi tiến độ dự án "${project.name}" của THP:\n\n${trackingUrl}\n\nLink này cho phép bạn xem tiến độ dự án theo thời gian thực mà không cần đăng nhập.`,
+                    title: `Theo dõi dự án: ${project.name}`,
+                    url: trackingUrl,
+                  });
+                } catch (error) {
+                  console.error('Error sharing tracking link:', error);
+                  Alert.alert('Lỗi', 'Không thể chia sẻ link theo dõi');
+                }
+              }}
+            >
+              <Ionicons name="share-social-outline" size={22} color="#2E7D32" />
+              <Text style={styles.tileLabel}>Chia sẻ Link Theo dõi</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -52255,7 +54565,6 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import ProductionService from '../api/productionService';
 import { getProjects } from '../api/projectService';
-import { getStageIcon, loadCustomIcons } from '../utils/stageIcons';
 
 const { width } = Dimensions.get('window');
 
@@ -52294,7 +54603,6 @@ const StarboardScreen = ({ navigation }) => {
   const [factoryStatus, setFactoryStatus] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [forceUpdate, setForceUpdate] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Toggle fullscreen mode
@@ -52360,6 +54668,11 @@ const StarboardScreen = ({ navigation }) => {
 
         // Setup real-time subscription for factory status
         unsubscribe = ProductionService.subscribeLiveFactoryStatus((status) => {
+          console.log(
+            'Real-time factory status update:',
+            status.length,
+            'workers'
+          );
           setFactoryStatus(status);
           setLoading(false);
         });
@@ -52385,8 +54698,19 @@ const StarboardScreen = ({ navigation }) => {
       const [projectsData, factoryStatusData] = await Promise.all([
         getProjects(),
         ProductionService.getLiveFactoryStatus(),
-        loadCustomIcons(), // Load custom icons
       ]);
+
+      console.log(
+        'StarboardScreen - Total projects loaded:',
+        projectsData.length
+      );
+      console.log(
+        'StarboardScreen - All project statuses:',
+        projectsData.map((p) => ({ name: p.name, status: p.status }))
+      );
+
+      // Tạm thời hiển thị tất cả dự án để debug
+      console.log('StarboardScreen - Showing ALL projects for debugging');
 
       // Chỉ hiển thị các dự án đang thực hiện - kiểm tra nhiều trạng thái có thể
       const activeProjects = projectsData.filter((project) => {
@@ -52401,6 +54725,15 @@ const StarboardScreen = ({ navigation }) => {
         );
       });
 
+      console.log(
+        'StarboardScreen - Active projects (filtered):',
+        activeProjects.length
+      );
+      console.log(
+        'StarboardScreen - Active projects details:',
+        activeProjects.map((p) => ({ name: p.name, status: p.status }))
+      );
+
       // Tạm thời hiển thị tất cả dự án để debug
       setProjects(projectsData);
       setFactoryStatus(factoryStatusData);
@@ -52414,23 +54747,12 @@ const StarboardScreen = ({ navigation }) => {
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadData();
-    setForceUpdate((prev) => prev + 1); // Force component re-render
     setRefreshing(false);
   };
 
-  // Get stage status based on project data and factory status
+  // Get stage status based on factory status
   const getStageStatus = (projectId, stageId) => {
-    // First, get the actual stage status from project data
-    const project = projects.find((p) => p.id === projectId);
-    if (project && project.workflowStages) {
-      const stage = project.workflowStages.find((s) => s.stageId === stageId);
-      if (stage && stage.status) {
-        // Return the actual status from project data
-        return stage.status;
-      }
-    }
-
-    // Fallback: Check if any worker is currently working on this stage
+    // Check if any worker is currently working on this stage
     const workingWorker = factoryStatus.find(
       (worker) =>
         worker.status === 'working' &&
@@ -52442,7 +54764,8 @@ const StarboardScreen = ({ navigation }) => {
       return 'in_progress';
     }
 
-    // Default to pending if no status found
+    // For now, we'll assume other stages are pending
+    // In a real app, you'd check completion status from project data
     return 'pending';
   };
 
@@ -52452,9 +54775,15 @@ const StarboardScreen = ({ navigation }) => {
     const project = projects.find((p) => p.id === projectId);
     const projectName = project?.name;
 
+    console.log('=== DEBUG getProjectWorkers ===');
+    console.log('Looking for projectId:', projectId);
+    console.log('Project name:', projectName);
+    console.log('factoryStatus:', factoryStatus);
+
     const workingWorkers = factoryStatus.filter(
       (worker) => worker.status === 'working'
     );
+    console.log('Working workers:', workingWorkers);
 
     const projectWorkers = factoryStatus.filter((worker) => {
       const isWorking = worker.status === 'working';
@@ -52468,8 +54797,20 @@ const StarboardScreen = ({ navigation }) => {
         worker.currentTask?.projectName === projectName ||
         worker.currentTask?.project === projectName;
 
+      console.log(`Worker ${worker.workerName || worker.workerId}:`, {
+        isWorking,
+        hasCurrentTask,
+        currentTask: worker.currentTask,
+        projectMatches,
+        'currentTask.projectName': worker.currentTask?.projectName,
+        'looking for projectName': projectName,
+      });
+
       return isWorking && hasCurrentTask && projectMatches;
     });
+
+    console.log('Final project workers:', projectWorkers);
+    console.log('=== END DEBUG ===');
 
     return projectWorkers;
   };
@@ -52487,9 +54828,42 @@ const StarboardScreen = ({ navigation }) => {
     return Math.round((completedStages / project.workflowStages.length) * 100);
   };
 
-  // Get icon for process type - sử dụng từ file stageIcons.js
-  const getProcessIcon = (processKey, isCompleted = false) => {
-    return getStageIcon(processKey, isCompleted);
+  // Get icon for process type
+  const getProcessIcon = (processKey) => {
+    const iconMap = {
+      // Cắt
+      laser_cutting: 'flash',
+      plasma_cutting: 'flash-outline',
+      cutting: 'cut',
+
+      // Hàn
+      welding: 'flame',
+      arc_welding: 'flame-outline',
+      han: 'flame',
+
+      // Sơn
+      painting: 'brush',
+      spray_painting: 'brush-outline',
+      son: 'brush',
+
+      // Gia công
+      machining: 'build',
+      drilling: 'ellipse',
+      milling: 'settings',
+
+      // Lắp ráp
+      assembly: 'construct',
+      lap_rap: 'construct-outline',
+
+      // Kiểm tra
+      inspection: 'checkmark-circle',
+      quality_check: 'shield-checkmark',
+
+      // Mặc định
+      default: 'ellipse',
+    };
+
+    return iconMap[processKey] || iconMap['default'];
   };
 
   // Render task icon với responsive sizing
@@ -52500,53 +54874,32 @@ const StarboardScreen = ({ navigation }) => {
     let borderColor = '#9E9E9E';
     let showTick = false;
 
-    // 🆕 No background fill - transparent/white only
-    let backgroundColor = '#FFFFFF'; // Always white background
-
     switch (status) {
       case 'completed':
-        iconColor = '#9E9E9E'; // Gray icon, no fill
-        borderColor = '#4CAF50'; // Green border
-        backgroundColor = '#FFFFFF'; // 🆕 No green fill
-        showTick = true; // Keep green checkmark
+        iconColor = '#4CAF50';
+        borderColor = '#4CAF50';
+        showTick = true;
         break;
       case 'in_progress':
-        iconColor = '#9E9E9E'; // Gray icon, no fill
-        borderColor = '#FFC107'; // Yellow border
-        backgroundColor = '#FFFFFF'; // 🆕 No yellow fill
+        iconColor = '#FFC107';
+        borderColor = '#FFC107';
         break;
       case 'pending':
       default:
-        iconColor = '#9E9E9E'; // Gray icon
-        borderColor = '#E0E0E0'; // Light gray border
-        backgroundColor = '#FFFFFF'; // White background
+        iconColor = '#9E9E9E';
+        borderColor = '#E0E0E0';
         break;
     }
 
-    // Kiểm tra trạng thái hoàn thành
-    const isCompleted = status === 'completed';
+    const iconName = getProcessIcon(stage.processKey);
 
-    const iconData = getProcessIcon(stage.processKey, isCompleted);
-
-    // Responsive sizing - 🆕 Increased icon sizes
-    const iconSize = isLandscapeMode ? 40 : 50; // Increased from 32/40 to 40/50
-    const iconIconSize = isLandscapeMode ? 20 : 25; // Increased from 16/20 to 20/25
-
-    // Check icon type
-    const isCustomIcon =
-      typeof iconData === 'object' && iconData.type === 'custom';
-    const isAssetIcon =
-      typeof iconData === 'object' && iconData.type === 'asset';
-    const iconName =
-      isCustomIcon || isAssetIcon
-        ? null
-        : typeof iconData === 'object'
-        ? iconData.data
-        : iconData;
+    // Responsive sizing
+    const iconSize = isLandscapeMode ? 32 : 40;
+    const iconIconSize = isLandscapeMode ? 16 : 20;
 
     return (
       <View
-        key={`${stage.stageId}-${forceUpdate}-${isCompleted}`}
+        key={stage.stageId}
         style={[
           styles.taskIconContainer,
           isLandscapeMode && styles.taskIconContainerLandscape,
@@ -52557,7 +54910,6 @@ const StarboardScreen = ({ navigation }) => {
             styles.taskIcon,
             {
               borderColor: borderColor,
-              backgroundColor: backgroundColor, // 🆕 Always white - no color fill
               borderWidth: status === 'in_progress' ? 3 : 1,
               width: iconSize,
               height: iconSize,
@@ -52566,37 +54918,7 @@ const StarboardScreen = ({ navigation }) => {
             isLandscapeMode && styles.taskIconLandscape,
           ]}
         >
-          {isCustomIcon ? (
-            <Image
-              source={{ uri: iconData.data.uri }}
-              style={{
-                width: iconIconSize,
-                height: iconIconSize,
-                resizeMode: 'contain',
-                borderRadius: 2,
-              }}
-              onError={(error) => {
-                console.error('Error loading custom icon in starboard:', error);
-              }}
-            />
-          ) : isAssetIcon ? (
-            <Image
-              key={`icon-${stage.stageId}-${isCompleted}-${iconData.data}`}
-              source={iconData.data}
-              style={{
-                width: iconIconSize,
-                height: iconIconSize,
-                resizeMode: 'contain',
-                borderRadius: 2,
-                tintColor:
-                  stage.processKey === 'painting' || stage.processKey === 'son'
-                    ? undefined
-                    : iconColor,
-              }}
-            />
-          ) : (
-            <Ionicons name={iconName} size={iconIconSize} color={iconColor} />
-          )}
+          <Ionicons name={iconName} size={iconIconSize} color={iconColor} />
           {showTick && (
             <View
               style={[
@@ -52612,7 +54934,12 @@ const StarboardScreen = ({ navigation }) => {
             </View>
           )}
         </View>
-        {/* 🚫 Removed stage name text - icons only */}
+        {/* Hiển thị tên stage trong landscape mode */}
+        {isLandscapeMode && (
+          <Text style={styles.stageNameText} numberOfLines={1}>
+            {stage.processName || stage.processKey}
+          </Text>
+        )}
       </View>
     );
   };
@@ -52722,8 +55049,8 @@ const StarboardScreen = ({ navigation }) => {
           >
             {project.name}
           </Text>
-          {/* 🆕 Hiển thị customer name trong cả portrait và landscape mode */}
-          {project.customerName && (
+          {/* Hiển thị customer name trong landscape mode */}
+          {isLandscape && project.customerName && (
             <Text
               style={[styles.customerName, { color: theme.textSecondary }]}
               numberOfLines={1}
@@ -52914,7 +55241,7 @@ const styles = StyleSheet.create({
   },
 
   headerTitle: {
-    fontSize: 22, // 🆕 Increased from 20 to 22
+    fontSize: 20,
     fontWeight: 'bold',
   },
   headerRight: {
@@ -52926,13 +55253,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   listContainer: {
-    padding: 24, // 🆕 Increased from 18 to 24 (more outer spacing)
+    padding: 16,
   },
   projectRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 32, // 🆕 Increased from 24 to 32 (more inner spacing)
-    marginBottom: 16, // 🆕 Increased from 8 to 16 (more spacing between rows)
+    padding: 20,
+    marginBottom: 2,
     borderWidth: 1,
     borderRadius: 8,
   },
@@ -52941,7 +55268,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
   },
   projectName: {
-    fontSize: 22, // 🆕 Increased from 18 to 22 (larger project names)
+    fontSize: 16,
     fontWeight: '600',
   },
   taskIconsContainer: {
@@ -52974,7 +55301,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   noStagesText: {
-    fontSize: 14, // 🆕 Increased from 12 to 14
+    fontSize: 12,
     fontStyle: 'italic',
   },
   workersContainer: {
@@ -53024,7 +55351,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   noWorkersText: {
-    fontSize: 14, // 🆕 Increased from 12 to 14
+    fontSize: 12,
     fontStyle: 'italic',
   },
   emptyContainer: {
@@ -53034,7 +55361,7 @@ const styles = StyleSheet.create({
     paddingVertical: 64,
   },
   emptyText: {
-    fontSize: 18, // 🆕 Increased from 16 to 18
+    fontSize: 16,
     marginTop: 16,
     textAlign: 'center',
   },
@@ -53063,7 +55390,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   customerName: {
-    fontSize: 14, // 🆕 Increased from 11 to 14 (larger customer name)
+    fontSize: 11,
     marginTop: 2,
     fontStyle: 'italic',
   },
@@ -53081,7 +55408,12 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
   },
-  // 🚫 Removed stageNameText style - no longer needed
+  stageNameText: {
+    fontSize: 8,
+    color: '#666',
+    textAlign: 'center',
+    maxWidth: 32,
+  },
   moreStagesIndicator: {
     backgroundColor: '#E0E0E0',
     borderRadius: 16,
@@ -54781,8 +57113,15 @@ import {
   orderBy,
   doc,
   getDoc,
+  onSnapshot,
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
+import {
+  fetchPendingLeaveRequests,
+  fetchPendingAdvanceRequests,
+  updateLeaveRequestStatus,
+  updateAdvanceRequestStatus,
+} from '../api/requestService';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -54881,9 +57220,12 @@ const TaskReportScreen = ({ navigation }) => {
   const [myTasks, setMyTasks] = useState([]);
   const [staffPendingTasks, setStaffPendingTasks] = useState([]);
   const [staffCompletedTasks, setStaffCompletedTasks] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [pendingLeave, setPendingLeave] = useState([]);
+  const [pendingAdvance, setPendingAdvance] = useState([]);
 
   // State for manager tabs
-  const [activeManagerView, setActiveManagerView] = useState('my_tasks'); // 'my_tasks', 'staff_pending', 'staff_completed'
+  const [activeManagerView, setActiveManagerView] = useState('my_tasks'); // 'my_tasks', 'staff_pending', 'staff_completed', 'requests'
 
   // States for Staff View
   const [tasks, setTasks] = useState([]);
@@ -54893,6 +57235,13 @@ const TaskReportScreen = ({ navigation }) => {
   const isManager = ['giam_doc', 'pho_giam_doc', 'admin'].includes(
     currentUser?.role
   );
+
+  const formatDateSafe = (value) => {
+    if (!value) return '';
+    const d = value.toDate ? value.toDate() : new Date(value);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('vi-VN');
+  };
 
   const fetchManagerTasks = async () => {
     setLoading(true);
@@ -54935,6 +57284,15 @@ const TaskReportScreen = ({ navigation }) => {
           ...doc.data(),
         }))
       );
+
+      // 4. Initial pending requests (leave + advance)
+      const [leaveReqs, advanceReqs] = await Promise.all([
+        fetchPendingLeaveRequests(),
+        fetchPendingAdvanceRequests(),
+      ]);
+      setPendingLeave(leaveReqs);
+      setPendingAdvance(advanceReqs);
+      setPendingRequests([...leaveReqs, ...advanceReqs]);
     } catch (err) {
       console.error('Error fetching manager tasks:', err);
       setError('Không thể tải báo cáo công việc.');
@@ -54942,6 +57300,46 @@ const TaskReportScreen = ({ navigation }) => {
       setLoading(false);
     }
   };
+
+  // Realtime badges for pending requests
+  useEffect(() => {
+    if (!isManager) return;
+    const leaveQ = query(
+      collection(db, 'leave_requests'),
+      where('status', '==', 'pending')
+    );
+    const advQ = query(
+      collection(db, 'advance_requests'),
+      where('status', '==', 'pending')
+    );
+
+    const un1 = onSnapshot(leaveQ, (snap) => {
+      const items = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        requestType: 'leave',
+      }));
+      setPendingLeave(items);
+    });
+    const un2 = onSnapshot(advQ, (snap) => {
+      const items = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        requestType: 'advance',
+      }));
+      setPendingAdvance(items);
+    });
+    return () => {
+      un1();
+      un2();
+    };
+  }, [isManager]);
+
+  useEffect(() => {
+    if (isManager) {
+      setPendingRequests([...(pendingLeave || []), ...(pendingAdvance || [])]);
+    }
+  }, [pendingLeave, pendingAdvance, isManager]);
 
   const fetchStaffTasks = async () => {
     setLoading(true);
@@ -55091,6 +57489,128 @@ const TaskReportScreen = ({ navigation }) => {
   if (isManager) {
     const renderManagerContent = () => {
       switch (activeManagerView) {
+        case 'requests':
+          return (
+            <View>
+              {pendingRequests.length === 0 ? (
+                <View style={styles.emptySection}>
+                  <Text style={{ color: theme.textSecondary }}>
+                    Không có yêu cầu nào đang chờ.
+                  </Text>
+                </View>
+              ) : (
+                pendingRequests.map((req) => (
+                  <View
+                    key={req.id}
+                    style={[styles.card, { backgroundColor: theme.card }]}
+                  >
+                    <View style={styles.cardHeader}>
+                      <Text style={[styles.taskLabel, { color: theme.text }]}>
+                        {req.requestType === 'leave'
+                          ? 'Xin nghỉ phép'
+                          : 'Xin ứng lương'}
+                      </Text>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          { backgroundColor: 'rgba(241, 196, 15, 0.2)' },
+                        ]}
+                      >
+                        <Text style={[styles.statusText, { color: '#F39C12' }]}>
+                          Chờ duyệt
+                        </Text>
+                      </View>
+                    </View>
+                    <View>
+                      <Text
+                        style={{ color: theme.textSecondary, marginBottom: 4 }}
+                      >
+                        Nhân viên: {req.userName || req.userId}
+                      </Text>
+                      {req.requestType === 'leave' ? (
+                        <Text style={{ color: theme.textSecondary }}>
+                          Từ ngày {formatDateSafe(req.startDate)} đến{' '}
+                          {formatDateSafe(req.endDate)} - Lý do: {req.reason}
+                        </Text>
+                      ) : (
+                        <Text style={{ color: theme.textSecondary }}>
+                          Số tiền:{' '}
+                          {Intl.NumberFormat('vi-VN', {
+                            style: 'currency',
+                            currency: 'VND',
+                          }).format(req.amount)}{' '}
+                          - Lý do: {req.reason}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={{ flexDirection: 'row', marginTop: 12 }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.managerTab,
+                          { backgroundColor: '#27AE60', flex: 0 },
+                        ]}
+                        onPress={async () => {
+                          try {
+                            // Optimistic remove to tránh full-screen reload
+                            setPendingRequests((list) =>
+                              list.filter((r) => r.id !== req.id)
+                            );
+                            if (req.requestType === 'leave') {
+                              await updateLeaveRequestStatus(
+                                req.id,
+                                'approved'
+                              );
+                            } else {
+                              await updateAdvanceRequestStatus(
+                                req.id,
+                                'approved'
+                              );
+                            }
+                          } catch (e) {
+                            console.warn('Approve failed', e);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                          Duyệt
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.managerTab,
+                          { backgroundColor: '#E74C3C', flex: 0 },
+                        ]}
+                        onPress={async () => {
+                          try {
+                            setPendingRequests((list) =>
+                              list.filter((r) => r.id !== req.id)
+                            );
+                            if (req.requestType === 'leave') {
+                              await updateLeaveRequestStatus(
+                                req.id,
+                                'rejected'
+                              );
+                            } else {
+                              await updateAdvanceRequestStatus(
+                                req.id,
+                                'rejected'
+                              );
+                            }
+                          } catch (e) {
+                            console.warn('Reject failed', e);
+                          }
+                        }}
+                      >
+                        <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                          Từ chối
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          );
         case 'staff_pending':
           return renderTaskList(staffPendingTasks);
         case 'staff_completed':
@@ -55170,6 +57690,48 @@ const TaskReportScreen = ({ navigation }) => {
             >
               Đã Hoàn Thành
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.managerTab,
+              { backgroundColor: theme.card },
+              activeManagerView === 'requests' && {
+                backgroundColor: theme.primary,
+              },
+            ]}
+            onPress={() => setActiveManagerView('requests')}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text
+                style={[
+                  styles.managerTabText,
+                  { color: theme.text },
+                  activeManagerView === 'requests' && { color: '#FFFFFF' },
+                ]}
+              >
+                Yêu cầu
+              </Text>
+              {pendingRequests.length > 0 && (
+                <View
+                  style={{
+                    marginLeft: 6,
+                    minWidth: 20,
+                    paddingHorizontal: 6,
+                    height: 20,
+                    borderRadius: 10,
+                    backgroundColor: '#E53935',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text
+                    style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}
+                  >
+                    {pendingRequests.length}
+                  </Text>
+                </View>
+              )}
+            </View>
           </TouchableOpacity>
         </View>
 
@@ -55390,6 +57952,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../config/firebaseConfig';
 import * as ImagePicker from 'expo-image-picker';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const UserManagementScreen = () => {
   const { theme } = useTheme();
@@ -55526,8 +58089,8 @@ const UserManagementScreen = () => {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7, // Tăng quality một chút cho ảnh đẹp hơn
-        base64: true, // Bật base64 để lấy dữ liệu trực tiếp
+        quality: 0.5, // Giảm quality để tránh file quá lớn
+        base64: false, // Không cần base64
       });
 
       console.log('ImagePicker result:', result);
@@ -55541,7 +58104,7 @@ const UserManagementScreen = () => {
           fileSize: asset.fileSize,
         });
 
-        uploadImageAsBase64(asset.base64, asset.uri);
+        uploadImage(asset.uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -55549,49 +58112,139 @@ const UserManagementScreen = () => {
     }
   };
 
-  // Upload image as base64 - Main method
-  const uploadImageAsBase64 = async (base64Data, uri) => {
+  // Upload image to Firebase Storage
+  const uploadImage = async (uri) => {
     try {
       setUploadingImage(true);
-      console.log('Starting base64 image upload');
+      console.log('Starting image upload for URI:', uri);
 
-      // Validate base64 data
-      if (!base64Data) {
-        throw new Error('Invalid base64 data');
+      // Validate URI
+      if (!uri) {
+        throw new Error('Invalid image URI');
       }
 
-      // Get file extension from URI
+      // Convert image to blob with better error handling
+      const response = await fetch(uri);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      console.log('Blob created successfully, size:', blob.size);
+
+      // Validate blob
+      if (!blob || blob.size === 0) {
+        throw new Error('Invalid image data');
+      }
+
+      // Try Firebase Storage upload with timeout
+      const storage = getStorage();
       const fileExtension = uri.split('.').pop() || 'jpg';
+      const fileName = `profile_${
+        selectedUser.id
+      }_${Date.now()}.${fileExtension}`;
+      const storageRef = ref(storage, `profiles/${fileName}`);
 
-      // Create data URL with proper MIME type
-      const mimeType = `image/${fileExtension}`;
-      const dataURL = `data:${mimeType};base64,${base64Data}`;
+      console.log('Uploading to Firebase Storage:', fileName);
+      console.log('Storage bucket:', storage.app.options.storageBucket);
 
-      console.log('Base64 data length:', base64Data.length);
-      console.log('Data URL created with MIME type:', mimeType);
+      // Upload with metadata and timeout
+      const metadata = {
+        contentType: `image/${fileExtension}`,
+        customMetadata: {
+          uploadedBy: currentUser?.uid || 'unknown',
+          uploadedAt: new Date().toISOString(),
+        },
+      };
 
-      // Update edit data with base64 image
+      // Add timeout to upload
+      const uploadPromise = uploadBytes(storageRef, blob, metadata);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Upload timeout after 30s')), 30000)
+      );
+
+      await Promise.race([uploadPromise, timeoutPromise]);
+      console.log('Upload successful, getting download URL...');
+
+      const downloadURL = await getDownloadURL(storageRef);
+      console.log('Download URL obtained:', downloadURL);
+
+      // Update edit data with new image URL
       setEditData((prev) => ({
         ...prev,
-        photoURL: dataURL,
+        photoURL: downloadURL,
       }));
 
-      console.log('Base64 image saved successfully');
-      Alert.alert('Thành công', 'Đã lưu ảnh thành công!');
+      Alert.alert('Thành công', 'Đã tải lên ảnh thành công!');
     } catch (error) {
-      console.error('Error uploading base64 image:', error);
+      console.error('Error uploading image:', error);
 
-      let errorMessage = 'Không thể lưu ảnh';
-      if (error.message.includes('Invalid')) {
-        errorMessage = 'Dữ liệu ảnh không hợp lệ';
+      // Try fallback method with base64
+      try {
+        console.log('Trying fallback method with base64...');
+        await uploadImageFallback(uri);
+        return;
+      } catch (fallbackError) {
+        console.error('Fallback method also failed:', fallbackError);
+      }
+
+      // More specific error messages
+      let errorMessage = 'Không thể tải lên ảnh';
+      if (error.code === 'storage/unauthorized') {
+        errorMessage = 'Không có quyền truy cập Firebase Storage';
+      } else if (error.code === 'storage/canceled') {
+        errorMessage = 'Upload bị hủy';
+      } else if (error.code === 'storage/unknown') {
+        errorMessage =
+          'Lỗi không xác định từ Firebase Storage. Có thể do mạng hoặc cấu hình.';
+      } else if (error.message.includes('fetch')) {
+        errorMessage = 'Không thể đọc file ảnh';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = 'Upload quá lâu, vui lòng thử lại';
       }
 
       Alert.alert(
         'Lỗi Upload',
-        errorMessage + '\n\nChi tiết: ' + error.message
+        errorMessage +
+          '\n\nChi tiết: ' +
+          error.message +
+          '\n\nGợi ý: Kiểm tra kết nối mạng và thử lại'
       );
     } finally {
       setUploadingImage(false);
+    }
+  };
+
+  // Fallback method: Save image as base64 directly to Firestore
+  const uploadImageFallback = async (uri) => {
+    try {
+      console.log('Using fallback method: base64 storage');
+
+      // Convert image to base64
+      const response = await fetch(uri);
+      const blob = await response.blob();
+
+      // Convert blob to base64
+      const reader = new FileReader();
+      const base64Promise = new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      const base64Data = await base64Promise;
+      console.log('Base64 conversion successful, length:', base64Data.length);
+
+      // Update edit data with base64 image
+      setEditData((prev) => ({
+        ...prev,
+        photoURL: base64Data,
+      }));
+
+      Alert.alert('Thành công', 'Đã lưu ảnh thành công (phương án dự phòng)!');
+    } catch (error) {
+      console.error('Fallback method failed:', error);
+      throw error;
     }
   };
 
@@ -56644,6 +59297,513 @@ export default WorkAllocationScreen;
 
 
 --- END: src\screens\WorkAllocationScreen.js ---
+
+
+--- START: src\screens\WorkerAttendanceScreen.js ---
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import { getAttendance, getAttendanceHistory } from '../api/attendanceService';
+
+const WorkerAttendanceScreen = ({ navigation }) => {
+  const { theme, isDarkMode } = useTheme();
+  const { user } = useAuth();
+  const [attendance, setAttendance] = useState(null);
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  useEffect(() => {
+    loadAttendanceData();
+  }, [selectedMonth, selectedYear]);
+
+  const loadAttendanceData = async () => {
+    try {
+      setLoading(true);
+
+      // Lấy thông tin chấm công hiện tại
+      if (user?.uid) {
+        const currentAttendance = await getAttendance(user.uid);
+        setAttendance(currentAttendance);
+
+        // Lấy lịch sử chấm công theo tháng
+        const history = await getAttendanceHistory(
+          user.uid,
+          selectedYear,
+          selectedMonth + 1
+        );
+
+        // Log để debug
+        console.log('Attendance history loaded:', history);
+        console.log('User ID:', user.uid);
+        console.log('Year:', selectedYear, 'Month:', selectedMonth + 1);
+
+        // Debug từng record
+        history.forEach((record, index) => {
+          console.log(`Record ${index}:`, {
+            id: record.id,
+            date: record.date,
+            clockIn: record.clockIn,
+            clockOut: record.clockOut,
+            userId: record.userId,
+          });
+        });
+
+        setAttendanceHistory(history);
+      }
+    } catch (error) {
+      console.error('Lỗi khi tải dữ liệu chấm công:', error);
+      Alert.alert('Lỗi', 'Không thể tải dữ liệu chấm công');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getMonthName = (month) => {
+    const months = [
+      'Tháng 1',
+      'Tháng 2',
+      'Tháng 3',
+      'Tháng 4',
+      'Tháng 5',
+      'Tháng 6',
+      'Tháng 7',
+      'Tháng 8',
+      'Tháng 9',
+      'Tháng 10',
+      'Tháng 11',
+      'Tháng 12',
+    ];
+    return months[month];
+  };
+
+  const formatDate = (timestamp) => {
+    if (!timestamp) return '';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString('vi-VN');
+  };
+
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  const calculateWorkHours = (clockIn, clockOut) => {
+    if (!clockIn || !clockOut) return 0;
+    const start = clockIn.toDate ? clockIn.toDate() : new Date(clockIn);
+    const end = clockOut.toDate ? clockOut.toDate() : new Date(clockOut);
+    const diffMs = end - start;
+    const diffHours = diffMs / (1000 * 60 * 60);
+    return Math.round(diffHours * 100) / 100;
+  };
+
+  const getTotalWorkHours = () => {
+    return attendanceHistory.reduce((total, record) => {
+      return total + calculateWorkHours(record.clockIn, record.clockOut);
+    }, 0);
+  };
+
+  const getTotalOvertime = () => {
+    return attendanceHistory.reduce((total, record) => {
+      return total + (record.overtime || 0);
+    }, 0);
+  };
+
+  const changeMonth = (direction) => {
+    if (direction === 'prev') {
+      if (selectedMonth === 0) {
+        setSelectedMonth(11);
+        setSelectedYear(selectedYear - 1);
+      } else {
+        setSelectedMonth(selectedMonth - 1);
+      }
+    } else {
+      if (selectedMonth === 11) {
+        setSelectedMonth(0);
+        setSelectedYear(selectedYear + 1);
+      } else {
+        setSelectedMonth(selectedMonth + 1);
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
+        <StatusBar
+          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+          backgroundColor={theme.background}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+            Đang tải dữ liệu...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
+      <StatusBar
+        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+        backgroundColor={theme.background}
+      />
+
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: theme.card }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: theme.text }]}>
+          Bảng Chấm Công
+        </Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Thông tin tổng quan */}
+        <View
+          style={[
+            styles.summaryCard,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <Text style={[styles.summaryTitle, { color: theme.text }]}>
+            Tổng quan tháng {getMonthName(selectedMonth)}/{selectedYear}
+          </Text>
+
+          <View style={styles.summaryGrid}>
+            <View style={styles.summaryItem}>
+              <Text style={[styles.summaryValue, { color: theme.primary }]}>
+                {attendanceHistory.length}
+              </Text>
+              <Text
+                style={[styles.summaryLabel, { color: theme.textSecondary }]}
+              >
+                Ngày làm việc
+              </Text>
+            </View>
+
+            <View style={styles.summaryItem}>
+              <Text style={[styles.summaryValue, { color: theme.primary }]}>
+                {attendanceHistory.filter((r) => (r.overtime || 0) > 0).length}
+              </Text>
+              <Text
+                style={[styles.summaryLabel, { color: theme.textSecondary }]}
+              >
+                Ngày tăng ca
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Chọn tháng */}
+        <View
+          style={[
+            styles.monthSelector,
+            { backgroundColor: theme.card, borderColor: theme.border },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.monthButton}
+            onPress={() => changeMonth('prev')}
+          >
+            <Ionicons name="chevron-back" size={24} color={theme.primary} />
+          </TouchableOpacity>
+
+          <Text style={[styles.monthText, { color: theme.text }]}>
+            {getMonthName(selectedMonth)} {selectedYear}
+          </Text>
+
+          <TouchableOpacity
+            style={styles.monthButton}
+            onPress={() => changeMonth('next')}
+          >
+            <Ionicons name="chevron-forward" size={24} color={theme.primary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Lịch sử chấm công */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            Lịch sử chấm công
+          </Text>
+
+          {attendanceHistory.length > 0 ? (
+            attendanceHistory.map((record, index) => {
+              // Debug: log record data
+              console.log('Record data:', record);
+              console.log('Record date:', record.date);
+              console.log('Record clockIn:', record.clockIn);
+
+              return (
+                <View
+                  key={index}
+                  style={[
+                    styles.attendanceCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                >
+                  <View style={styles.attendanceHeader}>
+                    <Text
+                      style={[styles.attendanceDate, { color: theme.text }]}
+                    >
+                      {formatDate(record.clockIn)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.attendanceDetails}>
+                    <View style={styles.dateRow}>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={16}
+                        color={theme.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.dateLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
+                        Đã đi làm ngày {record.date || 'Không xác định'}
+                      </Text>
+                    </View>
+                    <View style={styles.timeRow}>
+                      <Ionicons
+                        name="time-outline"
+                        size={16}
+                        color={theme.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.timeLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
+                        Công: 8h
+                        {record.overtime > 0
+                          ? `  •  Tăng ca: ${record.overtime}h`
+                          : ''}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            <View
+              style={[
+                styles.emptyCard,
+                { backgroundColor: theme.card, borderColor: theme.border },
+              ]}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={48}
+                color={theme.textMuted}
+              />
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
+                Không có dữ liệu chấm công
+              </Text>
+              <Text style={[styles.emptySubText, { color: theme.textMuted }]}>
+                Tháng {getMonthName(selectedMonth)}/{selectedYear}
+              </Text>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  summaryCard: {
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  summaryTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  summaryGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  summaryItem: {
+    alignItems: 'center',
+  },
+  summaryValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  summaryLabel: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  monthSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+  },
+  monthButton: {
+    padding: 8,
+  },
+  monthText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  attendanceCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  attendanceHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  attendanceDate: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  attendanceDetails: {
+    gap: 8,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateLabel: {
+    fontSize: 14,
+  },
+  timeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  timeLabel: {
+    fontSize: 14,
+  },
+  emptyCard: {
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  emptyText: {
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  emptySubText: {
+    fontSize: 14,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+});
+
+export default WorkerAttendanceScreen;
+
+
+
+
+--- END: src\screens\WorkerAttendanceScreen.js ---
 
 
 --- START: src\utils\audioPermissionHelper.js ---
@@ -62495,6 +65655,7 @@ export * from './attendanceExcelGenerator';
 export * from './processWorkAllocations';
 export * from './aggregateMonthlyReport';
 export * from './notificationTriggers';
+export * from './publicApi';
 
 // Không export từ excelGenerator nữa vì đã có export từ quotationExcelGenerator
 
@@ -65558,6 +68719,7 @@ import {
 import * as admin from 'firebase-admin';
 import { google } from 'googleapis';
 import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
 
 const db = admin.firestore();
 const ROOT_FOLDER_ID = '18OrAEBSuZzz-AFbqlitz5gUxpsdunXjX'; // Baogia root folder ID
@@ -65578,88 +68740,104 @@ export const onProjectCreate = onDocumentCreated(
       return;
     }
 
-    console.log(`Creating Drive folders for new project: ${projectData.name}`);
+    console.log(`Processing new project: ${projectData.name}`);
 
     try {
-      // Initialize Google Drive API
-      const auth = new google.auth.GoogleAuth({
-        keyFile: path.join(__dirname, '../tanyb-fe4bf-4fbd5c01b6c7.json'),
-        scopes: ['https://www.googleapis.com/auth/drive'],
-      });
-      const drive = google.drive({ version: 'v3', auth });
+      // Step 1: Create public tracking token IMMEDIATELY (không phụ thuộc Google Drive)
+      const publicTrackingToken = uuidv4().replace(/-/g, '');
 
-      // Get current date for folder structure (YYYY/MM/DD)
-      const createdDate = projectData.createdAt?.toDate() || new Date();
-      const year = createdDate.getFullYear().toString();
-      const month = (createdDate.getMonth() + 1).toString().padStart(2, '0');
-      const day = createdDate.getDate().toString().padStart(2, '0');
-
-      // Clean project name for use in folder name (remove invalid chars)
-      const cleanProjectName = projectData.name.replace(/[\/\\:*?"<>|]/g, '_');
-
-      // Step 1: Find or create year folder
-      const yearFolder = await findOrCreateFolder(drive, year, ROOT_FOLDER_ID);
-      if (!yearFolder) {
-        throw new Error(`Failed to create year folder ${year}`);
-      }
-
-      // Step 2: Find or create month folder
-      const monthFolder = await findOrCreateFolder(drive, month, yearFolder.id);
-      if (!monthFolder) {
-        throw new Error(`Failed to create month folder ${month}`);
-      }
-
-      // Step 3: Find or create day folder
-      const dayFolder = await findOrCreateFolder(drive, day, monthFolder.id);
-      if (!dayFolder) {
-        throw new Error(`Failed to create day folder ${day}`);
-      }
-
-      // Step 4: Create project folder
-      const projectFolder = await createFolder(
-        drive,
-        cleanProjectName,
-        dayFolder.id
-      );
-      if (!projectFolder) {
-        throw new Error(`Failed to create project folder ${cleanProjectName}`);
-      }
-
-      // Step 5: Create subfolders (baogia, hopdong)
-      // Create and track subfolder IDs for logging
-      const baogiaFolder = await createFolder(
-        drive,
-        'baogia',
-        projectFolder.id
-      );
-      const hopdongFolder = await createFolder(
-        drive,
-        'hopdong',
-        projectFolder.id
-      );
-
-      console.log(
-        `Created subfolders: baogia (${baogiaFolder.id}) and hopdong (${hopdongFolder.id})`
-      );
-
-      // Step 6: Update project document with folder IDs
+      // Step 2: Update project with token first
       await db.collection('projects').doc(projectId).update({
-        driveFolderId: projectFolder.id,
-        driveFolderUrl: projectFolder.webViewLink,
-        driveCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        publicTrackingToken: publicTrackingToken,
       });
 
       console.log(
-        `Successfully created Drive folders for project ${projectId}.`
+        `Created tracking token for project ${projectId}: ${publicTrackingToken}`
       );
+
+      // Step 3: Try to create Google Drive folders (optional, không block token creation)
+      try {
+        await createGoogleDriveFolders(projectId, projectData);
+      } catch (driveError) {
+        console.error(
+          `Google Drive folder creation failed for project ${projectId}:`,
+          driveError
+        );
+        // Continue execution even if Drive fails
+      }
+
+      console.log(`Successfully processed project ${projectId}.`);
     } catch (error) {
-      console.error(
-        `Error creating Drive folders for project ${projectId}:`,
-        error
-      );
+      console.error(`Error processing project ${projectId}:`, error);
     }
   }
 );
+
+// Tách riêng function tạo Google Drive folders
+async function createGoogleDriveFolders(projectId: string, projectData: any) {
+  console.log(`Creating Drive folders for project: ${projectData.name}`);
+
+  // Initialize Google Drive API
+  const auth = new google.auth.GoogleAuth({
+    keyFile: path.join(__dirname, '../tanyb-fe4bf-4fbd5c01b6c7.json'),
+    scopes: ['https://www.googleapis.com/auth/drive'],
+  });
+  const drive = google.drive({ version: 'v3', auth });
+
+  // Get current date for folder structure (YYYY/MM/DD)
+  const createdDate = projectData.createdAt?.toDate() || new Date();
+  const year = createdDate.getFullYear().toString();
+  const month = (createdDate.getMonth() + 1).toString().padStart(2, '0');
+  const day = createdDate.getDate().toString().padStart(2, '0');
+
+  // Clean project name for use in folder name (remove invalid chars)
+  const cleanProjectName = projectData.name.replace(/[\/\\:*?"<>|]/g, '_');
+
+  // Step 1: Find or create year folder
+  const yearFolder = await findOrCreateFolder(drive, year, ROOT_FOLDER_ID);
+  if (!yearFolder) {
+    throw new Error(`Failed to create year folder ${year}`);
+  }
+
+  // Step 2: Find or create month folder
+  const monthFolder = await findOrCreateFolder(drive, month, yearFolder.id);
+  if (!monthFolder) {
+    throw new Error(`Failed to create month folder ${month}`);
+  }
+
+  // Step 3: Find or create day folder
+  const dayFolder = await findOrCreateFolder(drive, day, monthFolder.id);
+  if (!dayFolder) {
+    throw new Error(`Failed to create day folder ${day}`);
+  }
+
+  // Step 4: Create project folder
+  const projectFolder = await createFolder(
+    drive,
+    cleanProjectName,
+    dayFolder.id
+  );
+  if (!projectFolder) {
+    throw new Error(`Failed to create project folder ${cleanProjectName}`);
+  }
+
+  // Step 5: Create subfolders (baogia, hopdong)
+  const baogiaFolder = await createFolder(drive, 'baogia', projectFolder.id);
+  const hopdongFolder = await createFolder(drive, 'hopdong', projectFolder.id);
+
+  console.log(
+    `Created subfolders: baogia (${baogiaFolder.id}) and hopdong (${hopdongFolder.id})`
+  );
+
+  // Step 6: Update project document with Drive folder info
+  await db.collection('projects').doc(projectId).update({
+    driveFolderId: projectFolder.id,
+    driveFolderUrl: projectFolder.webViewLink,
+    driveCreatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log(`Successfully created Drive folders for project ${projectId}.`);
+}
 
 /**
  * Automatically deducts materials from inventory when a project is marked as "completed".
@@ -65866,6 +69044,111 @@ async function createFolder(drive, folderName, parentFolderId) {
 
 
 --- END: functions\src\projectTriggers.ts ---
+
+
+--- START: functions\src\publicApi.ts ---
+import { onRequest } from 'firebase-functions/v2/https';
+import * as admin from 'firebase-admin';
+import cors from 'cors';
+
+const db = admin.firestore();
+const corsHandler = cors({ origin: true });
+
+/**
+ * Public API endpoint for project status tracking
+ * Allows customers to view project progress using a tracking token
+ */
+export const getProjectStatusByToken = onRequest(
+  {
+    region: 'asia-southeast1',
+    cors: true,
+  },
+  async (request, response) => {
+    // Handle CORS preflight requests
+    return corsHandler(request, response, async () => {
+      try {
+        // Only allow GET requests
+        if (request.method !== 'GET') {
+          response.status(405).json({
+            error: 'Method not allowed',
+            message: 'Only GET requests are supported',
+          });
+          return;
+        }
+
+        // Get token from query parameters
+        const { token } = request.query;
+
+        if (!token || typeof token !== 'string') {
+          response.status(400).json({
+            error: 'Bad Request',
+            message: 'Token parameter is required',
+          });
+          return;
+        }
+
+        // Query project by public tracking token
+        const projectsRef = db.collection('projects');
+        const query = projectsRef.where('publicTrackingToken', '==', token);
+        const snapshot = await query.limit(1).get();
+
+        if (snapshot.empty) {
+          response.status(404).json({
+            error: 'Not Found',
+            message: 'Project not found with the provided token',
+          });
+          return;
+        }
+
+        const projectDoc = snapshot.docs[0];
+        const projectData = projectDoc.data();
+
+        // Extract only safe data for public viewing
+        const safeProjectData = {
+          projectName: projectData.name || 'Dự án không tên',
+          customerName: projectData.customerName || 'Khách hàng không xác định',
+          status: projectData.status || 'pending',
+          startDate: projectData.startDate,
+          endDate: projectData.endDate,
+          workflowStages: [],
+        };
+
+        // Process workflow stages if they exist
+        if (
+          projectData.workflowStages &&
+          Array.isArray(projectData.workflowStages)
+        ) {
+          // Sort by order field and extract only safe fields
+          safeProjectData.workflowStages = projectData.workflowStages
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
+            .map((stage) => ({
+              processName: stage.processName || 'Công đoạn không xác định',
+              status: stage.status || 'pending',
+              order: stage.order || 0,
+              completionTime: stage.completionTime || null,
+              requirement: stage.requirement || null,
+              qcImages: stage.qcImages || [],
+            }));
+        }
+
+        // Return safe project data
+        response.status(200).json({
+          success: true,
+          data: safeProjectData,
+        });
+      } catch (error) {
+        console.error('Error in getProjectStatusByToken:', error);
+        response.status(500).json({
+          error: 'Internal Server Error',
+          message: 'An unexpected error occurred',
+        });
+      }
+    });
+  }
+);
+
+
+--- END: functions\src\publicApi.ts ---
 
 
 --- START: functions\src\quotationExcelGenerator.ts ---
@@ -67143,204 +70426,7 @@ export const projectWorkflowManager = onDocumentWritten(
 
 
 --- START: functions\src\uploadInstructionMedia.ts ---
-import * as functions from 'firebase-functions/v1';
-import * as admin from 'firebase-admin';
-import { google } from 'googleapis';
-import { Readable } from 'stream';
-
-const db = admin.firestore();
-
-/**
- * Upload instruction media (images, audio) to Google Drive using user access token
- * Creates an "Instructions" folder in the project's Drive folder
- */
-export const uploadInstructionMedia = functions
-  .region('asia-southeast1')
-  .runWith({ timeoutSeconds: 300, memory: '1GB' })
-  .https.onCall(async (data, context) => {
-    // Authentication check
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        'unauthenticated',
-        'Người dùng chưa đăng nhập.'
-      );
-    }
-
-    const { accessToken, projectId, fileName, mimeType, base64Data } = data;
-
-    // Validate input
-    if (!accessToken || !projectId || !fileName || !mimeType || !base64Data) {
-      throw new functions.https.HttpsError(
-        'invalid-argument',
-        'Thiếu thông tin cần thiết: accessToken, projectId, fileName, mimeType, base64Data'
-      );
-    }
-
-    console.log(
-      `[uploadInstructionMedia] Starting upload for project: ${projectId}`
-    );
-    console.log(
-      `[uploadInstructionMedia] File: ${fileName}, Type: ${mimeType}`
-    );
-
-    try {
-      // Get project data
-      const projectSnap = await db.collection('projects').doc(projectId).get();
-      const projectData = projectSnap.data();
-
-      if (!projectData || !projectData.driveFolderId) {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          'Không tìm thấy thư mục Drive của dự án.'
-        );
-      }
-
-      console.log(
-        `[uploadInstructionMedia] Project Drive folder: ${projectData.driveFolderId}`
-      );
-
-      // Build Drive client with user's OAuth token
-      const auth = new google.auth.OAuth2();
-      auth.setCredentials({ access_token: accessToken });
-      const drive = google.drive({ version: 'v3', auth });
-
-      // Verify access token works
-      try {
-        console.log(`[uploadInstructionMedia] Verifying access token validity`);
-        const aboutResponse = await drive.about.get({
-          fields: 'user',
-        });
-        console.log(
-          `[uploadInstructionMedia] Access token valid for user: ${
-            aboutResponse.data.user?.displayName || 'Unknown'
-          }`
-        );
-      } catch (tokenError) {
-        console.error(
-          `[uploadInstructionMedia] Access token verification failed:`,
-          tokenError
-        );
-        throw new functions.https.HttpsError(
-          'unauthenticated',
-          'Google access token không hợp lệ hoặc đã hết hạn.'
-        );
-      }
-
-      // Step 1: Find or create Instructions subfolder
-      const folderQuery = await drive.files.list({
-        q: `name='Instructions' and '${projectData.driveFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-        fields: 'files(id, name)',
-        spaces: 'drive',
-      });
-
-      let instructionsFolderId: string | undefined;
-      if (folderQuery.data.files && folderQuery.data.files.length > 0) {
-        instructionsFolderId = folderQuery.data.files[0].id;
-        console.log(
-          `[uploadInstructionMedia] Found existing Instructions folder: ${instructionsFolderId}`
-        );
-      } else {
-        console.log(
-          `[uploadInstructionMedia] Creating new Instructions folder`
-        );
-        const folderRes = await drive.files.create({
-          requestBody: {
-            name: 'Instructions',
-            mimeType: 'application/vnd.google-apps.folder',
-            parents: [projectData.driveFolderId],
-          },
-          fields: 'id',
-        });
-        instructionsFolderId = folderRes.data.id;
-        console.log(
-          `[uploadInstructionMedia] Created Instructions folder: ${instructionsFolderId}`
-        );
-      }
-
-      if (!instructionsFolderId) {
-        throw new functions.https.HttpsError(
-          'internal',
-          'Không thể tạo hoặc tìm Instructions folder.'
-        );
-      }
-
-      // Step 2: Upload file
-      console.log(
-        `[uploadInstructionMedia] Preparing file upload to Instructions folder`
-      );
-      const buffer = Buffer.from(base64Data, 'base64');
-      const stream = Readable.from(buffer);
-      console.log(
-        `[uploadInstructionMedia] File buffer size: ${buffer.length} bytes`
-      );
-
-      const fileRes = await drive.files.create({
-        requestBody: {
-          name: fileName,
-          mimeType,
-          parents: [instructionsFolderId],
-        },
-        media: {
-          mimeType,
-          body: stream,
-        },
-        fields:
-          'id, webViewLink, thumbnailLink, mimeType, webContentLink, parents',
-      });
-
-      console.log(
-        `[uploadInstructionMedia] File uploaded successfully with ID: ${fileRes.data.id}`
-      );
-      console.log(
-        `[uploadInstructionMedia] File webViewLink: ${fileRes.data.webViewLink}`
-      );
-
-      // Step 3: Set permissions to make file viewable by anyone with link
-      await drive.permissions.create({
-        fileId: fileRes.data.id!,
-        requestBody: {
-          role: 'reader',
-          type: 'anyone',
-        },
-      });
-
-      console.log(`[uploadInstructionMedia] File permissions set successfully`);
-
-      // Step 4: Generate a direct download URL for all media types
-      const publicUrl = `https://drive.google.com/uc?export=download&id=${fileRes
-        .data.id!}`;
-
-      const result = {
-        fileId: fileRes.data.id,
-        webViewLink: fileRes.data.webViewLink,
-        thumbnailLink: fileRes.data.thumbnailLink,
-        mimeType: fileRes.data.mimeType,
-        webContentLink: fileRes.data.webContentLink,
-        publicUrl,
-        fileName,
-      };
-
-      console.log(
-        `[uploadInstructionMedia] Upload completed successfully:`,
-        result
-      );
-      return result;
-    } catch (error) {
-      console.error(`[uploadInstructionMedia] Error:`, error);
-
-      if (error instanceof functions.https.HttpsError) {
-        throw error;
-      }
-
-      throw new functions.https.HttpsError(
-        'internal',
-        `Lỗi khi upload file: ${
-          error instanceof Error ? error.message : 'Unknown error'
-        }`
-      );
-    }
-  });
-
+ 
 
 --- END: functions\src\uploadInstructionMedia.ts ---
 

@@ -76,6 +76,10 @@ import InventoryTransactionScreen from '../screens/InventoryTransactionScreen';
 import InventoryReportScreen from '../screens/InventoryReportScreen';
 import AssignSalaryScreen from '../screens/AssignSalaryScreen';
 
+// Import màn hình quản lý lương
+import FixedFeesManagementScreen from '../screens/FixedFeesManagementScreen';
+import SalarySlipCreationScreen from '../screens/SalarySlipCreationScreen';
+
 // Import expense tracking screens
 import ExpenseListScreen from '../screens/ExpenseListScreen';
 
@@ -854,6 +858,18 @@ const AppNavigator = () => {
             <Stack.Screen
               name="AdvanceSalary"
               component={AdvanceSalaryScreen}
+              options={{ headerShown: false }}
+            />
+
+            {/* Salary Management Screens */}
+            <Stack.Screen
+              name="FixedFeesManagement"
+              component={FixedFeesManagementScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="SalarySlipCreation"
+              component={SalarySlipCreationScreen}
               options={{ headerShown: false }}
             />
           </>

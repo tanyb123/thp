@@ -176,6 +176,51 @@
 .stage-status {
   display: flex;
   justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.stage-info {
+  margin: 8px 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.stage-info strong {
+  color: #2c3e50;
+  margin-right: 5px;
+}
+
+.qc-images {
+  margin: 10px 0;
+}
+
+.qc-images strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #2c3e50;
+  font-size: 0.9rem;
+}
+
+.image-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+.qc-image {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 2px solid #e9ecef;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.qc-image:hover {
+  transform: scale(1.05);
+  border-color: #3498db;
 }
 
 .no-stages {

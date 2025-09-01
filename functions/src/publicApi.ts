@@ -76,6 +76,9 @@ export const getProjectStatusByToken = onRequest(
               processName: stage.processName || 'Công đoạn không xác định',
               status: stage.status || 'pending',
               order: stage.order || 0,
+              completionTime: stage.completionTime || null,
+              requirement: stage.requirement || null,
+              qcImages: stage.qcImages || [],
             }));
         }
 

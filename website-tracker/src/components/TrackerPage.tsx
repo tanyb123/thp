@@ -5,6 +5,9 @@ interface WorkflowStage {
   processName: string;
   status: 'completed' | 'in-progress' | 'pending';
   order: number;
+  completionTime?: string;
+  requirement?: string;
+  qcImages?: string[];
 }
 
 interface ProjectData {
@@ -77,6 +80,19 @@ const TrackerPage: React.FC = () => {
         return '🕒';
       default:
         return '🕒';
+    }
+  };
+
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return 'Hoàn Thành';
+      case 'in-progress':
+        return 'Đang Thực Hiện';
+      case 'pending':
+        return 'Chờ Xử Lý';
+      default:
+        return 'Chờ Xử Lý';
     }
   };
 
@@ -206,15 +222,43 @@ const TrackerPage: React.FC = () => {
                 </div>
                 <div className="timeline-content">
                   <h4>{stage.processName}</h4>
+
+                  {/* Thời gian hoàn thành */}
+                  {stage.completionTime && (
+                    <div className="stage-info">
+                      <strong>Thời gian hoàn thành:</strong>{' '}
+                      {stage.completionTime}
+                    </div>
+                  )}
+
+                  {/* Yêu cầu */}
+                  {stage.requirement && (
+                    <div className="stage-info">
+                      <strong>Yêu cầu:</strong> {stage.requirement}
+                    </div>
+                  )}
+
+                  {/* QC Images */}
+                  {stage.qcImages && stage.qcImages.length > 0 && (
+                    <div className="qc-images">
+                      <strong>Hình ảnh QC:</strong>
+                      <div className="image-gallery">
+                        {stage.qcImages.map((imageUrl, imgIndex) => (
+                          <img
+                            key={imgIndex}
+                            src={imageUrl}
+                            alt={`QC ${imgIndex + 1}`}
+                            className="qc-image"
+                            onClick={() => window.open(imageUrl, '_blank')}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className="stage-status">
                     <span className={`status-badge status-${stage.status}`}>
-                      {stage.status === 'completed'
-                        ? 'Hoàn Thành'
-                        : stage.status === 'in-progress'
-                        ? 'Đang Thực Hiện'
-                        : stage.status === 'pending'
-                        ? 'Chờ Xử Lý'
-                        : stage.status}
+                      {getStatusText(stage.status)}
                     </span>
                   </div>
                 </div>

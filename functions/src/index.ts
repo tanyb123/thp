@@ -36,6 +36,7 @@ export * from './deliveryNoteExcelGenerator';
 // Export trực tiếp từ quotationExcelGenerator
 export * from './quotationExcelGenerator';
 export * from './attendanceExcelGenerator';
+export * from './salaryExcelGenerator';
 export * from './processWorkAllocations';
 export * from './aggregateMonthlyReport';
 export * from './notificationTriggers';
