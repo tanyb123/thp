@@ -121,6 +121,7 @@ import KioskScreen from '../screens/KioskScreen';
 import StarboardScreen from '../screens/StarboardScreen';
 import ProductionDashboard from '../screens/ProductionDashboard';
 import WorkAllocationScreen from '../screens/WorkAllocationScreen';
+import ProjectsScreen from '../screens/ProjectsScreen';
 
 // Import AI Chat screen
 import AIChatScreen from '../screens/AIChatScreen';
@@ -859,6 +860,11 @@ const AppNavigator = () => {
             <Stack.Screen
               name="WorkAllocation"
               component={WorkAllocationScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="ProjectsScreen"
+              component={ProjectsScreen}
               options={{ headerShown: false }}
             />
             <Stack.Screen

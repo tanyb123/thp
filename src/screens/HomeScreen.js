@@ -58,17 +58,57 @@ const HomeScreen = ({ navigation }) => {
       color: '#FF6B35', // Cam
       description: 'Quản lý sản xuất & dự án',
       functions: [
-        { name: 'Kiosk xưởng sản xuất', icon: 'business', screen: 'KioskScreen' },
-        { name: 'Bảng tiến độ dự án', icon: 'trending-up', screen: 'ProjectsScreen' },
-        { name: 'Giao việc & Hướng dẫn', icon: 'clipboard', screen: 'WorkAllocationScreen' },
-        { name: 'Quản lý máy móc', icon: 'construct', screen: 'MachinesManagementScreen' },
-        { name: 'Lịch bảo trì', icon: 'calendar', screen: 'MaintenanceScheduleScreen' },
-        { name: 'Nhật ký bảo trì', icon: 'book', screen: 'MaintenanceLogsScreen' },
-        { name: 'Sự cố máy móc', icon: 'warning', screen: 'MachineIncidentsScreen' },
-        { name: 'Kiểm tra chất lượng', icon: 'checkmark-circle', screen: 'QCChecklistsScreen' },
-        { name: 'Báo cáo QC', icon: 'analytics', screen: 'QCReportsScreen' },
-        { name: 'Biểu đồ Gantt', icon: 'bar-chart', screen: 'ProductionPlanGanttScreen' },
-        { name: 'Quản lý năng lực', icon: 'people', screen: 'CapacityPlanningScreen' },
+        {
+          name: 'Kiosk xưởng sản xuất',
+          icon: 'business',
+          screen: 'Kiosk',
+        },
+        {
+          name: 'Bảng tiến độ dự án',
+          icon: 'trending-up',
+          screen: 'ProjectsScreen',
+        },
+        {
+          name: 'Giao việc & Hướng dẫn',
+          icon: 'clipboard',
+          screen: 'WorkAllocation',
+        },
+        {
+          name: 'Quản lý máy móc',
+          icon: 'construct',
+          screen: 'MachinesManagement',
+        },
+        {
+          name: 'Lịch bảo trì',
+          icon: 'calendar',
+          screen: 'MaintenanceSchedule',
+        },
+        {
+          name: 'Nhật ký bảo trì',
+          icon: 'book',
+          screen: 'MaintenanceLogs',
+        },
+        {
+          name: 'Sự cố máy móc',
+          icon: 'warning',
+          screen: 'MachineIncidents',
+        },
+        {
+          name: 'Kiểm tra chất lượng',
+          icon: 'checkmark-circle',
+          screen: 'QCChecklists',
+        },
+        { name: 'Báo cáo QC', icon: 'analytics', screen: 'QCReports' },
+        {
+          name: 'Biểu đồ Gantt',
+          icon: 'bar-chart',
+          screen: 'ProductionPlanGantt',
+        },
+        {
+          name: 'Quản lý năng lực',
+          icon: 'people',
+          screen: 'CapacityPlanning',
+        },
       ],
     },
     {
@@ -78,14 +118,38 @@ const HomeScreen = ({ navigation }) => {
       color: '#4CAF50', // Xanh lá
       description: 'Quản lý tài chính & lương',
       functions: [
-        { name: 'Tạo phiếu lương', icon: 'card', screen: 'SalarySlipCreationScreen' },
-        { name: 'Báo cáo tổng lương', icon: 'stats-chart', screen: 'TotalSalaryReportScreen' },
-        { name: 'Xin ứng lương', icon: 'wallet', screen: 'AdvanceSalaryScreen' },
-        { name: 'Khoản tiền ra', icon: 'cash-outline', screen: 'CompanyExpensesScreen' },
-        { name: 'Ví/Quỹ', icon: 'wallet-outline', screen: 'WalletScreen' },
-        { name: 'Yêu cầu nạp', icon: 'add-circle', screen: 'CashInRequestScreen' },
-        { name: 'Thêm chi phí', icon: 'receipt', screen: 'ExpenseListScreen' },
-        { name: 'Báo cáo lợi nhuận', icon: 'trending-up', screen: 'ProjectProfitReportScreen' },
+        {
+          name: 'Tạo phiếu lương',
+          icon: 'card',
+          screen: 'SalarySlipCreation',
+        },
+        {
+          name: 'Báo cáo tổng lương',
+          icon: 'stats-chart',
+          screen: 'TotalSalaryReport',
+        },
+        {
+          name: 'Xin ứng lương',
+          icon: 'wallet',
+          screen: 'AdvanceSalary',
+        },
+        {
+          name: 'Khoản tiền ra',
+          icon: 'cash-outline',
+          screen: 'CompanyExpenses',
+        },
+        { name: 'Ví/Quỹ', icon: 'wallet-outline', screen: 'Wallet' },
+        {
+          name: 'Yêu cầu nạp',
+          icon: 'add-circle',
+          screen: 'CashInRequest',
+        },
+        { name: 'Thêm chi phí', icon: 'receipt', screen: 'ExpenseList' },
+        {
+          name: 'Báo cáo lợi nhuận',
+          icon: 'trending-up',
+          screen: 'ProjectProfitReport',
+        },
       ],
     },
     {
@@ -95,11 +159,27 @@ const HomeScreen = ({ navigation }) => {
       color: '#2196F3', // Xanh dương
       description: 'Quản lý nhân viên & chấm công',
       functions: [
-        { name: 'Xem chấm công', icon: 'time', screen: 'AttendanceScreen' },
-        { name: 'Xin nghỉ phép', icon: 'calendar', screen: 'LeaveRequestScreen' },
-        { name: 'Bảng công việc', icon: 'list', screen: 'EmployeeTaskBoardScreen' },
-        { name: 'Báo cáo hiệu suất', icon: 'analytics', screen: 'WorkerPerformanceReportScreen' },
-        { name: 'Quản lý người dùng', icon: 'person', screen: 'UserManagementScreen' },
+        { name: 'Xem chấm công', icon: 'time', screen: 'Attendance' },
+        {
+          name: 'Xin nghỉ phép',
+          icon: 'calendar',
+          screen: 'LeaveRequest',
+        },
+        {
+          name: 'Bảng công việc',
+          icon: 'list',
+          screen: 'EmployeeTaskBoard',
+        },
+        {
+          name: 'Báo cáo hiệu suất',
+          icon: 'analytics',
+          screen: 'WorkerPerformanceReport',
+        },
+        {
+          name: 'Quản lý người dùng',
+          icon: 'person',
+          screen: 'UserManagement',
+        },
       ],
     },
     {
@@ -109,13 +189,37 @@ const HomeScreen = ({ navigation }) => {
       color: '#9C27B0', // Tím
       description: 'Quản lý kho & vật tư',
       functions: [
-        { name: 'Vật tư tồn kho', icon: 'archive', screen: 'InventoryScreen' },
-        { name: 'Báo cáo kho', icon: 'stats-chart', screen: 'InventoryReportScreen' },
-        { name: 'Giao dịch kho', icon: 'swap-horizontal', screen: 'InventoryTransactionScreen' },
-        { name: 'Thêm vật tư', icon: 'add-circle', screen: 'AddInventoryItemScreen' },
-        { name: 'Quản lý nhà cung cấp', icon: 'storefront', screen: 'SupplierManagementScreen' },
-        { name: 'Quản lý vật liệu', icon: 'construct', screen: 'MaterialManagementScreen' },
-        { name: 'Báo cáo nhà cung cấp', icon: 'analytics', screen: 'SupplierAnalysisReportScreen' },
+        { name: 'Vật tư tồn kho', icon: 'archive', screen: 'Inventory' },
+        {
+          name: 'Báo cáo kho',
+          icon: 'stats-chart',
+          screen: 'InventoryReport',
+        },
+        {
+          name: 'Giao dịch kho',
+          icon: 'swap-horizontal',
+          screen: 'InventoryTransaction',
+        },
+        {
+          name: 'Thêm vật tư',
+          icon: 'add-circle',
+          screen: 'AddInventoryItem',
+        },
+        {
+          name: 'Quản lý nhà cung cấp',
+          icon: 'storefront',
+          screen: 'SupplierManagement',
+        },
+        {
+          name: 'Quản lý vật liệu',
+          icon: 'construct',
+          screen: 'MaterialManagement',
+        },
+        {
+          name: 'Báo cáo nhà cung cấp',
+          icon: 'analytics',
+          screen: 'SupplierAnalysisReport',
+        },
       ],
     },
     {
@@ -125,10 +229,26 @@ const HomeScreen = ({ navigation }) => {
       color: '#FF9800', // Cam đậm
       description: 'Quản lý dự án & khách hàng',
       functions: [
-        { name: 'Quản lý dự án', icon: 'folder-open', screen: 'ProjectManagementScreen' },
-        { name: 'Quản lý khách hàng', icon: 'people-circle', screen: 'CustomerManagementScreen' },
-        { name: 'Tạo báo giá', icon: 'document-text', screen: 'QuotationScreen' },
-        { name: 'Quản lý phí cố định', icon: 'settings', screen: 'FixedFeesManagementScreen' },
+        {
+          name: 'Quản lý dự án',
+          icon: 'folder-open',
+          screen: 'ProjectManagement',
+        },
+        {
+          name: 'Quản lý khách hàng',
+          icon: 'people-circle',
+          screen: 'Customers',
+        },
+        {
+          name: 'Tạo báo giá',
+          icon: 'document-text',
+          screen: 'Quotation',
+        },
+        {
+          name: 'Quản lý phí cố định',
+          icon: 'settings',
+          screen: 'FixedFeesManagement',
+        },
       ],
     },
     {
@@ -138,10 +258,26 @@ const HomeScreen = ({ navigation }) => {
       color: '#607D8B', // Xám xanh
       description: 'Báo cáo & phân tích',
       functions: [
-        { name: 'Báo cáo tài chính', icon: 'stats-chart', screen: 'FinancialDashboardScreen' },
-        { name: 'Báo cáo dự án', icon: 'analytics', screen: 'ProjectCostScreen' },
-        { name: 'Báo cáo chi phí', icon: 'receipt', screen: 'MonthlyCostReportScreen' },
-        { name: 'Dashboard tổng quan', icon: 'grid', screen: 'DirectorDashboardScreen' },
+        {
+          name: 'Báo cáo tài chính',
+          icon: 'stats-chart',
+          screen: 'FinancialDashboard',
+        },
+        {
+          name: 'Báo cáo dự án',
+          icon: 'analytics',
+          screen: 'ProjectCost',
+        },
+        {
+          name: 'Báo cáo chi phí',
+          icon: 'receipt',
+          screen: 'MonthlyCostReport',
+        },
+        {
+          name: 'Dashboard tổng quan',
+          icon: 'grid',
+          screen: 'DirectorDashboard',
+        },
       ],
     },
   ];
@@ -238,13 +374,23 @@ const HomeScreen = ({ navigation }) => {
               style={[styles.moduleCard, { backgroundColor: theme.card }]}
               onPress={() => handleModulePress(module)}
             >
-              <View style={[styles.moduleIconContainer, { backgroundColor: module.color + '20' }]}>
+              <View
+                style={[
+                  styles.moduleIconContainer,
+                  { backgroundColor: module.color + '20' },
+                ]}
+              >
                 <Ionicons name={module.icon} size={28} color={module.color} />
               </View>
               <Text style={[styles.moduleTitle, { color: theme.text }]}>
                 {module.title}
               </Text>
-              <Text style={[styles.moduleDescription, { color: theme.textSecondary }]}>
+              <Text
+                style={[
+                  styles.moduleDescription,
+                  { color: theme.textSecondary },
+                ]}
+              >
                 {module.description}
               </Text>
             </TouchableOpacity>
@@ -270,7 +416,7 @@ const HomeScreen = ({ navigation }) => {
             {selectedModule.title}
           </Text>
         </View>
-        
+
         <View style={styles.functionsGrid}>
           {selectedModule.functions.map((functionItem, index) => (
             <TouchableOpacity
@@ -278,8 +424,17 @@ const HomeScreen = ({ navigation }) => {
               style={[styles.functionCard, { backgroundColor: theme.card }]}
               onPress={() => handleFunctionPress(functionItem)}
             >
-              <View style={[styles.functionIconContainer, { backgroundColor: selectedModule.color + '20' }]}>
-                <Ionicons name={functionItem.icon} size={24} color={selectedModule.color} />
+              <View
+                style={[
+                  styles.functionIconContainer,
+                  { backgroundColor: selectedModule.color + '20' },
+                ]}
+              >
+                <Ionicons
+                  name={functionItem.icon}
+                  size={24}
+                  color={selectedModule.color}
+                />
               </View>
               <Text style={[styles.functionText, { color: theme.text }]}>
                 {functionItem.name}
@@ -295,7 +450,9 @@ const HomeScreen = ({ navigation }) => {
     if (!canUseAttendance) return null;
 
     return (
-      <View style={[styles.attendanceContainer, { backgroundColor: theme.card }]}>
+      <View
+        style={[styles.attendanceContainer, { backgroundColor: theme.card }]}
+      >
         <Text style={[styles.attendanceTitle, { color: theme.text }]}>
           Chấm công hôm nay
         </Text>
@@ -305,7 +462,10 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.attendanceButtons}>
             {!attendance?.clockIn ? (
               <TouchableOpacity
-                style={[styles.attendanceButton, { backgroundColor: theme.primary }]}
+                style={[
+                  styles.attendanceButton,
+                  { backgroundColor: theme.primary },
+                ]}
                 onPress={handleClockIn}
               >
                 <Ionicons name="time" size={20} color="white" />
@@ -313,7 +473,10 @@ const HomeScreen = ({ navigation }) => {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity
-                style={[styles.attendanceButton, { backgroundColor: theme.danger }]}
+                style={[
+                  styles.attendanceButton,
+                  { backgroundColor: theme.danger },
+                ]}
                 onPress={handleClockOut}
               >
                 <Ionicons name="time" size={20} color="white" />
@@ -328,7 +491,9 @@ const HomeScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+      <SafeAreaView
+        style={[styles.container, { backgroundColor: theme.background }]}
+      >
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={theme.primary} />
@@ -341,9 +506,14 @@ const HomeScreen = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: theme.background }]}
+    >
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.header}>
           <Text style={[styles.greeting, { color: theme.text }]}>
             Xin chào, {user?.displayName || user?.email || 'Người dùng'}
