@@ -2581,6 +2581,100 @@ export default InventoryService;
 --- END: src\api\inventoryService.js ---
 
 
+--- START: src\api\machineService.js ---
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  serverTimestamp,
+} from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
+
+class MachineService {
+  constructor() {
+    this.db = db;
+    this.colName = 'machines';
+  }
+
+  async listMachines(filters = {}) {
+    try {
+      const { keyword, status } = filters;
+      let q = query(
+        collection(this.db, this.colName),
+        orderBy('createdAt', 'desc')
+      );
+
+      // Firestore không hỗ trợ contains cho nhiều field, nên filter keyword ở client
+      const snap = await getDocs(q);
+      let items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+      if (status)
+        items = items.filter(
+          (m) => (m.status || '').toLowerCase() === status.toLowerCase()
+        );
+      if (keyword && keyword.trim()) {
+        const k = keyword.trim().toLowerCase();
+        items = items.filter((m) =>
+          [m.code, m.name, m.location, m.vendor, m.model]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(k))
+        );
+      }
+      return items;
+    } catch (e) {
+      console.error('listMachines error', e);
+      return [];
+    }
+  }
+
+  async getMachine(id) {
+    const ref = doc(this.db, this.colName, id);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...snap.data() };
+  }
+
+  async createMachine(payload) {
+    const ref = await addDoc(collection(this.db, this.colName), {
+      code: payload.code || '',
+      name: payload.name || '',
+      model: payload.model || '',
+      vendor: payload.vendor || '',
+      location: payload.location || '',
+      status: payload.status || 'active', // active | maintenance | broken | retired
+      lastMaintenanceAt: payload.lastMaintenanceAt || null,
+      nextMaintenanceAt: payload.nextMaintenanceAt || null,
+      notes: payload.notes || '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    return { id: ref.id };
+  }
+
+  async updateMachine(id, payload) {
+    const ref = doc(this.db, this.colName, id);
+    await updateDoc(ref, { ...payload, updatedAt: serverTimestamp() });
+  }
+
+  async deleteMachine(id) {
+    const ref = doc(this.db, this.colName, id);
+    await deleteDoc(ref);
+  }
+}
+
+export default new MachineService();
+
+
+--- END: src\api\machineService.js ---
+
+
 --- START: src\api\materialService.js ---
 import {
   collection,
@@ -5327,6 +5421,884 @@ export const fetchAdvanceRequestsByUser = async (userId) => {
 --- END: src\api\requestService.js ---
 
 
+--- START: src\api\salaryService.js ---
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  serverTimestamp,
+  deleteDoc,
+  runTransaction,
+  documentId,
+  setDoc,
+} from 'firebase/firestore';
+import { db } from '../config/firebaseConfig';
+import { getUsers } from './userService';
+
+class SalaryService {
+  constructor() {
+    this.db = db;
+  }
+
+  // ===== QUẢN LÝ CẤU HÌNH HỆ THỐNG =====
+
+  /**
+   * Lấy cấu hình hệ thống từ collection 'settings'.
+   * @returns {Promise<Object>} - Cấu hình công ty.
+   */
+  async getSystemSettings() {
+    try {
+      const settingsRef = doc(this.db, 'settings', 'companyConfig');
+      const settingsDoc = await getDoc(settingsRef);
+
+      if (settingsDoc.exists()) {
+        return settingsDoc.data();
+      } else {
+        // Trả về giá trị mặc định nếu chưa có cấu hình
+        console.warn(
+          'Không tìm thấy companyConfig trong Firestore, sử dụng giá trị mặc định.'
+        );
+        return {
+          standardWorkingDays: 26,
+          overtimeMultipliers: {
+            normal: 1.5,
+            sunday: 2.0,
+            holiday: 3.0,
+          },
+        };
+      }
+    } catch (error) {
+      console.error('Lỗi khi lấy cấu hình hệ thống:', error);
+      throw error;
+    }
+  }
+
+  // ===== QUẢN LÝ DỮ LIỆU NHÂN VIÊN =====
+
+  /**
+   * Lấy thông tin chi tiết của một nhân viên.
+   * @param {string} employeeId - ID của nhân viên.
+   * @returns {Promise<Object>} - Dữ liệu chi tiết của nhân viên.
+   */
+  async getEmployeeDetails(employeeId) {
+    try {
+      const userRef = doc(this.db, 'users', employeeId);
+      const userDoc = await getDoc(userRef);
+
+      if (!userDoc.exists()) {
+        throw new Error(`Không tìm thấy nhân viên với ID: ${employeeId}`);
+      }
+      const userData = userDoc.data();
+      return {
+        id: userDoc.id,
+        ...userData,
+        // Đảm bảo các trường quan trọng có giá trị mặc định
+        salaryType:
+          userData.salaryType || (userData.monthlySalary ? 'monthly' : 'daily'),
+        dailySalary: userData.dailySalary || 0,
+        monthlySalary: userData.monthlySalary || 0,
+        insuranceContributionBase: userData.insuranceContributionBase || 0,
+        annualLeaveBalance:
+          userData.annualLeaveBalance !== undefined
+            ? userData.annualLeaveBalance
+            : 12,
+      };
+    } catch (error) {
+      console.error('Lỗi khi lấy thông tin nhân viên:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Lấy danh sách ứng lương đã được duyệt của nhân viên trong tháng.
+   * @param {string} employeeId - ID nhân viên.
+   * @param {number} month - Tháng (1-12).
+   * @param {number} year - Năm.
+   * @returns {Promise<Array>} - Danh sách các khoản ứng lương.
+   */
+  async getAdvancePayments(employeeId, month, year) {
+    try {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+
+      console.log('DEBUG getAdvancePayments:', {
+        employeeId,
+        month,
+        year,
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+      });
+
+      const advanceRef = collection(this.db, 'advance_requests');
+      const q = query(
+        advanceRef,
+        where('userId', '==', employeeId),
+        where('status', '==', 'approved')
+      );
+
+      const querySnapshot = await getDocs(q);
+      const allDocs = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      console.log('DEBUG all approved advances:', allDocs);
+
+      // Filter by date range manually since Firestore date queries can be tricky
+      const filteredDocs = allDocs.filter((doc) => {
+        const requestDate = doc.requestDate?.toDate
+          ? doc.requestDate.toDate()
+          : new Date(doc.requestDate);
+        return requestDate >= startDate && requestDate <= endDate;
+      });
+
+      console.log('DEBUG filtered advances for period:', filteredDocs);
+      return filteredDocs;
+    } catch (error) {
+      console.error('Lỗi khi lấy danh sách ứng lương:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Đọc cache báo cáo tổng lương trong Firestore nếu có
+   */
+  async getCachedSalaryReport(month, year) {
+    try {
+      const id = `${year}-${String(month).padStart(2, '0')}`;
+      const ref = doc(this.db, 'salaryReportCache', id);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data();
+        return data?.payload || null;
+      }
+      return null;
+    } catch (e) {
+      console.warn('Không đọc được cache báo cáo:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Lưu cache báo cáo tổng lương vào Firestore
+   */
+  async saveSalaryReportCache(month, year, reportPayload) {
+    try {
+      const id = `${year}-${String(month).padStart(2, '0')}`;
+      const ref = doc(this.db, 'salaryReportCache', id);
+      await setDoc(ref, {
+        month,
+        year,
+        payload: reportPayload,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.warn('Không lưu được cache báo cáo:', e);
+    }
+  }
+
+  /**
+   * Lấy báo cáo tổng lương cho tất cả nhân viên trong tháng (tính từ dữ liệu gốc)
+   * @param {number} month - Tháng (1-12)
+   * @param {number} year - Năm
+   * @returns {Promise<Object>} - Báo cáo tổng lương
+   */
+  async getTotalSalaryReport(month, year, options = {}) {
+    try {
+      const { forceRefresh = false } = options;
+      console.log('DEBUG getTotalSalaryReport:', { month, year, forceRefresh });
+
+      if (!forceRefresh) {
+        const cached = await this.getCachedSalaryReport(month, year);
+        if (cached) {
+          return cached;
+        }
+      }
+
+      // 1) Fetch all users
+      const usersRef = collection(this.db, 'users');
+      const usersSnapshot = await getDocs(usersRef);
+      const allUsers = usersSnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      // 2) For each user, try to get the latest salary slip in that month/year
+      const resolvedReports = [];
+      for (const user of allUsers) {
+        try {
+          const slipsQ = query(
+            collection(this.db, 'salarySlips'),
+            where('employeeId', '==', user.id),
+            where('month', '==', parseInt(month)),
+            where('year', '==', parseInt(year)),
+            orderBy('createdAt', 'desc')
+          );
+          const slipsSnap = await getDocs(slipsQ);
+          if (!slipsSnap.empty) {
+            // Use the latest slip as ground truth
+            const latestSlip = {
+              id: slipsSnap.docs[0].id,
+              ...slipsSnap.docs[0].data(),
+            };
+            resolvedReports.push({
+              employeeId: latestSlip.employeeId,
+              employeeName: latestSlip.employeeName,
+              position: user.position || 'Nhân viên',
+              attendanceSummary: latestSlip.attendanceSummary,
+              calculatedSalary: latestSlip.calculatedSalary,
+              source: 'slip',
+            });
+            continue;
+          }
+
+          // 3) If no slip exists, compute from raw data (fallback)
+          const attendance = await this.getEmployeeAttendance(
+            user.id,
+            month,
+            year
+          );
+          const advancePayments = await this.getAdvancePayments(
+            user.id,
+            month,
+            year
+          );
+
+          const monthlySalary = Number(user.monthlySalary) || 0;
+          const dailySalaryRate = Number(user.dailySalary) || 0;
+          const baseSalary =
+            monthlySalary > 0 ? monthlySalary : dailySalaryRate * 26;
+          const effectiveDays = Number(attendance.effectiveWorkingDays) || 0;
+          const baseSalaryForMonth =
+            monthlySalary > 0
+              ? (monthlySalary / 26) * effectiveDays
+              : dailySalaryRate * effectiveDays;
+
+          const hourlyRate =
+            baseSalaryForMonth > 0 ? baseSalaryForMonth / 8 : 0;
+          const overtimePay = {
+            normal:
+              (Number(attendance.overtimeHours.normal) || 0) * hourlyRate * 1.5,
+            sunday:
+              (Number(attendance.overtimeHours.sunday) || 0) * hourlyRate * 1.5,
+            holiday:
+              (Number(attendance.overtimeHours.holiday) || 0) *
+              hourlyRate *
+              1.5,
+          };
+          const totalOvertimePay =
+            overtimePay.normal + overtimePay.sunday + overtimePay.holiday;
+
+          const insuranceBase =
+            Number(user.insuranceContributionBase) || baseSalary;
+          const autoDeductions = await this.getAutoDeductions(insuranceBase);
+          const totalAutoDeductions = autoDeductions.reduce(
+            (s, d) => s + (Number(d.amount) || 0),
+            0
+          );
+          const totalAdvancePayments = advancePayments.reduce(
+            (s, p) => s + (Number(p.amount) || 0),
+            0
+          );
+
+          const grossSalary = baseSalaryForMonth + totalOvertimePay;
+          const totalDeductions = totalAutoDeductions + totalAdvancePayments;
+          const netSalary = Math.max(0, grossSalary - totalDeductions);
+
+          resolvedReports.push({
+            employeeId: user.id,
+            employeeName: user.displayName || user.email || 'Nhân viên',
+            position: user.position || 'Nhân viên',
+            attendanceSummary: attendance,
+            calculatedSalary: {
+              baseSalary: baseSalaryForMonth,
+              totalOvertimePay,
+              grossSalary,
+              totalDeductions,
+              netSalary,
+              autoDeductions,
+              advancePayments,
+            },
+            source: 'computed',
+          });
+        } catch (e) {
+          console.error('Report item error for user', user.id, e);
+        }
+      }
+
+      // Normalize per-entry totals to avoid mismatch
+      const normalizedReports = resolvedReports.map((r) => {
+        const gross = Number(r.calculatedSalary?.grossSalary) || 0;
+        const net = Number(r.calculatedSalary?.netSalary) || 0;
+        let totalDeductions = Number(r.calculatedSalary?.totalDeductions);
+        if (
+          !Number.isFinite(totalDeductions) ||
+          Math.abs(gross - totalDeductions - net) > 1
+        ) {
+          totalDeductions = Math.max(0, gross - net);
+        }
+        return {
+          ...r,
+          calculatedSalary: {
+            ...r.calculatedSalary,
+            grossSalary: gross,
+            netSalary: net,
+            totalDeductions,
+          },
+        };
+      });
+
+      // 4) Aggregate totals
+      const totalGrossSalary = normalizedReports.reduce(
+        (s, r) => s + (r.calculatedSalary?.grossSalary || 0),
+        0
+      );
+      const totalNetSalary = normalizedReports.reduce(
+        (s, r) => s + (r.calculatedSalary?.netSalary || 0),
+        0
+      );
+      const totalDeductions = Math.max(0, totalGrossSalary - totalNetSalary);
+
+      const finalReport = {
+        month,
+        year,
+        totalSalarySlips: normalizedReports.length,
+        totalGrossSalary,
+        totalDeductions,
+        totalNetSalary,
+        salarySlips: normalizedReports,
+        generatedAt: Date.now(),
+      };
+
+      // Lưu cache để lần sau mở ra nhanh
+      await this.saveSalaryReportCache(month, year, finalReport);
+
+      return finalReport;
+    } catch (error) {
+      console.error('Lỗi khi lấy báo cáo tổng lương:', error);
+      throw error;
+    }
+  }
+
+  // ===== NHIỆM VỤ 2: TÁI CẤU TRÚC LOGIC BACKEND =====
+
+  /**
+   * (VIẾT LẠI) Tổng hợp dữ liệu chấm công và nghỉ phép của nhân viên trong tháng.
+   * @param {string} employeeId - ID nhân viên.
+   * @param {number} month - Tháng (1-12).
+   * @param {number} year - Năm.
+   * @returns {Promise<Object>} - Đối tượng tóm tắt chấm công.
+   */
+  async getEmployeeAttendance(employeeId, month, year) {
+    try {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0);
+
+      // 1. Lấy dữ liệu chấm công từ collection 'attendance'
+      const attendanceRef = collection(this.db, 'attendance');
+      const attendanceQuery = query(
+        attendanceRef,
+        where('userId', '==', employeeId),
+        where('date', '>=', `${year}-${String(month).padStart(2, '0')}-01`),
+        where(
+          'date',
+          '<=',
+          `${year}-${String(month).padStart(2, '0')}-${String(
+            endDate.getDate()
+          ).padStart(2, '0')}`
+        )
+      );
+      const attendanceSnapshot = await getDocs(attendanceQuery);
+      const actualWorkDays = attendanceSnapshot.size;
+
+      // Phân loại giờ tăng ca
+      const overtimeHours = { normal: 0, sunday: 0, holiday: 0 };
+      // Lấy danh sách ngày lễ trong khoảng tháng
+      const startDateStr = `${year}-${String(month).padStart(2, '0')}-01`;
+      const endDateStr = `${year}-${String(month).padStart(2, '0')}-${String(
+        endDate.getDate()
+      ).padStart(2, '0')}`;
+      const holidaysRef = collection(this.db, 'holidays');
+      const holidaysQuery = query(
+        holidaysRef,
+        where(documentId(), '>=', startDateStr),
+        where(documentId(), '<=', endDateStr)
+      );
+      const holidaysSnap = await getDocs(holidaysQuery);
+      const holidays = holidaysSnap.docs.map((d) => d.id);
+
+      // DEBUG rows collector
+      const debugRows = [];
+      // OT details per day for frontend breakdown
+      const overtimeDetails = [];
+
+      const parseHours = (timeStr) => {
+        if (!timeStr || typeof timeStr !== 'string') return null;
+        const [h, m] = timeStr.split(':').map((x) => parseInt(x, 10));
+        if (Number.isNaN(h) || Number.isNaN(m)) return null;
+        return h + m / 60;
+      };
+
+      // Mốc giờ chuẩn cho ngày thường
+      const NORMAL_WORK_END = parseHours('17:30'); // 17h30
+      const DEFAULT_OT_END = parseHours('20:30'); // 20h30 (mặc định OT đến 20:30 => 3 giờ)
+
+      attendanceSnapshot.forEach((docItem) => {
+        const data = docItem.data();
+        let workDateStr = data.date;
+        if (
+          !workDateStr &&
+          typeof docItem.id === 'string' &&
+          docItem.id.includes('_')
+        ) {
+          const parts = docItem.id.split('_');
+          const datePart = parts[1];
+          if (datePart && /^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+            workDateStr = datePart;
+          }
+        }
+        if (!workDateStr) return; // không xác định được ngày
+        const workDate = new Date(workDateStr);
+        const dayOfWeek = workDate.getDay();
+        const isHoliday = holidays.includes(workDateStr);
+
+        // Tính số giờ làm việc trong ngày nếu có clockIn/clockOut, fallback 8 giờ
+        const inH = parseHours(data.clockIn);
+        const outH = parseHours(data.clockOut);
+        let workedHours = 0;
+        if (inH !== null && outH !== null && outH > inH) {
+          workedHours = outH - inH;
+        }
+
+        if (isHoliday) {
+          // Làm vào ngày lễ: toàn bộ giờ là OT ngày lễ
+          overtimeHours.holiday += workedHours > 0 ? workedHours : 8;
+          return;
+        }
+
+        if (dayOfWeek === 0) {
+          // Làm vào Chủ nhật: toàn bộ giờ là OT chủ nhật
+          overtimeHours.sunday += workedHours > 0 ? workedHours : 8;
+          return;
+        }
+
+        // Ngày thường: nếu có cờ tăng ca thì tính OT theo mốc 17:30 -> (overtimeEnd | otEndTime | overtimeTo | otTo | default 20:30)
+        // LƯU Ý: KHÔNG dùng clockOut để suy ra OT nếu không có trường OT kết thúc riêng.
+        if (data.overtime) {
+          // Trường hợp tương thích cũ: nếu overtime là số, hiểu là số giờ OT nhập tay
+          const explicitOt =
+            typeof data.overtime === 'number' ? data.overtime : null;
+
+          if (explicitOt && explicitOt > 0) {
+            overtimeHours.normal += explicitOt;
+            overtimeDetails.push({
+              date: workDateStr,
+              type: 'weekday',
+              hours: explicitOt,
+              source: 'explicit',
+            });
+          } else {
+            // Ưu tiên giờ kết thúc OT theo các trường riêng; nếu không có, mặc định 20:30
+            const otEndCandidates = [
+              data.overtimeEnd,
+              data.otEndTime,
+              data.overtimeTo,
+              data.otTo,
+            ]
+              .map((t) => parseHours(t))
+              .filter((v) => v !== null);
+            const endH =
+              otEndCandidates.length > 0 ? otEndCandidates[0] : DEFAULT_OT_END;
+            const startH = NORMAL_WORK_END; // OT bắt đầu từ 17:30
+            const computedOt = Math.max(0, endH - startH);
+            const finalOt = computedOt > 0 ? computedOt : 3; // fallback: 3 giờ nếu không đủ dữ liệu
+
+            overtimeHours.normal += finalOt;
+            overtimeDetails.push({
+              date: workDateStr,
+              type: 'weekday',
+              hours: finalOt,
+              start: '17:30',
+              end:
+                otEndCandidates.length > 0
+                  ? data.overtimeEnd ||
+                    data.otEndTime ||
+                    data.overtimeTo ||
+                    data.otTo
+                  : '20:30',
+              source: otEndCandidates.length > 0 ? 'endField' : 'default2030',
+            });
+          }
+        }
+      });
+
+      // 2. Lấy dữ liệu nghỉ phép đã được duyệt từ collection 'leaveRequests'
+      const leaveRef = collection(this.db, 'leaveRequests');
+      const leaveQuery = query(
+        leaveRef,
+        where('userId', '==', employeeId),
+        where('status', '==', 'approved'),
+        where('leaveType', '==', 'paid') // Chỉ tính nghỉ phép có lương
+      );
+      const leaveSnapshot = await getDocs(leaveQuery);
+
+      let paidLeaveDays = 0;
+      leaveSnapshot.forEach((doc) => {
+        const leave = doc.data();
+        const leaveStart = leave.startDate.toDate();
+        const leaveEnd = leave.endDate.toDate();
+
+        // Tính số ngày nghỉ phép trong tháng đang xét
+        for (
+          let d = new Date(leaveStart);
+          d <= leaveEnd;
+          d.setDate(d.getDate() + 1)
+        ) {
+          if (d.getFullYear() === year && d.getMonth() === month - 1) {
+            paidLeaveDays++;
+          }
+        }
+      });
+
+      // DEBUG: in ra cách cộng dồn OT theo từng ngày
+      try {
+        console.log('DEBUG OT MONTH', {
+          employeeId,
+          month,
+          year,
+          actualWorkDays,
+          paidLeaveDays,
+          overtimeHours,
+          rows: debugRows,
+        });
+      } catch (e) {
+        // ignore logging errors
+      }
+
+      // Tính số ngày công hiệu quả (ngày công thực tế + nghỉ phép)
+      const effectiveWorkingDays = actualWorkDays + paidLeaveDays;
+
+      return {
+        actualWorkDays,
+        paidLeaveDays,
+        effectiveWorkingDays,
+        overtimeHours,
+        overtimeDetails,
+      };
+    } catch (error) {
+      console.error('Lỗi khi tổng hợp dữ liệu chấm công:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * (VIẾT LẠI) Tính các khoản khấu trừ tự động (BHXH, BHYT, BHTN).
+   * @param {number} insuranceContributionBase - Lương đóng BHXH cố định.
+   * @returns {Promise<Array>} - Danh sách các khoản khấu trừ tự động.
+   */
+  async getAutoDeductions(insuranceContributionBase) {
+    if (insuranceContributionBase <= 0) {
+      return [];
+    }
+    // Các tỷ lệ này có thể được chuyển vào 'settings' collection để linh hoạt hơn
+    const deductionsConfig = [
+      { name: 'Bảo hiểm xã hội (8%)', rate: 0.08 },
+      { name: 'Bảo hiểm y tế (1.5%)', rate: 0.015 },
+      { name: 'Bảo hiểm thất nghiệp (1%)', rate: 0.01 },
+    ];
+
+    return deductionsConfig.map((config) => ({
+      name: config.name,
+      amount: Math.round(insuranceContributionBase * config.rate),
+      isAuto: true,
+    }));
+  }
+
+  /**
+   * (VIẾT LẠI) Thực hiện toàn bộ logic tính toán lương chi tiết.
+   * @param {Object} employeeInfo - Thông tin nhân viên (lương tháng, etc.).
+   * @param {Object} attendanceSummary - Tóm tắt chấm công từ getEmployeeAttendance.
+   * @param {Object} systemSettings - Cấu hình hệ thống (ngày công chuẩn, hệ số OT).
+   * @param {Object} manualInputs - Các khoản nhập tay (phụ cấp, thưởng, khấu trừ khác).
+   * @returns {Object} - Kết quả tính lương chi tiết.
+   */
+  calculateSalary(
+    employeeInfo,
+    attendanceSummary,
+    systemSettings,
+    manualInputs
+  ) {
+    const { monthlySalary, dailySalary, salaryType } = employeeInfo;
+    const { actualWorkDays, paidLeaveDays, overtimeHours } = attendanceSummary;
+    const { standardWorkingDays, overtimeMultipliers } = systemSettings;
+    const {
+      allowances = [],
+      bonuses = [],
+      deductions = [],
+      advancePayments = [],
+    } = manualInputs;
+
+    // 1. Tính ngày công hiệu lực
+    const effectiveWorkingDays = actualWorkDays + paidLeaveDays;
+
+    // 2. Tính lương cơ bản theo loại lương
+    let baseSalary = 0;
+    let hourlyRate = 0;
+    if (salaryType === 'daily') {
+      baseSalary = (dailySalary || 0) * effectiveWorkingDays;
+      hourlyRate = (dailySalary || 0) / 8;
+    } else {
+      baseSalary = (monthlySalary / standardWorkingDays) * effectiveWorkingDays;
+      hourlyRate = monthlySalary / standardWorkingDays / 8;
+    }
+
+    // 3. Tính lương tăng ca
+    const mNormal = overtimeMultipliers?.normal ?? 1.5;
+    const mSunday = mNormal; // Chủ nhật cùng đơn giá OT như ngày thường
+    const mHoliday = overtimeMultipliers?.holiday ?? 3.0;
+
+    const overtimeHourlyRate = {
+      normal: hourlyRate * mNormal,
+      sunday: hourlyRate * mSunday,
+      holiday: hourlyRate * mHoliday,
+    };
+
+    const overtimePay = {
+      normal: overtimeHourlyRate.normal * (overtimeHours.normal || 0),
+      sunday: overtimeHourlyRate.sunday * (overtimeHours.sunday || 0),
+      holiday: overtimeHourlyRate.holiday * (overtimeHours.holiday || 0),
+    };
+    const totalOvertimePay =
+      (overtimePay.normal || 0) +
+      (overtimePay.sunday || 0) +
+      (overtimePay.holiday || 0);
+
+    // 4. Tính tổng thu nhập (Gross)
+    const totalAllowances = allowances.reduce(
+      (sum, item) => sum + item.amount,
+      0
+    );
+    const totalBonuses = bonuses.reduce((sum, item) => sum + item.amount, 0);
+    const grossSalary =
+      baseSalary + totalOvertimePay + totalAllowances + totalBonuses;
+
+    // 5. Tính tổng khấu trừ và lương Net
+    const totalManualDeductions = deductions.reduce(
+      (sum, item) => sum + item.amount,
+      0
+    );
+    const totalAdvancePayments = advancePayments.reduce(
+      (sum, item) => sum + item.amount,
+      0
+    );
+    // Các khoản khấu trừ tự động (BHXH...) sẽ được thêm vào sau
+    const totalDeductionsBeforeInsurance =
+      totalManualDeductions + totalAdvancePayments;
+    const netSalaryBeforeInsurance =
+      grossSalary - totalDeductionsBeforeInsurance;
+
+    return {
+      // Inputs & Base Info
+      monthlySalary,
+      standardWorkingDays,
+      hourlyRate: Math.round(hourlyRate),
+
+      // Attendance & Prorated Salary
+      attendanceSummary,
+      effectiveWorkingDays,
+      baseSalary: Math.round(baseSalary),
+
+      // Overtime
+      overtimeMultipliers,
+      overtimeHourlyRate: {
+        normal: Math.round(overtimeHourlyRate.normal),
+        sunday: Math.round(overtimeHourlyRate.sunday),
+        holiday: Math.round(overtimeHourlyRate.holiday),
+      },
+      overtimePay: {
+        normal: Math.round(overtimePay.normal),
+        sunday: Math.round(overtimePay.sunday),
+        holiday: Math.round(overtimePay.holiday),
+      },
+      totalOvertimePay: Math.round(totalOvertimePay),
+
+      // Incomes
+      allowances,
+      totalAllowances: Math.round(totalAllowances),
+      bonuses,
+      totalBonuses: Math.round(totalBonuses),
+      grossSalary: Math.round(grossSalary),
+
+      // Deductions
+      manualDeductions: deductions,
+      totalManualDeductions: Math.round(totalManualDeductions),
+      advancePayments,
+      totalAdvancePayments: Math.round(totalAdvancePayments),
+
+      // Summary (tạm thời, sẽ được cập nhật lại sau khi có BHXH)
+      netSalaryBeforeInsurance: Math.round(netSalaryBeforeInsurance),
+    };
+  }
+
+  /**
+   * (VIẾT LẠI) Hàm điều phối chính, tạo phiếu lương tự động.
+   * @param {Object} data - Dữ liệu đầu vào từ client (employeeId, month, year, manual inputs).
+   * @returns {Promise<Object>} - Phiếu lương đã tạo.
+   */
+  async createSalarySlipAuto(data) {
+    const {
+      employeeId,
+      month,
+      year,
+      allowances = [],
+      bonuses = [],
+      deductions = [],
+      notes = '',
+    } = data;
+
+    if (!employeeId || !month || !year) {
+      throw new Error('Thông tin nhân viên, tháng, năm là bắt buộc.');
+    }
+
+    // Sử dụng transaction để đảm bảo tính toàn vẹn dữ liệu (cập nhật phép năm)
+    return await runTransaction(this.db, async (transaction) => {
+      // 1. Lấy cấu hình, thông tin nhân viên, chấm công, và ứng lương
+      const systemSettings = await this.getSystemSettings();
+      const employeeInfo = await this.getEmployeeDetails(employeeId);
+      const attendanceSummary = await this.getEmployeeAttendance(
+        employeeId,
+        month,
+        year
+      );
+      const advancePayments = await this.getAdvancePayments(
+        employeeId,
+        month,
+        year
+      );
+
+      // 2. Tính các khoản khấu trừ BHXH dựa trên insuranceContributionBase
+      const autoDeductions = await this.getAutoDeductions(
+        employeeInfo.insuranceContributionBase
+      );
+
+      // 3. Gọi hàm tính lương với tất cả dữ liệu đã thu thập
+      const calculatedSalary = this.calculateSalary(
+        employeeInfo,
+        attendanceSummary,
+        systemSettings,
+        { allowances, bonuses, deductions, advancePayments }
+      );
+
+      // 4. Hoàn thiện tính toán tổng khấu trừ và lương thực nhận
+      const totalAutoDeductions = autoDeductions.reduce(
+        (sum, item) => sum + item.amount,
+        0
+      );
+      const totalDeductions =
+        calculatedSalary.totalManualDeductions +
+        calculatedSalary.totalAdvancePayments +
+        totalAutoDeductions;
+      const netSalary = calculatedSalary.grossSalary - totalDeductions;
+
+      // Loại bỏ trường tạm thời khỏi calculatedSalary trước khi lưu
+      const { netSalaryBeforeInsurance, ...finalCalculatedFields } =
+        calculatedSalary;
+
+      // 5. Chuẩn bị dữ liệu để lưu vào Firestore
+      const finalSalarySlip = {
+        // Metadata
+        employeeId,
+        employeeName: employeeInfo.displayName || employeeInfo.name,
+        month: parseInt(month),
+        year: parseInt(year),
+        createdAt: serverTimestamp(),
+        status: 'pending', // 'pending', 'approved', 'paid'
+        notes,
+
+        // Input Data
+        employeeInfo: {
+          salaryType:
+            employeeInfo.salaryType ||
+            (employeeInfo.monthlySalary ? 'monthly' : 'daily'),
+          dailySalary: employeeInfo.dailySalary || 0,
+          monthlySalary: employeeInfo.monthlySalary || 0,
+          insuranceContributionBase:
+            employeeInfo.insuranceContributionBase || 0,
+        },
+        manualInputs: {
+          allowances,
+          bonuses,
+          manualDeductions: deductions,
+          advancePayments,
+        },
+
+        // Calculated Data
+        attendanceSummary,
+        calculatedSalary: {
+          ...finalCalculatedFields,
+          autoDeductions,
+          totalAutoDeductions: Math.round(totalAutoDeductions),
+          totalDeductions: Math.round(totalDeductions),
+          netSalary: Math.round(netSalary),
+        },
+      };
+
+      // 6. Lưu phiếu lương vào collection 'salarySlips'
+      const newSlipRef = doc(collection(this.db, 'salarySlips'));
+      transaction.set(newSlipRef, finalSalarySlip);
+
+      // 7. Cập nhật lại số phép năm của nhân viên
+      const paidLeaveDaysInMonth = attendanceSummary.paidLeaveDays;
+      if (paidLeaveDaysInMonth > 0) {
+        const userRef = doc(this.db, 'users', employeeId);
+        const newBalance =
+          (employeeInfo.annualLeaveBalance || 0) - paidLeaveDaysInMonth;
+        transaction.update(userRef, { annualLeaveBalance: newBalance });
+      }
+
+      return { id: newSlipRef.id, ...finalSalarySlip };
+    });
+  }
+
+  /**
+   * Lấy danh sách phiếu lương (có thể lọc).
+   * @param {Object} filters - Bộ lọc (month, year, employeeId, status).
+   * @returns {Promise<Array>} - Danh sách phiếu lương.
+   */
+  async getSalarySlips(filters = {}) {
+    try {
+      const { month, year, employeeId, status } = filters;
+      let q = query(
+        collection(this.db, 'salarySlips'),
+        orderBy('createdAt', 'desc')
+      );
+
+      if (month) q = query(q, where('month', '==', parseInt(month)));
+      if (year) q = query(q, where('year', '==', parseInt(year)));
+      if (employeeId) q = query(q, where('employeeId', '==', employeeId));
+      if (status) q = query(q, where('status', '==', status));
+
+      const querySnapshot = await getDocs(q);
+      return querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    } catch (error) {
+      console.error('Lỗi khi lấy danh sách phiếu lương:', error);
+      throw error;
+    }
+  }
+}
+
+export default new SalaryService();
+
+
+--- END: src\api\salaryService.js ---
+
+
 --- START: src\api\supplierService.js ---
 // src/api/supplierService.js
 import { db } from '../config/firebaseConfig';
@@ -7640,6 +8612,56 @@ export default CustomIconDebug;
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 --- END: src\components\CustomIconDebug.js ---
 
 
@@ -7775,6 +8797,467 @@ export default InventoryItemCard;
 
 
 --- END: src\components\InventoryItemCard.js ---
+
+
+--- START: src\components\MaterialsContextDemo.js ---
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
+import { useMaterialsContext } from '../hooks/useMaterialsContext';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+
+/**
+ * Component demo để test function getAutoMaterialsContext
+ * Hiển thị thông tin vật tư từ báo giá hoặc file Excel
+ */
+const MaterialsContextDemo = ({ project }) => {
+  const {
+    materialsContext,
+    isLoading,
+    error,
+    hasMaterialsContext,
+    materialsSource,
+    materialsCount,
+    materialsList,
+    isFromQuotation,
+    isFromExcel,
+    hasNoData,
+    fetchMaterialsContext,
+    refreshContext,
+    clearCache,
+  } = useMaterialsContext(project);
+
+  const [accessToken, setAccessToken] = useState(null);
+
+  // Lấy access token khi component mount
+  useEffect(() => {
+    const getToken = async () => {
+      try {
+        const isSignedIn = await GoogleSignin.isSignedIn();
+        if (isSignedIn) {
+          const tokens = await GoogleSignin.getTokens();
+          setAccessToken(tokens.accessToken);
+        }
+      } catch (error) {
+        console.error('Lỗi khi lấy access token:', error);
+      }
+    };
+
+    getToken();
+  }, []);
+
+  // Tự động fetch context khi có project
+  useEffect(() => {
+    if (project && accessToken) {
+      fetchMaterialsContext(accessToken);
+    }
+  }, [project, accessToken, fetchMaterialsContext]);
+
+  const handleFetchContext = async () => {
+    try {
+      await fetchMaterialsContext(accessToken);
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể lấy context vật tư: ' + error.message);
+    }
+  };
+
+  const handleRefreshContext = async () => {
+    try {
+      await refreshContext(accessToken);
+      Alert.alert('Thành công', 'Đã refresh context vật tư');
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể refresh context: ' + error.message);
+    }
+  };
+
+  const handleClearCache = () => {
+    clearCache();
+    Alert.alert('Thành công', 'Đã xóa cache');
+  };
+
+  const renderMaterialsList = () => {
+    if (!materialsList || materialsList.length === 0) {
+      return <Text style={styles.noData}>Không có danh sách vật tư</Text>;
+    }
+
+    return (
+      <View style={styles.materialsList}>
+        <Text style={styles.sectionTitle}>
+          Danh sách vật tư ({materialsList.length}):
+        </Text>
+        {materialsList.slice(0, 10).map((item, index) => (
+          <View key={index} style={styles.materialItem}>
+            <Text style={styles.materialName}>
+              {index + 1}. {item.name || item.materialName || 'Không có tên'}
+            </Text>
+            {item.code && (
+              <Text style={styles.materialCode}>Mã: {item.code}</Text>
+            )}
+            {item.quantity && (
+              <Text style={styles.materialQuantity}>
+                SL: {item.quantity} {item.unit || ''}
+              </Text>
+            )}
+            {item.price && (
+              <Text style={styles.materialPrice}>Giá: {item.price}</Text>
+            )}
+          </View>
+        ))}
+        {materialsList.length > 10 && (
+          <Text style={styles.moreItems}>
+            ... và {materialsList.length - 10} vật tư khác
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderContextInfo = () => {
+    if (!materialsContext) {
+      return <Text style={styles.noData}>Chưa có context vật tư</Text>;
+    }
+
+    return (
+      <View style={styles.contextInfo}>
+        <Text style={styles.sectionTitle}>Thông tin Context:</Text>
+
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Nguồn dữ liệu:</Text>
+          <Text style={styles.infoValue}>
+            {materialsSource === 'quotation'
+              ? 'Báo giá mới nhất'
+              : materialsSource === 'excel'
+              ? 'File Excel Google Drive'
+              : 'Không có dữ liệu'}
+          </Text>
+        </View>
+
+        {materialsCount > 0 && (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Số lượng vật tư:</Text>
+            <Text style={styles.infoValue}>{materialsCount}</Text>
+          </View>
+        )}
+
+        {isFromQuotation && materialsContext.materialsData && (
+          <>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Mã báo giá:</Text>
+              <Text style={styles.infoValue}>
+                {materialsContext.materialsData.quotationNumber ||
+                  materialsContext.materialsData.quotationId}
+              </Text>
+            </View>
+            {materialsContext.materialsData.totalAmount && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Tổng giá trị:</Text>
+                <Text style={styles.infoValue}>
+                  {materialsContext.materialsData.totalAmount.toLocaleString(
+                    'vi-VN'
+                  )}{' '}
+                  VNĐ
+                </Text>
+              </View>
+            )}
+          </>
+        )}
+
+        {isFromExcel && materialsContext.materialsData && (
+          <>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Tên file:</Text>
+              <Text style={styles.infoValue}>
+                {materialsContext.materialsData.fileName}
+              </Text>
+            </View>
+            {materialsContext.materialsData.lastModified && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Cập nhật lúc:</Text>
+                <Text style={styles.infoValue}>
+                  {new Date(
+                    materialsContext.materialsData.lastModified
+                  ).toLocaleString('vi-VN')}
+                </Text>
+              </View>
+            )}
+          </>
+        )}
+      </View>
+    );
+  };
+
+  if (!project) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.error}>
+          Vui lòng chọn dự án để xem context vật tư
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Demo Context Vật Tư</Text>
+        <Text style={styles.subtitle}>Dự án: {project.name}</Text>
+      </View>
+
+      <View style={styles.controls}>
+        <TouchableOpacity
+          style={[styles.button, styles.primaryButton]}
+          onPress={handleFetchContext}
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Lấy Context</Text>
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, styles.secondaryButton]}
+          onPress={handleRefreshContext}
+          disabled={isLoading}
+        >
+          <Text style={styles.buttonText}>Refresh</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.button, styles.dangerButton]}
+          onPress={handleClearCache}
+        >
+          <Text style={styles.buttonText}>Xóa Cache</Text>
+        </TouchableOpacity>
+      </View>
+
+      {error && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Lỗi: {error}</Text>
+        </View>
+      )}
+
+      {renderContextInfo()}
+      {renderMaterialsList()}
+
+      <View style={styles.status}>
+        <Text style={styles.statusText}>
+          Trạng thái: {hasMaterialsContext ? 'Có dữ liệu' : 'Không có dữ liệu'}
+        </Text>
+        <Text style={styles.statusText}>Nguồn: {materialsSource}</Text>
+        <Text style={styles.statusText}>Số lượng: {materialsCount}</Text>
+      </View>
+    </ScrollView>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+    padding: 16,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
+  },
+  controls: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 20,
+  },
+  button: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  primaryButton: {
+    backgroundColor: '#007AFF',
+  },
+  secondaryButton: {
+    backgroundColor: '#34C759',
+  },
+  dangerButton: {
+    backgroundColor: '#FF3B30',
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  errorContainer: {
+    backgroundColor: '#FFE5E5',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  errorText: {
+    color: '#D70015',
+    textAlign: 'center',
+  },
+  contextInfo: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  infoLabel: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  infoValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+    flex: 2,
+    textAlign: 'right',
+  },
+  materialsList: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  materialItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    paddingVertical: 8,
+  },
+  materialName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 4,
+  },
+  materialCode: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  materialQuantity: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  materialPrice: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  moreItems: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  status: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  statusText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  noData: {
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    padding: 20,
+  },
+  error: {
+    fontSize: 16,
+    color: '#FF3B30',
+    textAlign: 'center',
+    padding: 20,
+  },
+});
+
+export default MaterialsContextDemo;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--- END: src\components\MaterialsContextDemo.js ---
 
 
 --- START: src\components\MediaInstructionsViewer.js ---
@@ -10765,6 +12248,56 @@ export default TestComponent;
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 --- END: src\components\TestComponent.js ---
 
 
@@ -12095,6 +13628,263 @@ export default WorkerCard;
 
 
 --- END: src\components\WorkerCard.js ---
+
+
+--- START: src\components\WorkerFeaturesMenu.js ---
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+
+/**
+ * Component hiển thị menu chức năng cho công nhân, kỹ sư, kế toán
+ * Bao gồm: Xem chấm công, Xin nghỉ phép, Xin ứng lương
+ */
+const WorkerFeaturesMenu = ({ userRole, onNavigate, style = {} }) => {
+  const { theme } = useTheme();
+
+  // Xác định role và tiêu đề
+  const isWorker = userRole?.toLowerCase() === 'cong_nhan';
+  const isEngineer = userRole?.toLowerCase() === 'ky_su';
+  const isAccountant = userRole?.toLowerCase() === 'ke_toan';
+
+  const getRoleTitle = () => {
+    if (isWorker) return 'Chức năng công nhân';
+    if (isEngineer) return 'Chức năng kỹ sư';
+    if (isAccountant) return 'Chức năng kế toán';
+    return 'Chức năng nhân viên';
+  };
+
+  const getRoleIcon = () => {
+    if (isWorker) return 'construct-outline';
+    if (isEngineer) return 'school-outline';
+    if (isAccountant) return 'calculator-outline';
+    return 'person-outline';
+  };
+
+  const getRoleColor = () => {
+    if (isWorker) return '#4CAF50'; // Green
+    if (isEngineer) return '#2196F3'; // Blue
+    if (isAccountant) return '#FF9800'; // Orange
+    return '#9C27B0'; // Purple
+  };
+
+  const menuItems = [
+    {
+      id: 'attendance',
+      title: 'Xem chấm công',
+      description: 'Xem lịch sử và thống kê',
+      icon: 'time-outline',
+      iconColor: '#4CAF50',
+      screen: 'WorkerAttendance',
+    },
+    {
+      id: 'leave',
+      title: 'Xin nghỉ phép',
+      description: 'Đăng ký và theo dõi',
+      icon: 'calendar-outline',
+      iconColor: '#FF9800',
+      screen: 'LeaveRequest',
+    },
+    {
+      id: 'advance',
+      title: 'Xin ứng lương',
+      description: 'Yêu cầu và theo dõi',
+      icon: 'cash-outline',
+      iconColor: '#2196F3',
+      screen: 'AdvanceSalary',
+    },
+  ];
+
+  const handleMenuPress = (screen) => {
+    if (onNavigate && typeof onNavigate === 'function') {
+      onNavigate(screen);
+    }
+  };
+
+  return (
+    <View style={[styles.container, style]}>
+      {/* Header với icon và tiêu đề */}
+      <View style={styles.header}>
+        <View style={[styles.roleIcon, { backgroundColor: getRoleColor() }]}>
+          <Ionicons name={getRoleIcon()} size={24} color="#fff" />
+        </View>
+        <Text style={[styles.roleTitle, { color: theme.text }]}>
+          {getRoleTitle()}
+        </Text>
+      </View>
+
+      {/* Grid menu items */}
+      <View style={styles.menuGrid}>
+        {menuItems.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={[
+              styles.menuCard,
+              { backgroundColor: theme.card, borderColor: theme.border },
+            ]}
+            onPress={() => handleMenuPress(item.screen)}
+            activeOpacity={0.7}
+          >
+            <View
+              style={[styles.menuIcon, { backgroundColor: item.iconColor }]}
+            >
+              <Ionicons name={item.icon} size={24} color="#fff" />
+            </View>
+            <Text style={[styles.menuText, { color: theme.text }]}>
+              {item.title}
+            </Text>
+            <Text style={[styles.menuDesc, { color: theme.textSecondary }]}>
+              {item.description}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Thông tin bổ sung cho từng role */}
+      <View
+        style={[
+          styles.infoCard,
+          { backgroundColor: theme.card, borderColor: theme.border },
+        ]}
+      >
+        <Ionicons
+          name="information-circle-outline"
+          size={20}
+          color={theme.primary}
+        />
+        <Text style={[styles.infoText, { color: theme.textSecondary }]}>
+          {isWorker && 'Bạn có thể xem chấm công, xin nghỉ phép và ứng lương'}
+          {isEngineer && 'Bạn có thể xem chấm công, xin nghỉ phép và ứng lương'}
+          {isAccountant &&
+            'Bạn có thể xem chấm công, xin nghỉ phép và ứng lương'}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  roleIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  roleTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  menuGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  menuCard: {
+    width: '31%',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    marginBottom: 12,
+    minHeight: 120,
+  },
+  menuIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  menuText: {
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  menuDesc: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  infoText: {
+    fontSize: 12,
+    marginLeft: 8,
+    flex: 1,
+    lineHeight: 16,
+  },
+});
+
+export default WorkerFeaturesMenu;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--- END: src\components\WorkerFeaturesMenu.js ---
 
 
 --- START: src\config\authConfig.js ---
@@ -14507,6 +16297,248 @@ export default useInventory;
 --- END: src\hooks\useInventory.js ---
 
 
+--- START: src\hooks\useMaterialsContext.js ---
+import { useState, useCallback } from 'react';
+import {
+  getAutoMaterialsContext,
+  getMaterialsContextForProject,
+  refreshMaterialsContext,
+} from '../api/aiChatService';
+
+/**
+ * Hook để quản lý context vật tư cho dự án
+ * Tự động lấy vật tư từ báo giá mới nhất hoặc file Google Drive
+ */
+export const useMaterialsContext = (project) => {
+  const [materialsContext, setMaterialsContext] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  /**
+   * Lấy context vật tư cho dự án
+   * @param {string} accessToken - Google access token (tùy chọn)
+   * @param {boolean} forceRefresh - Bắt buộc refresh dữ liệu
+   */
+  const fetchMaterialsContext = useCallback(
+    async (accessToken = null, forceRefresh = false) => {
+      if (!project) {
+        setError('Dự án không được để trống');
+        return;
+      }
+
+      // Kiểm tra cache nếu không bắt buộc refresh
+      if (!forceRefresh && materialsContext && lastUpdated) {
+        const now = Date.now();
+        const cacheAge = now - lastUpdated;
+        // Cache trong 5 phút
+        if (cacheAge < 5 * 60 * 1000) {
+          console.log(
+            'Sử dụng cache context vật tư (tuổi:',
+            Math.round(cacheAge / 1000),
+            'giây)'
+          );
+          return materialsContext;
+        }
+      }
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const result = await getAutoMaterialsContext(project, accessToken);
+
+        if (result.materialsContext) {
+          setMaterialsContext(result);
+          setLastUpdated(Date.now());
+          console.log('Đã cập nhật context vật tư:', result.materialsSource);
+        } else {
+          setError('Không có dữ liệu vật tư');
+        }
+
+        return result;
+      } catch (err) {
+        const errorMessage =
+          err.message || 'Có lỗi xảy ra khi lấy context vật tư';
+        setError(errorMessage);
+        console.error('Lỗi khi lấy context vật tư:', err);
+        throw err;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [project, materialsContext, lastUpdated]
+  );
+
+  /**
+   * Refresh context vật tư (bắt buộc cập nhật)
+   * @param {string} accessToken - Google access token (tùy chọn)
+   */
+  const refreshContext = useCallback(
+    async (accessToken = null) => {
+      return await fetchMaterialsContext(accessToken, true);
+    },
+    [fetchMaterialsContext]
+  );
+
+  /**
+   * Lấy context vật tư với thông tin chi tiết
+   * @param {string} accessToken - Google access token (tùy chọn)
+   */
+  const getDetailedContext = useCallback(
+    async (accessToken = null) => {
+      if (!project) {
+        throw new Error('Dự án không được để trống');
+      }
+
+      try {
+        const result = await getMaterialsContextForProject(
+          project,
+          accessToken
+        );
+        return result;
+      } catch (err) {
+        console.error('Lỗi khi lấy context chi tiết:', err);
+        throw err;
+      }
+    },
+    [project]
+  );
+
+  /**
+   * Xóa cache context vật tư
+   */
+  const clearCache = useCallback(() => {
+    setMaterialsContext(null);
+    setLastUpdated(null);
+    setError(null);
+    console.log('Đã xóa cache context vật tư');
+  }, []);
+
+  /**
+   * Kiểm tra xem có context vật tư hay không
+   */
+  const hasMaterialsContext = useCallback(() => {
+    return materialsContext && materialsContext.materialsSource !== 'none';
+  }, [materialsContext]);
+
+  /**
+   * Lấy thông tin nguồn dữ liệu vật tư
+   */
+  const getMaterialsSource = useCallback(() => {
+    return materialsContext?.materialsSource || 'none';
+  }, [materialsContext]);
+
+  /**
+   * Lấy số lượng vật tư
+   */
+  const getMaterialsCount = useCallback(() => {
+    if (!materialsContext) return 0;
+
+    switch (materialsContext.materialsSource) {
+      case 'quotation':
+        return materialsContext.materialsData?.materialsCount || 0;
+      case 'excel':
+        return materialsContext.materialsData?.materialsCount || 0;
+      default:
+        return 0;
+    }
+  }, [materialsContext]);
+
+  /**
+   * Lấy danh sách vật tư
+   */
+  const getMaterialsList = useCallback(() => {
+    if (!materialsContext) return [];
+
+    switch (materialsContext.materialsSource) {
+      case 'quotation':
+        return materialsContext.materialsData?.materials || [];
+      case 'excel':
+        return materialsContext.materialsData?.materials || [];
+      default:
+        return [];
+    }
+  }, [materialsContext]);
+
+  return {
+    // State
+    materialsContext,
+    isLoading,
+    error,
+    lastUpdated,
+
+    // Actions
+    fetchMaterialsContext,
+    refreshContext,
+    getDetailedContext,
+    clearCache,
+
+    // Computed values
+    hasMaterialsContext: hasMaterialsContext(),
+    materialsSource: getMaterialsSource(),
+    materialsCount: getMaterialsCount(),
+    materialsList: getMaterialsList(),
+
+    // Helpers
+    isFromQuotation: getMaterialsSource() === 'quotation',
+    isFromExcel: getMaterialsSource() === 'excel',
+    hasNoData: getMaterialsSource() === 'none',
+  };
+};
+
+export default useMaterialsContext;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--- END: src\hooks\useMaterialsContext.js ---
+
+
 --- START: src\hooks\useMaterialsProcessor.js ---
 //src/hooks/useMaterialsProcessor.js
 import { useState, useCallback } from 'react';
@@ -15990,6 +18022,11 @@ import InventoryTransactionScreen from '../screens/InventoryTransactionScreen';
 import InventoryReportScreen from '../screens/InventoryReportScreen';
 import AssignSalaryScreen from '../screens/AssignSalaryScreen';
 
+// Import màn hình quản lý lương
+import FixedFeesManagementScreen from '../screens/FixedFeesManagementScreen';
+import SalarySlipCreationScreen from '../screens/SalarySlipCreationScreen';
+import TotalSalaryReportScreen from '../screens/TotalSalaryReportScreen';
+
 // Import expense tracking screens
 import ExpenseListScreen from '../screens/ExpenseListScreen';
 
@@ -16022,6 +18059,9 @@ import AdvanceSalaryScreen from '../screens/AdvanceSalaryScreen';
 
 // Import Project Discussion screen
 import ProjectDiscussionScreen from '../screens/ProjectDiscussionScreen';
+
+// Import MachinesManagementScreen
+import MachinesManagementScreen from '../screens/MachinesManagementScreen';
 
 // Tạo Stack Navigator cho quản lý dự án
 const ProjectStack = createNativeStackNavigator();
@@ -16769,6 +18809,30 @@ const AppNavigator = () => {
               name="AdvanceSalary"
               component={AdvanceSalaryScreen}
               options={{ headerShown: false }}
+            />
+
+            {/* Salary Management Screens */}
+            <Stack.Screen
+              name="FixedFeesManagement"
+              component={FixedFeesManagementScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="SalarySlipCreation"
+              component={SalarySlipCreationScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="TotalSalaryReport"
+              component={TotalSalaryReportScreen}
+              options={{ headerShown: false }}
+            />
+
+            {/* Machines Management Screen */}
+            <Stack.Screen
+              name="MachinesManagement"
+              component={MachinesManagementScreen}
+              options={{ title: 'Quản lý máy móc', headerShown: false }}
             />
           </>
         ) : (
@@ -21971,7 +24035,7 @@ const AttendanceScreen = ({ navigation }) => {
   const functions = getFunctions(getApp(), 'asia-southeast1');
 
   // Add default overtime hours
-  const DEFAULT_OVERTIME_HOURS = 2.5; // Default 2.5 hours (20:30)
+  const DEFAULT_OVERTIME_HOURS = 3; // Default 3 hours (20:30)
 
   // Format date for display
   const formatDisplayDate = (date) => {
@@ -28403,6 +30467,29 @@ const DirectorDashboardScreen = ({ navigation }) => {
           </View>
           <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.dashboardCard, { backgroundColor: theme.card }]}
+          onPress={() => navigation.navigate('TotalSalaryReport')}
+        >
+          <Ionicons
+            name="wallet-outline"
+            size={24}
+            color="#FF9500"
+            style={styles.cardIcon}
+          />
+          <View style={styles.cardContent}>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>
+              Báo cáo tổng lương
+            </Text>
+            <Text
+              style={[styles.cardDescription, { color: theme.textSecondary }]}
+            >
+              Xem tổng lương phải trả cho nhân viên
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
@@ -33278,6 +35365,917 @@ export default FinancialDashboardScreen;
 --- END: src\screens\FinancialDashboardScreen.js ---
 
 
+--- START: src\screens\FixedFeesManagementScreen.js ---
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
+import salaryService from '../api/salaryService';
+
+const FixedFeesManagementScreen = ({ navigation }) => {
+  const { theme } = useTheme();
+  const { user } = useAuth();
+
+  const [fees, setFees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingFee, setEditingFee] = useState(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    type: 'deduction',
+    amount: '',
+    percentage: '',
+    calculationType: 'fixed', // 'fixed' hoặc 'percentage'
+    description: '',
+    isActive: true,
+  });
+
+  const feeTypes = [
+    { key: 'deduction', label: 'Khấu trừ', color: '#F44336' },
+    { key: 'allowance', label: 'Phụ cấp', color: '#4CAF50' },
+    { key: 'insurance', label: 'Bảo hiểm', color: '#2196F3' },
+  ];
+
+  useEffect(() => {
+    loadFees();
+  }, []);
+
+  const loadFees = async () => {
+    try {
+      setLoading(true);
+      const feesData = await salaryService.getAllFixedFees();
+      setFees(feesData);
+    } catch (error) {
+      console.error('Lỗi khi tải danh sách phí:', error);
+      Alert.alert('Lỗi', 'Không thể tải danh sách phí cố định');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddFee = () => {
+    setEditingFee(null);
+    setFormData({
+      name: '',
+      type: 'deduction',
+      amount: '',
+      percentage: '',
+      calculationType: 'fixed',
+      description: '',
+      isActive: true,
+    });
+    setModalVisible(true);
+  };
+
+  const handleEditFee = (fee) => {
+    setEditingFee(fee);
+    setFormData({
+      name: fee.name,
+      type: fee.type,
+      amount: fee.amount ? fee.amount.toString() : '',
+      percentage: fee.percentage ? fee.percentage.toString() : '',
+      calculationType: fee.calculationType || 'fixed',
+      description: fee.description,
+      isActive: fee.isActive,
+    });
+    setModalVisible(true);
+  };
+
+  const handleDeleteFee = async (feeId) => {
+    Alert.alert('Xác nhận xóa', 'Bạn có chắc chắn muốn xóa loại phí này?', [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Xóa',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await salaryService.deleteFixedFee(feeId);
+            Alert.alert('Thành công', 'Đã xóa loại phí');
+            loadFees();
+          } catch (error) {
+            console.error('Lỗi khi xóa phí:', error);
+            Alert.alert('Lỗi', 'Không thể xóa loại phí');
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleSaveFee = async () => {
+    if (!formData.name.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập tên phí');
+      return;
+    }
+
+    if (formData.calculationType === 'fixed' && !formData.amount.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập số tiền cố định');
+      return;
+    }
+
+    if (
+      formData.calculationType === 'percentage' &&
+      !formData.percentage.trim()
+    ) {
+      Alert.alert('Lỗi', 'Vui lòng nhập phần trăm');
+      return;
+    }
+
+    try {
+      if (editingFee) {
+        await salaryService.updateFixedFee(editingFee.id, formData);
+        Alert.alert('Thành công', 'Đã cập nhật loại phí');
+      } else {
+        await salaryService.createFixedFee(formData);
+        Alert.alert('Thành công', 'Đã tạo loại phí mới');
+      }
+
+      setModalVisible(false);
+      loadFees();
+    } catch (error) {
+      console.error('Lỗi khi lưu phí:', error);
+      Alert.alert('Lỗi', error.message || 'Không thể lưu loại phí');
+    }
+  };
+
+  const getFeeTypeLabel = (type) => {
+    const feeType = feeTypes.find((ft) => ft.key === type);
+    return feeType ? feeType.label : type;
+  };
+
+  const getFeeTypeColor = (type) => {
+    const feeType = feeTypes.find((ft) => ft.key === type);
+    return feeType ? feeType.color : '#666';
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+    }).format(amount);
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.primary} />
+          <Text style={[styles.loadingText, { color: theme.textSecondary }]}>
+            Đang tải danh sách phí cố định...
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* Header */}
+      <View style={[styles.header, { backgroundColor: theme.primary }]}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Quản lý phí cố định</Text>
+        <TouchableOpacity style={styles.addButton} onPress={handleAddFee}>
+          <Ionicons name="add" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Content */}
+      <ScrollView style={styles.content}>
+        {/* Thống kê */}
+        <View style={[styles.statsContainer, { backgroundColor: theme.card }]}>
+          <Text style={[styles.statsTitle, { color: theme.text }]}>
+            Thống kê
+          </Text>
+          <View style={styles.statsGrid}>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: theme.primary }]}>
+                {fees.length}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Tổng số loại phí
+              </Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: '#4CAF50' }]}>
+                {fees.filter((f) => f.type === 'allowance').length}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Phụ cấp
+              </Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: '#F44336' }]}>
+                {fees.filter((f) => f.type === 'deduction').length}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Khấu trừ
+              </Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: '#2196F3' }]}>
+                {fees.filter((f) => f.type === 'insurance').length}
+              </Text>
+              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Bảo hiểm
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Danh sách phí cố định */}
+        <View style={styles.feesContainer}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            Danh sách phí cố định
+          </Text>
+
+          {fees.length === 0 ? (
+            <View
+              style={[styles.emptyContainer, { backgroundColor: theme.card }]}
+            >
+              <Ionicons
+                name="document-outline"
+                size={48}
+                color={theme.textMuted}
+              />
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
+                Chưa có loại phí cố định nào
+              </Text>
+              <TouchableOpacity
+                style={[styles.emptyButton, { backgroundColor: theme.primary }]}
+                onPress={handleAddFee}
+              >
+                <Text style={styles.emptyButtonText}>
+                  Thêm loại phí đầu tiên
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            fees.map((fee) => (
+              <View
+                key={fee.id}
+                style={[styles.feeCard, { backgroundColor: theme.card }]}
+              >
+                <View style={styles.feeHeader}>
+                  <View style={styles.feeInfo}>
+                    <Text style={[styles.feeName, { color: theme.text }]}>
+                      {fee.name}
+                    </Text>
+                    <View
+                      style={[
+                        styles.feeType,
+                        { backgroundColor: getFeeTypeColor(fee.type) },
+                      ]}
+                    >
+                      <Text style={styles.feeTypeText}>
+                        {getFeeTypeLabel(fee.type)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.feeActions}>
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButton,
+                        { backgroundColor: theme.primary },
+                      ]}
+                      onPress={() => handleEditFee(fee)}
+                    >
+                      <Ionicons name="create-outline" size={16} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.actionButton,
+                        { backgroundColor: '#F44336' },
+                      ]}
+                      onPress={() => handleDeleteFee(fee.id)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.feeDetails}>
+                  {fee.calculationType === 'percentage' ? (
+                    <Text style={[styles.feeAmount, { color: theme.primary }]}>
+                      {fee.percentage}% lương
+                    </Text>
+                  ) : (
+                    <Text style={[styles.feeAmount, { color: theme.primary }]}>
+                      {formatCurrency(fee.amount || 0)}
+                    </Text>
+                  )}
+                  {fee.description && (
+                    <Text
+                      style={[
+                        styles.feeDescription,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      {fee.description}
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.feeStatus}>
+                  <View
+                    style={[
+                      styles.statusIndicator,
+                      { backgroundColor: fee.isActive ? '#4CAF50' : '#F44336' },
+                    ]}
+                  />
+                  <Text
+                    style={[styles.statusText, { color: theme.textSecondary }]}
+                  >
+                    {fee.isActive ? 'Đang hoạt động' : 'Đã tắt'}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Modal thêm/sửa phí */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={modalVisible}
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[styles.modalContent, { backgroundColor: theme.background }]}
+          >
+            <View
+              style={[styles.modalHeader, { backgroundColor: theme.primary }]}
+            >
+              <Text style={styles.modalTitle}>
+                {editingFee ? 'Sửa loại phí' : 'Thêm loại phí mới'}
+              </Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setModalVisible(false)}
+              >
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody}>
+              {/* Tên loại phí */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Tên loại phí *
+                </Text>
+                <TextInput
+                  style={[
+                    styles.formInput,
+                    {
+                      backgroundColor: theme.card,
+                      borderColor: theme.border,
+                      color: theme.text,
+                    },
+                  ]}
+                  value={formData.name}
+                  onChangeText={(text) =>
+                    setFormData({ ...formData, name: text })
+                  }
+                  placeholder="VD: Bảo hiểm xã hội, Phụ cấp ăn trưa..."
+                  placeholderTextColor={theme.textMuted}
+                />
+              </View>
+
+              {/* Loại phí */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Loại phí *
+                </Text>
+                <View style={styles.typeSelector}>
+                  {feeTypes.map((type) => (
+                    <TouchableOpacity
+                      key={type.key}
+                      style={[
+                        styles.typeOption,
+                        formData.type === type.key && {
+                          backgroundColor: type.color,
+                        },
+                      ]}
+                      onPress={() =>
+                        setFormData({ ...formData, type: type.key })
+                      }
+                    >
+                      <Text
+                        style={[
+                          styles.typeOptionText,
+                          formData.type === type.key && { color: '#fff' },
+                        ]}
+                      >
+                        {type.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Cách tính phí */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Cách tính phí *
+                </Text>
+                <View style={styles.typeSelector}>
+                  <TouchableOpacity
+                    style={[
+                      styles.typeOption,
+                      formData.calculationType === 'fixed' && {
+                        backgroundColor: theme.primary,
+                      },
+                    ]}
+                    onPress={() =>
+                      setFormData({ ...formData, calculationType: 'fixed' })
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.typeOptionText,
+                        formData.calculationType === 'fixed' && {
+                          color: '#fff',
+                        },
+                      ]}
+                    >
+                      Số tiền cố định
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.typeOption,
+                      formData.calculationType === 'percentage' && {
+                        backgroundColor: theme.primary,
+                      },
+                    ]}
+                    onPress={() =>
+                      setFormData({
+                        ...formData,
+                        calculationType: 'percentage',
+                      })
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.typeOptionText,
+                        formData.calculationType === 'percentage' && {
+                          color: '#fff',
+                        },
+                      ]}
+                    >
+                      Theo phần trăm lương
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Số tiền hoặc phần trăm */}
+              {formData.calculationType === 'fixed' ? (
+                <View style={styles.formGroup}>
+                  <Text style={[styles.formLabel, { color: theme.text }]}>
+                    Số tiền (VNĐ) *
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.formInput,
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                        color: theme.text,
+                      },
+                    ]}
+                    value={formData.amount}
+                    onChangeText={(text) =>
+                      setFormData({ ...formData, amount: text })
+                    }
+                    placeholder="VD: 500000"
+                    placeholderTextColor={theme.textMuted}
+                    keyboardType="numeric"
+                  />
+                </View>
+              ) : (
+                <View style={styles.formGroup}>
+                  <Text style={[styles.formLabel, { color: theme.text }]}>
+                    Phần trăm (%) *
+                  </Text>
+                  <View style={styles.percentageInputContainer}>
+                    <TextInput
+                      style={[
+                        styles.formInput,
+                        {
+                          backgroundColor: theme.card,
+                          borderColor: theme.border,
+                          color: theme.text,
+                          flex: 1,
+                        },
+                      ]}
+                      value={formData.percentage}
+                      onChangeText={(text) =>
+                        setFormData({ ...formData, percentage: text })
+                      }
+                      placeholder="VD: 8"
+                      placeholderTextColor={theme.textMuted}
+                      keyboardType="numeric"
+                    />
+                    <Text
+                      style={[styles.percentageSymbol, { color: theme.text }]}
+                    >
+                      %
+                    </Text>
+                  </View>
+                  <Text style={[styles.formHint, { color: theme.textMuted }]}>
+                    VD: BHXH = 8%, BHYT = 1.5%, BHTN = 1%
+                  </Text>
+                </View>
+              )}
+
+              {/* Mô tả */}
+              <View style={styles.formGroup}>
+                <Text style={[styles.formLabel, { color: theme.text }]}>
+                  Mô tả
+                </Text>
+                <TextInput
+                  style={[
+                    styles.formTextArea,
+                    {
+                      backgroundColor: theme.card,
+                      borderColor: theme.border,
+                      color: theme.text,
+                    },
+                  ]}
+                  value={formData.description}
+                  onChangeText={(text) =>
+                    setFormData({ ...formData, description: text })
+                  }
+                  placeholder="Mô tả chi tiết về loại phí này..."
+                  placeholderTextColor={theme.textMuted}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+
+              {/* Trạng thái */}
+              <View style={styles.formGroup}>
+                <View style={styles.switchContainer}>
+                  <Text style={[styles.formLabel, { color: theme.text }]}>
+                    Đang hoạt động
+                  </Text>
+                  <TouchableOpacity
+                    style={[
+                      styles.switch,
+                      {
+                        backgroundColor: formData.isActive
+                          ? theme.primary
+                          : theme.textMuted,
+                      },
+                    ]}
+                    onPress={() =>
+                      setFormData({ ...formData, isActive: !formData.isActive })
+                    }
+                  >
+                    <View
+                      style={[
+                        styles.switchThumb,
+                        {
+                          backgroundColor: '#fff',
+                          transform: [
+                            { translateX: formData.isActive ? 20 : 0 },
+                          ],
+                        },
+                      ]}
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  { backgroundColor: theme.textMuted },
+                ]}
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: theme.primary }]}
+                onPress={handleSaveFee}
+              >
+                <Text style={styles.modalButtonText}>
+                  {editingFee ? 'Cập nhật' : 'Thêm mới'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 16,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    flex: 1,
+    textAlign: 'center',
+  },
+  addButton: {
+    padding: 8,
+  },
+  content: {
+    flex: 1,
+    padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+  },
+  statsContainer: {
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  statsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statNumber: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  feesContainer: {
+    flex: 1,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  emptyContainer: {
+    padding: 32,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: 16,
+    marginTop: 16,
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  emptyButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  emptyButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  feeCard: {
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.1)',
+  },
+  feeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  feeInfo: {
+    flex: 1,
+  },
+  feeName: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  feeType: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+  },
+  feeTypeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  feeActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionButton: {
+    padding: 8,
+    borderRadius: 8,
+  },
+  percentageInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  percentageSymbol: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  formHint: {
+    fontSize: 12,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  feeDetails: {
+    marginBottom: 12,
+  },
+  feeAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  feeDescription: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  feeStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statusIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  statusText: {
+    fontSize: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: '90%',
+    maxHeight: '80%',
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalBody: {
+    padding: 16,
+  },
+  formGroup: {
+    marginBottom: 20,
+  },
+  formLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  formInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+  },
+  formTextArea: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  typeSelector: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  typeOption: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+  },
+  typeOptionText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  switchContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  switch: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    padding: 2,
+  },
+  switchThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
+
+export default FixedFeesManagementScreen;
+
+
+--- END: src\screens\FixedFeesManagementScreen.js ---
+
+
 --- START: src\screens\HomeScreen.js ---
 //src/screens/HomeScreen.js
 import React, { useState, useEffect } from 'react';
@@ -33305,6 +36303,7 @@ import {
   getAttendanceStatus,
 } from '../api/attendanceService';
 import { useAuth } from '../contexts/AuthContext';
+import WorkerFeaturesMenu from '../components/WorkerFeaturesMenu';
 
 const HomeScreen = ({ navigation }) => {
   const { theme, isDarkMode } = useTheme();
@@ -33317,14 +36316,19 @@ const HomeScreen = ({ navigation }) => {
   const [attendance, setAttendance] = useState(null);
   const [attLoading, setAttLoading] = useState(true);
 
-  const ROLE_CAN_ATTEND = ['ke_toan', 'cong_nhan'];
+  const ROLE_CAN_ATTEND = ['ke_toan', 'cong_nhan', 'ky_su'];
 
   const canUseAttendance = ROLE_CAN_ATTEND.includes(
     (user?.role || '').toLowerCase()
   );
 
-  // Kiểm tra role công nhân để hiển thị các chức năng đặc biệt
+  // Kiểm tra role để hiển thị các chức năng đặc biệt
   const isWorker = (user?.role || '').toLowerCase() === 'cong_nhan';
+  const isEngineer = (user?.role || '').toLowerCase() === 'ky_su';
+  const isAccountant = (user?.role || '').toLowerCase() === 'ke_toan';
+
+  // Các role có thể sử dụng chức năng chấm công, nghỉ phép, ứng lương
+  const canUseWorkerFeatures = isWorker || isEngineer || isAccountant;
 
   const loadAttendance = async () => {
     if (!user?.uid || !canUseAttendance) {
@@ -33492,7 +36496,14 @@ const HomeScreen = ({ navigation }) => {
                 marginBottom: 8,
               }}
             >
-              Chấm Công
+              Chấm Công -{' '}
+              {isWorker
+                ? 'Công nhân'
+                : isEngineer
+                ? 'Kỹ sư'
+                : isAccountant
+                ? 'Kế toán'
+                : 'Nhân viên'}
             </Text>
             {user?.role === 'ke_toan' ? (
               <TouchableOpacity
@@ -33509,6 +36520,101 @@ const HomeScreen = ({ navigation }) => {
                   Xem Bảng Chấm Công
                 </Text>
               </TouchableOpacity>
+            ) : user?.role === 'ky_su' ? (
+              <>
+                {attLoading ? (
+                  <ActivityIndicator color={theme.primary} />
+                ) : (
+                  <>
+                    {(() => {
+                      const status = getAttendanceStatus(attendance);
+                      if (status === 'none') {
+                        return (
+                          <TouchableOpacity
+                            style={getAttBtnStyle(theme)}
+                            onPress={handleClockIn}
+                          >
+                            <Ionicons
+                              name="log-in-outline"
+                              size={20}
+                              color="#fff"
+                              style={{ marginRight: 6 }}
+                            />
+                            <Text style={{ color: '#fff', fontWeight: '600' }}>
+                              Chấm Công Vào
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      }
+                      if (status === 'clocked_in') {
+                        return (
+                          <>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 8 }}
+                            >
+                              Vào lúc:{' '}
+                              {attendance.clockIn.toDate().toLocaleTimeString()}
+                            </Text>
+                            <TouchableOpacity
+                              style={getAttBtnStyle(theme)}
+                              onPress={handleClockOut}
+                            >
+                              <Ionicons
+                                name="log-out-outline"
+                                size={20}
+                                color="#fff"
+                                style={{ marginRight: 6 }}
+                              />
+                              <Text
+                                style={{ color: '#fff', fontWeight: '600' }}
+                              >
+                                Chấm Công Ra
+                              </Text>
+                            </TouchableOpacity>
+                          </>
+                        );
+                      }
+                      if (status === 'clocked_out') {
+                        return (
+                          <>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 4 }}
+                            >
+                              Vào lúc:{' '}
+                              {attendance.clockIn.toDate().toLocaleTimeString()}
+                            </Text>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 8 }}
+                            >
+                              Ra lúc:{' '}
+                              {attendance.clockOut
+                                .toDate()
+                                .toLocaleTimeString()}
+                            </Text>
+                            <Text
+                              style={{ color: theme.text, marginBottom: 8 }}
+                            >
+                              Tăng ca: {attendance.overtime || 0} giờ
+                            </Text>
+                            <View style={{ flexDirection: 'row' }}>
+                              {[1, 2, 3].map((h) => (
+                                <TouchableOpacity
+                                  key={h}
+                                  style={getOvertimeBtnStyle(theme)}
+                                  onPress={() => handleAddOvertime(h)}
+                                >
+                                  <Text style={{ color: '#fff' }}>+{h}</Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          </>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </>
+                )}
+              </>
             ) : (
               <>
                 {attLoading ? (
@@ -33608,88 +36714,12 @@ const HomeScreen = ({ navigation }) => {
         </View>
       )}
 
-      {/* Menu chức năng cho công nhân */}
-      {isWorker && (
-        <View style={{ paddingHorizontal: 16, marginBottom: 20 }}>
-          <Text
-            style={{
-              fontSize: 18,
-              fontWeight: 'bold',
-              color: theme.text,
-              marginBottom: 16,
-            }}
-          >
-            Chức năng công nhân
-          </Text>
-
-          <View style={styles.workerMenuGrid}>
-            <TouchableOpacity
-              style={[
-                styles.workerMenuCard,
-                { backgroundColor: theme.card, borderColor: theme.border },
-              ]}
-              onPress={() => navigation.navigate('WorkerAttendance')}
-            >
-              <View
-                style={[styles.workerMenuIcon, { backgroundColor: '#4CAF50' }]}
-              >
-                <Ionicons name="time-outline" size={24} color="#fff" />
-              </View>
-              <Text style={[styles.workerMenuText, { color: theme.text }]}>
-                Xem chấm công
-              </Text>
-              <Text
-                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
-              >
-                Xem lịch sử và thống kê
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.workerMenuCard,
-                { backgroundColor: theme.card, borderColor: theme.border },
-              ]}
-              onPress={() => navigation.navigate('LeaveRequest')}
-            >
-              <View
-                style={[styles.workerMenuIcon, { backgroundColor: '#FF9800' }]}
-              >
-                <Ionicons name="calendar-outline" size={24} color="#fff" />
-              </View>
-              <Text style={[styles.workerMenuText, { color: theme.text }]}>
-                Xin nghỉ phép
-              </Text>
-              <Text
-                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
-              >
-                Đăng ký và theo dõi
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.workerMenuCard,
-                { backgroundColor: theme.card, borderColor: theme.border },
-              ]}
-              onPress={() => navigation.navigate('AdvanceSalary')}
-            >
-              <View
-                style={[styles.workerMenuIcon, { backgroundColor: '#2196F3' }]}
-              >
-                <Ionicons name="cash-outline" size={24} color="#fff" />
-              </View>
-              <Text style={[styles.workerMenuText, { color: theme.text }]}>
-                Xin ứng lương
-              </Text>
-              <Text
-                style={[styles.workerMenuDesc, { color: theme.textSecondary }]}
-              >
-                Yêu cầu và theo dõi
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+      {/* Menu chức năng cho công nhân, kỹ sư, kế toán */}
+      {canUseWorkerFeatures && (
+        <WorkerFeaturesMenu
+          userRole={user?.role}
+          onNavigate={(screen) => navigation.navigate(screen)}
+        />
       )}
 
       {loading ? (
@@ -34063,6 +37093,51 @@ const HomeScreen = ({ navigation }) => {
             <Ionicons name="chevron-forward" size={20} color="#999" />
           </TouchableOpacity>
 
+          {/* Quản lý lương - Chỉ hiển thị cho kế toán */}
+          {isAccountant && (
+            <>
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => navigation.navigate('FixedFeesManagement')}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: '#9C27B0' }]}>
+                  <Ionicons name="settings-outline" size={24} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuText}>Quản lý phí cố định</Text>
+                  <Text
+                    style={[styles.menuDescription, { color: theme.textMuted }]}
+                  >
+                    Cài đặt BHXH, phụ cấp, khấu trừ cố định
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#999" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.menuItem}
+                onPress={() => navigation.navigate('SalarySlipCreation')}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: '#4CAF50' }]}>
+                  <Ionicons
+                    name="document-text-outline"
+                    size={24}
+                    color="#fff"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.menuText}>Tạo phiếu lương</Text>
+                  <Text
+                    style={[styles.menuDescription, { color: theme.textMuted }]}
+                  >
+                    Tạo và xuất phiếu lương Excel vào Google Drive
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#999" />
+              </TouchableOpacity>
+            </>
+          )}
+
           {/* Test Role - Hiển thị role hiện tại */}
           <TouchableOpacity
             style={styles.menuItem}
@@ -34187,6 +37262,29 @@ const HomeScreen = ({ navigation }) => {
                   style={[styles.menuDescription, { color: theme.textMuted }]}
                 >
                   Giám sát và quản lý sản xuất thời gian thực
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#999" />
+            </TouchableOpacity>
+          )}
+
+          {/* Quản lý máy móc - hiển thị cho Giám đốc, Kỹ sư, Phó giám đốc */}
+          {(user?.role === 'giam_doc' ||
+            user?.role === 'pho_giam_doc' ||
+            user?.role === 'ky_su') && (
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('MachinesManagement')}
+            >
+              <View style={[styles.menuIcon, { backgroundColor: '#00695C' }]}>
+                <Ionicons name="construct-outline" size={24} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuText}>Quản lý máy móc</Text>
+                <Text
+                  style={[styles.menuDescription, { color: theme.textMuted }]}
+                >
+                  Danh sách máy, trạng thái, bảo trì
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#999" />
@@ -34383,44 +37481,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontWeight: 'bold',
     textAlign: 'center',
-  },
-  // Styles cho menu chức năng công nhân
-  workerMenuGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  workerMenuCard: {
-    width: '48%',
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  workerMenuIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  workerMenuText: {
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  workerMenuDesc: {
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 16,
   },
 });
 
@@ -39193,6 +42253,435 @@ export default LoginScreen;
 
 
 --- END: src\screens\LoginScreen.js ---
+
+
+--- START: src\screens\MachinesManagementScreen.js ---
+import React, { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  Modal,
+  ActivityIndicator,
+  Alert,
+  Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+import machineService from '../api/machineService';
+
+const STATUS_OPTIONS = [
+  { key: 'all', label: 'Tất cả' },
+  { key: 'active', label: 'Đang hoạt động' },
+  { key: 'maintenance', label: 'Bảo trì' },
+  { key: 'broken', label: 'Hỏng' },
+  { key: 'retired', label: 'Ngừng sử dụng' },
+];
+
+const MachinesManagementScreen = ({ navigation }) => {
+  const { theme } = useTheme();
+
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState([]);
+  const [keyword, setKeyword] = useState('');
+  const [status, setStatus] = useState('all');
+
+  const [editVisible, setEditVisible] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const data = await machineService.listMachines({
+        keyword,
+        status: status === 'all' ? undefined : status,
+      });
+      setItems(data);
+    } catch (e) {
+      Alert.alert('Lỗi', 'Không thể tải danh sách máy móc');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  const openCreate = () => {
+    setEditing({
+      code: '',
+      name: '',
+      model: '',
+      vendor: '',
+      location: '',
+      status: 'active',
+      notes: '',
+    });
+    setEditVisible(true);
+  };
+
+  const openEdit = (m) => {
+    setEditing({ ...m });
+    setEditVisible(true);
+  };
+
+  const save = async () => {
+    try {
+      setLoading(true);
+      const payload = { ...editing };
+      if (payload.id) {
+        const id = payload.id;
+        delete payload.id;
+        await machineService.updateMachine(id, payload);
+      } else {
+        await machineService.createMachine(payload);
+      }
+      setEditVisible(false);
+      await load();
+    } catch (e) {
+      Alert.alert('Lỗi', 'Không thể lưu máy');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const remove = async (id) => {
+    Alert.alert('Xác nhận', 'Xóa máy này?', [
+      { text: 'Hủy', style: 'cancel' },
+      {
+        text: 'Xóa',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setLoading(true);
+            await machineService.deleteMachine(id);
+            await load();
+          } catch (e) {
+            Alert.alert('Lỗi', 'Không thể xóa');
+          } finally {
+            setLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const renderItem = ({ item }) => (
+    <TouchableOpacity
+      style={[styles.item, { backgroundColor: theme.card }]}
+      onPress={() => openEdit(item)}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.itemTitle, { color: theme.text }]}>
+          {item.code || '-'} · {item.name || 'Máy'}
+        </Text>
+        <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+          {item.model || ''} {item.vendor ? '• ' + item.vendor : ''}{' '}
+          {item.location ? '• ' + item.location : ''}
+        </Text>
+      </View>
+      <View style={[styles.badge, { borderColor: theme.border }]}>
+        <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+          {STATUS_OPTIONS.find((s) => s.key === item.status)?.label || '—'}
+        </Text>
+      </View>
+      <TouchableOpacity
+        onPress={() => remove(item.id)}
+        style={{ paddingHorizontal: 8 }}
+      >
+        <Ionicons
+          name="trash-outline"
+          size={18}
+          color={theme.error || '#d00'}
+        />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.primary }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Quản lý máy móc</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <View style={styles.toolbar}>
+        <View style={[styles.searchBox, { borderColor: theme.border }]}>
+          <Ionicons name="search" size={16} color={theme.textSecondary} />
+          <TextInput
+            placeholder="Tìm mã, tên, vị trí, hãng..."
+            placeholderTextColor={theme.textMuted}
+            style={{ flex: 1, color: theme.text, paddingHorizontal: 8 }}
+            value={keyword}
+            onChangeText={setKeyword}
+            onSubmitEditing={load}
+            returnKeyType="search"
+          />
+          {keyword ? (
+            <TouchableOpacity
+              onPress={() => {
+                setKeyword('');
+                load();
+              }}
+            >
+              <Ionicons name="close-circle" size={16} color={theme.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <View style={styles.filtersRow}>
+          {STATUS_OPTIONS.map((s) => (
+            <TouchableOpacity
+              key={s.key}
+              style={[
+                styles.chip,
+                {
+                  borderColor: theme.border,
+                  backgroundColor:
+                    status === s.key ? theme.primary + '22' : 'transparent',
+                },
+              ]}
+              onPress={() => setStatus(s.key)}
+            >
+              <Text
+                style={{ color: status === s.key ? theme.primary : theme.text }}
+              >
+                {s.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {loading ? (
+        <ActivityIndicator style={{ marginTop: 16 }} color={theme.primary} />
+      ) : (
+        <FlatList
+          data={items}
+          keyExtractor={(it) => it.id}
+          renderItem={renderItem}
+          contentContainerStyle={{ padding: 12 }}
+          ListEmptyComponent={
+            <Text
+              style={{
+                color: theme.textSecondary,
+                textAlign: 'center',
+                marginTop: 24,
+              }}
+            >
+              Chưa có máy nào
+            </Text>
+          }
+        />
+      )}
+
+      <TouchableOpacity
+        style={[styles.fab, { backgroundColor: theme.primary }]}
+        onPress={openCreate}
+      >
+        <Ionicons name="add" size={24} color="#fff" />
+      </TouchableOpacity>
+
+      <Modal
+        visible={editVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setEditVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              {editing?.id ? 'Sửa máy' : 'Thêm máy'}
+            </Text>
+
+            <View style={styles.formRow}>
+              <TextInput
+                placeholder="Mã máy"
+                placeholderTextColor={theme.textMuted}
+                value={editing?.code}
+                onChangeText={(v) => setEditing((e) => ({ ...e, code: v }))}
+                style={[
+                  styles.input,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                placeholder="Tên máy"
+                placeholderTextColor={theme.textMuted}
+                value={editing?.name}
+                onChangeText={(v) => setEditing((e) => ({ ...e, name: v }))}
+                style={[
+                  styles.input,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                placeholder="Model"
+                placeholderTextColor={theme.textMuted}
+                value={editing?.model}
+                onChangeText={(v) => setEditing((e) => ({ ...e, model: v }))}
+                style={[
+                  styles.input,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                placeholder="Hãng (Vendor)"
+                placeholderTextColor={theme.textMuted}
+                value={editing?.vendor}
+                onChangeText={(v) => setEditing((e) => ({ ...e, vendor: v }))}
+                style={[
+                  styles.input,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                placeholder="Vị trí"
+                placeholderTextColor={theme.textMuted}
+                value={editing?.location}
+                onChangeText={(v) => setEditing((e) => ({ ...e, location: v }))}
+                style={[
+                  styles.input,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                placeholder="Trạng thái (active/maintenance/broken/retired)"
+                placeholderTextColor={theme.textMuted}
+                value={editing?.status}
+                onChangeText={(v) => setEditing((e) => ({ ...e, status: v }))}
+                style={[
+                  styles.input,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+              />
+            </View>
+            <View style={styles.formRow}>
+              <TextInput
+                placeholder="Ghi chú"
+                placeholderTextColor={theme.textMuted}
+                value={editing?.notes}
+                onChangeText={(v) => setEditing((e) => ({ ...e, notes: v }))}
+                style={[
+                  styles.input,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+              />
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton]}
+                onPress={() => setEditVisible(false)}
+              >
+                <Text style={{ color: theme.text }}>Huỷ</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: theme.primary }]}
+                onPress={save}
+              >
+                <Text style={{ color: '#fff' }}>Lưu</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    paddingTop: Platform.OS === 'ios' ? 52 : 20,
+  },
+  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  toolbar: { padding: 12 },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  filtersRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  chip: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  itemTitle: { fontSize: 14, fontWeight: '600' },
+  badge: {
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    marginHorizontal: 8,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalContent: { width: '90%', borderRadius: 12, padding: 16 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
+  formRow: { marginBottom: 8 },
+  input: { borderWidth: 1, borderRadius: 8, padding: 10 },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 8,
+  },
+  modalButton: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8 },
+});
+
+export default MachinesManagementScreen;
+
+
+--- END: src\screens\MachinesManagementScreen.js ---
 
 
 --- START: src\screens\ManualQuotationScreen.js ---
@@ -52808,6 +56297,1305 @@ export default QuotationScreen;
 --- END: src\screens\QuotationScreen.js ---
 
 
+--- START: src\screens\SalarySlipCreationScreen.js ---
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  TextInput,
+  ActivityIndicator,
+  Modal,
+  Linking,
+  Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+import salaryService from '../api/salaryService';
+import { getUsers } from '../api/userService';
+import * as Clipboard from 'expo-clipboard';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+
+// Helper function to format currency
+const formatCurrency = (amount) => {
+  if (typeof amount !== 'number' || isNaN(amount)) return '0 VNĐ';
+  return new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+  }).format(amount);
+};
+
+const SalarySlipCreationScreen = ({ navigation }) => {
+  const { theme } = useTheme();
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [employees, setEmployees] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [employeeInfo, setEmployeeInfo] = useState(null); // salary, insurance base, leave balance
+  const [attendanceInfo, setAttendanceInfo] = useState(null); // attendance summary
+  const [autoDeductions, setAutoDeductions] = useState([]);
+  const [advancePayments, setAdvancePayments] = useState([]);
+  const [systemSettings, setSystemSettings] = useState(null);
+
+  // Modal kết quả sau khi tạo
+  const [resultModalVisible, setResultModalVisible] = useState(false);
+  const [lastCreatedSlip, setLastCreatedSlip] = useState(null);
+
+  // Quản lý slip hiện tại theo kỳ lương đang chọn
+  const [currentSlip, setCurrentSlip] = useState(null);
+  const [monthPickerVisible, setMonthPickerVisible] = useState(false);
+  const [exportLink, setExportLink] = useState('');
+
+  const formatDateVN = (d) => {
+    try {
+      const date = d?.toDate ? d.toDate() : new Date(d);
+      if (isNaN(date)) return '';
+      return date.toLocaleDateString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const [formData, setFormData] = useState({
+    month: new Date().getMonth() + 1,
+    year: new Date().getFullYear(),
+    allowances: [],
+    bonuses: [],
+    deductions: [], // Manual deductions only
+    notes: '',
+  });
+
+  const [showEmployeeModal, setShowEmployeeModal] = useState(false);
+  const [showFeeModal, setShowFeeModal] = useState(false);
+  const [feeModalType, setFeeModalType] = useState(''); // 'allowance' | 'bonus' | 'deduction'
+  const [newFee, setNewFee] = useState({ name: '', amount: '' });
+  const [otModalVisible, setOtModalVisible] = useState(false);
+
+  // Map fee type to localized label
+  const feeTypeLabel = (type) => {
+    switch (type) {
+      case 'allowance':
+        return 'phụ cấp'; // yêu cầu: "thêm phụ cấp"
+      case 'bonus':
+        return 'Thưởng'; // yêu cầu: "thêm Thưởng"
+      case 'deduction':
+        return 'khấu trừ';
+      default:
+        return type || '';
+    }
+  };
+
+  // Load employees
+  useEffect(() => {
+    const loadEmployees = async () => {
+      try {
+        setLoading(true);
+        const users = await getUsers();
+        setEmployees(users);
+      } catch (error) {
+        Alert.alert('Lỗi', 'Không thể tải danh sách nhân viên.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadEmployees();
+  }, []);
+
+  const resetForm = () => {
+    setSelectedEmployee(null);
+    setEmployeeInfo(null);
+    setAttendanceInfo(null);
+    setAutoDeductions([]);
+    setSystemSettings(null);
+    setFormData({
+      month: new Date().getMonth() + 1,
+      year: new Date().getFullYear(),
+      allowances: [],
+      bonuses: [],
+      deductions: [],
+      notes: '',
+    });
+  };
+
+  // Load employee details and attendance when an employee is selected
+  const handleEmployeeSelect = async (employee) => {
+    setSelectedEmployee(employee);
+    setShowEmployeeModal(false);
+    await fetchEmployeeData(employee.id, formData.month, formData.year);
+  };
+
+  // Fetch all necessary data for the selected employee and period
+  const fetchEmployeeData = async (employeeId, month, year) => {
+    try {
+      setLoading(true);
+      // Lấy đồng thời tất cả dữ liệu cần thiết
+      const [details, attendance, settings, advances] = await Promise.all([
+        salaryService.getEmployeeDetails(employeeId),
+        salaryService.getEmployeeAttendance(employeeId, month, year),
+        salaryService.getSystemSettings(),
+        salaryService.getAdvancePayments(employeeId, month, year),
+      ]);
+
+      console.log('DEBUG fetchEmployeeData advances:', advances);
+
+      // Tính khấu trừ tự động để hiển thị (dùng lương đóng BHXH cố định)
+      const autoDeds = await salaryService.getAutoDeductions(
+        details.insuranceContributionBase || 0
+      );
+
+      setEmployeeInfo(details);
+      setAttendanceInfo(attendance);
+      setSystemSettings(settings);
+      setAutoDeductions(autoDeds);
+      setAdvancePayments(Array.isArray(advances) ? advances : []);
+    } catch (error) {
+      Alert.alert(
+        'Lỗi',
+        `Không thể tải dữ liệu cho nhân viên: ${error.message}`
+      );
+      resetForm();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Refetch data when month/year changes
+  useEffect(() => {
+    if (selectedEmployee) {
+      fetchEmployeeData(selectedEmployee.id, formData.month, formData.year);
+    }
+  }, [formData.month, formData.year]);
+
+  // Fetch current slip for selected employee & period and clear previous export state
+  const refreshCurrentSlip = async () => {
+    if (!selectedEmployee) return;
+    try {
+      const slips = await salaryService.getSalarySlips({
+        employeeId: selectedEmployee.id,
+        month: formData.month,
+        year: formData.year,
+      });
+      setCurrentSlip(slips && slips.length > 0 ? slips[0] : null);
+      setExportLink('');
+    } catch (e) {
+      setCurrentSlip(null);
+    }
+  };
+
+  useEffect(() => {
+    refreshCurrentSlip();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEmployee, formData.month, formData.year]);
+
+  // Main function to create the salary slip
+  // Sao chép link mở phiếu lương trong ứng dụng (deep link) từ lastCreatedSlip
+  const handleCopyAppLink = async () => {
+    try {
+      if (!lastCreatedSlip?.id) return;
+      const appLink = `thpapp://salary-slips/${lastCreatedSlip.id}`;
+      await Clipboard.setStringAsync(appLink);
+      Alert.alert('Đã sao chép', 'Link trong ứng dụng đã được sao chép.');
+    } catch (e) {
+      Alert.alert('Lỗi', 'Không thể sao chép link ứng dụng.');
+    }
+  };
+
+  // Xuất Excel và cho phép mở/copy link Google Drive
+  const handleExportToExcel = async (specificSlipId) => {
+    // Ưu tiên kỳ đang xem (currentSlip) để tránh nhầm tháng trước đó
+    const targetSlipId =
+      specificSlipId || currentSlip?.id || lastCreatedSlip?.id;
+    if (
+      !targetSlipId ||
+      typeof targetSlipId !== 'string' ||
+      targetSlipId.trim().length === 0
+    ) {
+      Alert.alert(
+        'Thông báo',
+        'Không tìm thấy hoặc ID phiếu lương không hợp lệ cho kỳ này. Vui lòng tạo trước.'
+      );
+      return;
+    }
+    try {
+      setExporting(true);
+      const signedIn = await GoogleSignin.isSignedIn();
+      if (!signedIn) {
+        await GoogleSignin.hasPlayServices();
+        await GoogleSignin.signIn();
+      }
+      const { accessToken } = await GoogleSignin.getTokens();
+      if (!accessToken) throw new Error('Không lấy được quyền truy cập Google');
+
+      const { getFunctions, httpsCallable } = require('firebase/functions');
+      const functions = getFunctions(undefined, 'asia-southeast1');
+      const exportSalarySlip = httpsCallable(
+        functions,
+        'exportSalarySlipToDrive'
+      );
+      const result = await exportSalarySlip({
+        salarySlipId: targetSlipId,
+        accessToken,
+      });
+
+      const fileUrl = result?.data?.fileUrl;
+      if (fileUrl) {
+        if (resultModalVisible) {
+          setExportLink(fileUrl);
+        } else {
+          Alert.alert('Xuất thành công', 'Bạn muốn làm gì với link?', [
+            { text: 'Mở link', onPress: () => Linking.openURL(fileUrl) },
+            {
+              text: 'Sao chép',
+              onPress: async () => {
+                await Clipboard.setStringAsync(fileUrl);
+                Alert.alert('Đã sao chép');
+              },
+            },
+            { text: 'Đóng', style: 'cancel' },
+          ]);
+        }
+      } else {
+        Alert.alert(
+          'Thông báo',
+          'Xuất Excel thành công nhưng không nhận được link.'
+        );
+      }
+    } catch (error) {
+      Alert.alert(
+        'Lỗi',
+        `Không thể xuất Excel: ${error?.message || 'Unknown'}`
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleCreateSalarySlip = async () => {
+    if (!selectedEmployee) {
+      Alert.alert('Lỗi', 'Vui lòng chọn một nhân viên.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      // Frontend only collects manual inputs
+      const payload = {
+        employeeId: selectedEmployee.id,
+        month: formData.month,
+        year: formData.year,
+        allowances: formData.allowances,
+        bonuses: formData.bonuses,
+        deductions: formData.deductions, // Manual deductions only
+        notes: formData.notes,
+      };
+
+      // Backend handles all calculations
+      const created = await salaryService.createSalarySlipAuto(payload);
+      setLastCreatedSlip(created);
+      setResultModalVisible(true);
+      resetForm();
+    } catch (error) {
+      Alert.alert('Lỗi', `Không thể tạo phiếu lương: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- UI Helper Functions for Modals ---
+  const addFee = (type) => {
+    setFeeModalType(type);
+    setNewFee({ name: '', amount: '' });
+    setShowFeeModal(true);
+  };
+
+  const handleSaveFee = () => {
+    if (!newFee.name.trim() || !newFee.amount.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập đầy đủ thông tin.');
+      return;
+    }
+    const fee = {
+      id: Date.now().toString(),
+      name: newFee.name,
+      amount: parseFloat(newFee.amount),
+    };
+    setFormData((prev) => ({
+      ...prev,
+      [`${feeModalType}s`]: [...prev[`${feeModalType}s`], fee],
+    }));
+    setShowFeeModal(false);
+  };
+
+  const removeFee = (type, feeId) => {
+    setFormData((prev) => ({
+      ...prev,
+      [`${type}s`]: prev[`${type}s`].filter((f) => f.id !== feeId),
+    }));
+  };
+
+  // --- RENDER FUNCTIONS ---
+
+  const renderEmployeeInfo = () =>
+    selectedEmployee && employeeInfo ? (
+      <View style={styles.autoInfoContainer}>
+        <View style={styles.autoInfoGrid}>
+          <InfoBox
+            label={
+              employeeInfo?.salaryType === 'daily'
+                ? 'Lương Theo Ngày'
+                : 'Lương Hợp Đồng'
+            }
+            value={formatCurrency(
+              employeeInfo?.salaryType === 'daily'
+                ? employeeInfo?.dailySalary || 0
+                : employeeInfo?.monthlySalary || 0
+            )}
+          />
+          <InfoBox
+            label="Lương Đóng BH"
+            value={formatCurrency(employeeInfo.insuranceContributionBase)}
+          />
+          <InfoBox
+            label="Phép Năm Còn Lại"
+            value={`${employeeInfo.annualLeaveBalance} ngày`}
+          />
+        </View>
+      </View>
+    ) : null;
+
+  const handleDebugOT = async () => {
+    try {
+      if (!selectedEmployee) return;
+      const res = await salaryService.getEmployeeAttendance(
+        selectedEmployee.id,
+        formData.month,
+        formData.year
+      );
+      console.log('DEBUG OT MONTH (frontend echo)', res);
+      Alert.alert(
+        'Debug OT',
+        `Kỳ ${formData.month}/${formData.year}\nNgày công: ${res.actualWorkDays}\nOT Thường/CN/Lễ: ${res.overtimeHours.normal} / ${res.overtimeHours.sunday} / ${res.overtimeHours.holiday}`
+      );
+    } catch (e) {
+      Alert.alert('Debug OT lỗi', e?.message || 'Unknown');
+    }
+  };
+
+  const renderAttendanceInfo = () =>
+    selectedEmployee && attendanceInfo ? (
+      <View style={styles.attendanceInfoContainer}>
+        <Text style={[styles.attendanceInfoTitle, { color: theme.primary }]}>
+          Thông tin chấm công tháng {formData.month}/{formData.year}
+        </Text>
+        <View style={styles.attendanceInfoGrid}>
+          <InfoBox
+            label="Ngày công thực tế"
+            value={`${attendanceInfo.actualWorkDays} ngày`}
+          />
+          <InfoBox
+            label="Nghỉ phép"
+            value={`${attendanceInfo.paidLeaveDays} ngày`}
+          />
+          <InfoBox
+            label="Giờ OT (Thường/CN/Lễ)"
+            value={`${attendanceInfo.overtimeHours.normal} / ${attendanceInfo.overtimeHours.sunday} / ${attendanceInfo.overtimeHours.holiday}`}
+          />
+        </View>
+        <TouchableOpacity
+          style={[
+            styles.modalButton,
+            {
+              marginTop: 8,
+              alignSelf: 'flex-end',
+              backgroundColor: theme.primary,
+            },
+          ]}
+          onPress={handleDebugOT}
+        >
+          <Text style={{ color: '#fff' }}>Debug OT</Text>
+        </TouchableOpacity>
+      </View>
+    ) : null;
+
+  const renderSalaryPreview = () => {
+    if (!employeeInfo || !attendanceInfo || !systemSettings) return null;
+
+    // Bước 1: Lấy tất cả các biến cần thiết từ state.
+    const { salaryType, dailySalary, monthlySalary } = employeeInfo;
+    const { actualWorkDays, paidLeaveDays, overtimeHours } = attendanceInfo;
+    const { standardWorkingDays, overtimeMultipliers } = systemSettings;
+
+    // Bước 2: Tính toán các giá trị cơ bản.
+    const effectiveDays = actualWorkDays + paidLeaveDays;
+
+    // ----- SỬA LỖI LOGIC CỐT LÕI NẰM Ở ĐÂY -----
+    let baseSalary = 0;
+    let hourlyRate = 0;
+
+    if (salaryType === 'daily') {
+      // Áp dụng công thức cho lương ngày
+      baseSalary = (dailySalary || 0) * effectiveDays;
+      hourlyRate = (dailySalary || 0) / 8;
+    } else {
+      // Áp dụng công thức cho lương tháng (mặc định)
+      baseSalary = (monthlySalary / standardWorkingDays) * effectiveDays;
+      hourlyRate = monthlySalary / standardWorkingDays / 8;
+    }
+    // ---------------------------------------------
+
+    // Bước 3: Tiếp tục các phép tính còn lại với baseSalary và hourlyRate đã chính xác.
+    // Đơn giá giờ OT (hiển thị xem trước) theo hệ số từ settings, với fallback an toàn
+    const mNormal = overtimeMultipliers?.normal ?? 1.5;
+    const mSunday = mNormal; // CN cùng đơn giá như ngày thường theo yêu cầu
+    const mHoliday = overtimeMultipliers?.holiday ?? 3.0;
+
+    const overtimeHourlyRate = {
+      normal: hourlyRate * mNormal,
+      sunday: hourlyRate * mSunday,
+      holiday: hourlyRate * mHoliday,
+    };
+
+    // Chuẩn hóa OT ngày thường theo bội số 3 giờ (tối đa 3h/ngày) – hiển thị preview an toàn
+    const normalHoursRaw = overtimeHours.normal || 0;
+    const normalizedNormalHours = Math.floor(normalHoursRaw / 3) * 3;
+
+    const totalOvertimePay =
+      normalizedNormalHours * overtimeHourlyRate.normal +
+      (overtimeHours.sunday || 0) * overtimeHourlyRate.sunday +
+      (overtimeHours.holiday || 0) * overtimeHourlyRate.holiday;
+
+    const totalAllowances = formData.allowances.reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0
+    );
+    const totalBonuses = formData.bonuses.reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0
+    );
+
+    const grossSalary =
+      baseSalary + totalOvertimePay + totalAllowances + totalBonuses;
+
+    const totalAuto = autoDeductions.reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0
+    );
+    const totalManual = formData.deductions.reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0
+    );
+    const totalAdvances = advancePayments.reduce(
+      (sum, item) => sum + (item.amount || 0),
+      0
+    );
+    const totalDeductions = totalAuto + totalManual + totalAdvances;
+
+    const netSalary = grossSalary - totalDeductions;
+
+    // Bước 4: Render giao diện với kết quả đúng.
+    return (
+      <View style={[styles.section, { backgroundColor: theme.card }]}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>
+          Xem trước (Ước tính)
+        </Text>
+        <SummaryRow
+          label="Lương cơ bản (theo ngày công)"
+          value={formatCurrency(baseSalary)}
+        />
+        <SummaryRow
+          label="Tổng lương tăng ca"
+          value={formatCurrency(totalOvertimePay)}
+          isAddition={true}
+        />
+        <SummaryRow
+          label="Đơn giá giờ OT (Th/CN/Lễ)"
+          value={`${formatCurrency(
+            overtimeHourlyRate.normal
+          )} / ${formatCurrency(overtimeHourlyRate.sunday)} / ${formatCurrency(
+            overtimeHourlyRate.holiday
+          )}`}
+        />
+        <SummaryRow
+          label={`Chi tiết OT Thường (${overtimeHours.normal || 0}h)`}
+          value={formatCurrency(
+            (overtimeHours.normal || 0) * overtimeHourlyRate.normal
+          )}
+        />
+        <SummaryRow
+          label={`Chi tiết OT Chủ nhật (${overtimeHours.sunday || 0}h)`}
+          value={formatCurrency(
+            (overtimeHours.sunday || 0) * overtimeHourlyRate.sunday
+          )}
+        />
+        <SummaryRow
+          label={`Chi tiết OT Ngày lễ (${overtimeHours.holiday || 0}h)`}
+          value={formatCurrency(
+            (overtimeHours.holiday || 0) * overtimeHourlyRate.holiday
+          )}
+        />
+        <SummaryRow
+          label="Tổng Phụ Cấp"
+          value={formatCurrency(totalAllowances)}
+          isAddition={true}
+        />
+        <SummaryRow
+          label="Tổng Thưởng"
+          value={formatCurrency(totalBonuses)}
+          isAddition={true}
+        />
+        <SummaryRow
+          label="TỔNG THU NHẬP (GROSS)"
+          value={formatCurrency(grossSalary)}
+          isTotal={true}
+        />
+        <SummaryRow
+          label="Tổng khấu trừ (BH + khác)"
+          value={formatCurrency(-totalDeductions)}
+        />
+        <SummaryRow
+          label="THỰC NHẬN (ƯỚC TÍNH)"
+          value={formatCurrency(netSalary)}
+          isTotal={true}
+        />
+        <Text style={[styles.previewNote, { color: theme.textMuted }]}>
+          *Đây là ước tính hiển thị. Số liệu chính xác sẽ do backend tính toán.
+        </Text>
+      </View>
+    );
+  };
+
+  if (loading) {
+    return (
+      <ActivityIndicator
+        size="large"
+        color={theme.primary}
+        style={{ flex: 1 }}
+      />
+    );
+  }
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.primary }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Tạo Phiếu Lương Mới</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content}>
+        {/* Employee Selection */}
+        <View style={[styles.section, { backgroundColor: theme.card }]}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            1. Chọn nhân viên
+          </Text>
+          <TouchableOpacity
+            style={[styles.selector, { borderColor: theme.border }]}
+            onPress={() => setShowEmployeeModal(true)}
+          >
+            <Text style={{ color: theme.text }}>
+              {selectedEmployee
+                ? selectedEmployee.displayName || selectedEmployee.name || 'N/A'
+                : 'Chọn nhân viên'}
+            </Text>
+            <Ionicons name="chevron-down" size={20} color={theme.textMuted} />
+          </TouchableOpacity>
+          {renderEmployeeInfo()}
+        </View>
+
+        {/* Period and Attendance */}
+        {selectedEmployee && (
+          <View style={[styles.section, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              2. Chọn kỳ lương
+            </Text>
+            <View style={styles.formRow}>
+              {/* Month dropdown trigger */}
+              <TouchableOpacity
+                style={[
+                  styles.formInput,
+                  { justifyContent: 'center', borderColor: theme.border },
+                ]}
+                onPress={() => setMonthPickerVisible(true)}
+              >
+                <Text style={{ color: theme.text }}>
+                  Tháng {formData.month}
+                </Text>
+              </TouchableOpacity>
+              {/* Year numeric input remains */}
+              <TextInput
+                style={[
+                  styles.formInput,
+                  { color: theme.text, borderColor: theme.border },
+                ]}
+                value={formData.year.toString()}
+                onChangeText={(text) =>
+                  setFormData({
+                    ...formData,
+                    year: parseInt(text) || new Date().getFullYear(),
+                  })
+                }
+                keyboardType="numeric"
+              />
+            </View>
+            {renderAttendanceInfo()}
+
+            {/* Export current period's slip if exists */}
+            {currentSlip ? (
+              <TouchableOpacity
+                style={[
+                  styles.createButton,
+                  { backgroundColor: theme.primary, marginTop: 8 },
+                ]}
+                onPress={() => handleExportToExcel()}
+                disabled={exporting}
+              >
+                {exporting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.createButtonText}>
+                    Xuất Excel kỳ {formData.month}/{formData.year}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            ) : (
+              <Text style={{ color: theme.textSecondary, marginTop: 8 }}>
+                Chưa có phiếu lương của kỳ này.
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* Manual Inputs */}
+        {selectedEmployee && (
+          <>
+            <FeeSection
+              type="allowance"
+              title="3. Phụ cấp (Nhập tay)"
+              data={formData.allowances}
+              onAdd={() => addFee('allowance')}
+              onRemove={(id) => removeFee('allowance', id)}
+              theme={theme}
+            />
+            <FeeSection
+              type="bonus"
+              title="4. Thưởng (Nhập tay)"
+              data={formData.bonuses}
+              onAdd={() => addFee('bonus')}
+              onRemove={(id) => removeFee('bonus', id)}
+              theme={theme}
+            />
+
+            {/* Approved Advance Payments (read-only) */}
+            <View style={[styles.section, { backgroundColor: theme.card }]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                  5. Ứng lương đã duyệt (tự trừ)
+                </Text>
+              </View>
+              {advancePayments && advancePayments.length > 0 ? (
+                <>
+                  {advancePayments.map((item) => (
+                    <View key={item.id} style={styles.feeItem}>
+                      <Text style={{ color: theme.text }}>
+                        {formatDateVN(item.requestDate)} -{' '}
+                        {item.reason || 'Không có lý do'}
+                      </Text>
+                      <Text style={{ color: theme.text }}>
+                        {formatCurrency(item.amount || 0)}
+                      </Text>
+                    </View>
+                  ))}
+                  <View style={[styles.feeItem, { borderBottomWidth: 0 }]}>
+                    <Text style={{ color: theme.text, fontWeight: '600' }}>
+                      Tổng ứng lương
+                    </Text>
+                    <Text style={{ color: theme.text, fontWeight: '600' }}>
+                      {formatCurrency(
+                        advancePayments.reduce((s, x) => s + (x.amount || 0), 0)
+                      )}
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <View>
+                  <Text style={{ color: theme.textSecondary }}>
+                    Không có yêu cầu ứng lương đã duyệt.
+                  </Text>
+                  <Text
+                    style={{
+                      color: theme.textMuted,
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    Debug: {JSON.stringify(advancePayments)}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Auto Deductions (read-only) */}
+            <View style={[styles.section, { backgroundColor: theme.card }]}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                  6. Khấu trừ tự động (BHXH, BHYT, BHTN)
+                </Text>
+              </View>
+              {autoDeductions && autoDeductions.length > 0 ? (
+                autoDeductions.map((item, idx) => (
+                  <View key={idx} style={styles.feeItem}>
+                    <Text style={{ color: theme.text }}>{item.name}</Text>
+                    <Text style={{ color: theme.text }}>
+                      {formatCurrency(item.amount)}
+                    </Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={{ color: theme.textSecondary }}>
+                  Không có khấu trừ tự động.
+                </Text>
+              )}
+            </View>
+
+            <FeeSection
+              type="deduction"
+              title="7. Khấu trừ khác (VD: phạt, viếng tang...)"
+              data={formData.deductions}
+              onAdd={() => addFee('deduction')}
+              onRemove={(id) => removeFee('deduction', id)}
+              theme={theme}
+            />
+          </>
+        )}
+
+        {/* Notes */}
+        {selectedEmployee && (
+          <View style={[styles.section, { backgroundColor: theme.card }]}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              7. Ghi chú
+            </Text>
+            <TextInput
+              style={[
+                styles.notesInput,
+                { color: theme.text, borderColor: theme.border },
+              ]}
+              value={formData.notes}
+              onChangeText={(text) => setFormData({ ...formData, notes: text })}
+              multiline
+            />
+          </View>
+        )}
+
+        {/* Salary Preview */}
+        {renderSalaryPreview()}
+
+        {/* Submit Button */}
+        <TouchableOpacity
+          style={[styles.createButton, { backgroundColor: theme.primary }]}
+          onPress={handleCreateSalarySlip}
+          disabled={!selectedEmployee}
+        >
+          <Text style={styles.createButtonText}>Tạo Phiếu Lương</Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+      {/* Employee Modal */}
+      <Modal
+        visible={showEmployeeModal}
+        transparent={true}
+        onRequestClose={() => setShowEmployeeModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              Chọn Nhân Viên
+            </Text>
+            <ScrollView>
+              {employees.map((emp) => (
+                <TouchableOpacity
+                  key={emp.id}
+                  style={styles.employeeItem}
+                  onPress={() => handleEmployeeSelect(emp)}
+                >
+                  <Text style={{ color: theme.text }}>
+                    {emp.displayName || emp.name || emp.email}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setShowEmployeeModal(false)}
+            >
+              <Text style={{ color: theme.text }}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Month Picker Modal */}
+      <Modal
+        visible={monthPickerVisible}
+        transparent={true}
+        onRequestClose={() => setMonthPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: theme.card, width: '90%', maxHeight: '70%' },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              Chọn Tháng
+            </Text>
+            <ScrollView>
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                <TouchableOpacity
+                  key={m}
+                  style={[
+                    styles.employeeItem,
+                    {
+                      backgroundColor:
+                        m === formData.month
+                          ? theme.primary + '20'
+                          : 'transparent',
+                    },
+                  ]}
+                  onPress={() => {
+                    setFormData((prev) => ({ ...prev, month: m }));
+                    setMonthPickerVisible(false);
+                  }}
+                >
+                  <Text style={{ color: theme.text }}>Tháng {m}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => setMonthPickerVisible(false)}
+            >
+              <Text style={{ color: theme.text }}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Fee Modal */}
+      <Modal
+        visible={showFeeModal}
+        transparent={true}
+        onRequestClose={() => setShowFeeModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              Thêm {feeTypeLabel(feeModalType)}
+            </Text>
+            <TextInput
+              style={[
+                styles.modalInput,
+                { color: theme.text, borderColor: theme.border, marginTop: 12 },
+              ]}
+              placeholder="Tên"
+              placeholderTextColor={theme.textMuted}
+              selectionColor={theme.primary}
+              value={newFee.name}
+              onChangeText={(text) => setNewFee({ ...newFee, name: text })}
+              returnKeyType="next"
+              underlineColorAndroid="transparent"
+            />
+            <TextInput
+              style={[
+                styles.modalInput,
+                { color: theme.text, borderColor: theme.border },
+              ]}
+              placeholder="Số tiền"
+              placeholderTextColor={theme.textMuted}
+              selectionColor={theme.primary}
+              value={newFee.amount}
+              onChangeText={(text) => setNewFee({ ...newFee, amount: text })}
+              keyboardType={
+                Platform.OS === 'ios'
+                  ? 'numbers-and-punctuation'
+                  : 'decimal-pad'
+              }
+              returnKeyType="done"
+            />
+            <View style={styles.formRow}>
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => setShowFeeModal(false)}
+              >
+                <Text style={{ color: theme.text }}>Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: theme.primary }]}
+                onPress={handleSaveFee}
+              >
+                <Text style={{ color: '#fff' }}>Lưu</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* OT Breakdown Modal */}
+      <Modal
+        visible={otModalVisible}
+        transparent={true}
+        onRequestClose={() => setOtModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: theme.card, width: '92%', maxHeight: '80%' },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              Danh sách ngày OT
+            </Text>
+            <ScrollView>
+              {attendanceInfo?.overtimeDetails &&
+              attendanceInfo.overtimeDetails.length > 0 ? (
+                attendanceInfo.overtimeDetails.map((d, idx) => (
+                  <View key={idx} style={styles.feeItem}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: theme.text, fontWeight: '600' }}>
+                        {d.date} • {d.type.toUpperCase()}
+                      </Text>
+                      <Text
+                        style={{ color: theme.textSecondary, fontSize: 12 }}
+                      >
+                        Giờ: {d.hours}h • Vào: {d.clockIn || '-'} • Ra:{' '}
+                        {d.clockOut || '-'} • Công: {d.workedHours || 0}h
+                      </Text>
+                      {d.reason ? (
+                        <Text
+                          style={{ color: theme.textSecondary, fontSize: 12 }}
+                        >
+                          Lý do: {d.reason}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Text style={{ color: theme.text, fontWeight: '600' }}>
+                      {d.hours}
+                    </Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={{ color: theme.text }}>
+                  Không có ngày OT trong kỳ.
+                </Text>
+              )}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => setOtModalVisible(false)}
+            >
+              <Text style={{ color: theme.text }}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Result Modal: hiển thị sau khi tạo phiếu lương thành công */}
+      <Modal
+        visible={resultModalVisible}
+        transparent={true}
+        onRequestClose={() => setResultModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalContent,
+              { backgroundColor: theme.card, width: '92%' },
+            ]}
+          >
+            <Text style={[styles.modalTitle, { color: theme.text }]}>
+              Tạo Phiếu Lương Thành Công
+            </Text>
+            {lastCreatedSlip?.employeeName ? (
+              <Text
+                style={{
+                  color: theme.text,
+                  textAlign: 'center',
+                  marginBottom: 12,
+                }}
+              >
+                Phiếu của {lastCreatedSlip.employeeName}
+              </Text>
+            ) : null}
+
+            {/* Nút xuất Excel */}
+            <TouchableOpacity
+              style={[
+                styles.modalButton,
+                { backgroundColor: theme.primary, marginBottom: 12 },
+              ]}
+              onPress={() => handleExportToExcel(lastCreatedSlip?.id)}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={{ color: '#fff' }}>
+                  Xuất Excel & Lấy Link Drive
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Hiển thị link Drive sau khi export thành công */}
+            {exportLink ? (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: theme.textSecondary, marginBottom: 6 }}>
+                  Link Google Drive:
+                </Text>
+                <Text
+                  style={{ color: theme.text, marginBottom: 10 }}
+                  numberOfLines={2}
+                >
+                  {exportLink}
+                </Text>
+                <View style={styles.formRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: theme.primary },
+                    ]}
+                    onPress={async () => {
+                      await Clipboard.setStringAsync(exportLink);
+                    }}
+                  >
+                    <Text style={{ color: '#fff' }}>Copy link Drive</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: theme.primary },
+                    ]}
+                    onPress={() => Linking.openURL(exportLink)}
+                  >
+                    <Text style={{ color: '#fff' }}>Mở link</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
+            {/* Nút sao chép link ứng dụng */}
+            <TouchableOpacity
+              style={[
+                styles.modalButton,
+                { backgroundColor: theme.primary, marginBottom: 12 },
+              ]}
+              onPress={handleCopyAppLink}
+            >
+              <Text style={{ color: '#fff' }}>Sao chép Link trong App</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => setResultModalVisible(false)}
+            >
+              <Text style={{ color: theme.text }}>Đóng</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+};
+
+// --- Reusable Components ---
+const InfoBox = ({ label, value }) => {
+  const { theme } = useTheme();
+  return (
+    <View style={styles.autoInfoItem}>
+      <Text style={[styles.autoInfoLabel, { color: theme.textSecondary }]}>
+        {label}
+      </Text>
+      <Text style={[styles.autoInfoValue, { color: theme.text }]}>{value}</Text>
+    </View>
+  );
+};
+
+const FeeSection = ({ type, title, data, onAdd, onRemove, theme }) => (
+  <View style={[styles.section, { backgroundColor: theme.card }]}>
+    <View style={styles.sectionHeader}>
+      <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+      <TouchableOpacity onPress={onAdd}>
+        <Ionicons name="add-circle" size={28} color={theme.primary} />
+      </TouchableOpacity>
+    </View>
+    {data.map((item) => (
+      <View key={item.id} style={styles.feeItem}>
+        <Text style={{ color: theme.text }}>{item.name}</Text>
+        <Text style={{ color: theme.text }}>{formatCurrency(item.amount)}</Text>
+        <TouchableOpacity onPress={() => onRemove(item.id)}>
+          <Ionicons name="remove-circle" size={24} color={theme.error} />
+        </TouchableOpacity>
+      </View>
+    ))}
+  </View>
+);
+
+const SummaryRow = ({ label, value, isAddition = false, isTotal = false }) => {
+  const { theme } = useTheme();
+  return (
+    <View style={[styles.summaryRow, isTotal && styles.summaryDivider]}>
+      <Text
+        style={[
+          styles.summaryLabel,
+          { color: theme.text, fontWeight: isTotal ? 'bold' : 'normal' },
+        ]}
+      >
+        {label}
+      </Text>
+      <Text
+        style={[
+          styles.summaryValue,
+          {
+            color: isAddition ? theme.success : theme.text,
+            fontWeight: isTotal ? 'bold' : 'normal',
+          },
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+};
+
+// --- Styles ---
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+  },
+  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  content: { padding: 16 },
+  section: { padding: 16, borderRadius: 12, marginBottom: 16 },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold' },
+  selector: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  formRow: { flexDirection: 'row', gap: 12 },
+  // Dedicated style for modal inputs to avoid clipping
+  modalInput: {
+    height: 52,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 8,
+    textAlignVertical: 'center',
+    marginBottom: 12,
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  formInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+  },
+  autoInfoContainer: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    borderRadius: 8,
+  },
+  autoInfoGrid: { flexDirection: 'row', justifyContent: 'space-around' },
+  autoInfoItem: { flex: 1, alignItems: 'center', paddingHorizontal: 4 },
+  autoInfoLabel: { fontSize: 12, marginBottom: 4, textAlign: 'center' },
+  autoInfoValue: { fontSize: 14, fontWeight: '600', textAlign: 'center' },
+  attendanceInfoContainer: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+    borderRadius: 8,
+  },
+  attendanceInfoTitle: { fontSize: 14, fontWeight: '600', marginBottom: 12 },
+  attendanceInfoGrid: { flexDirection: 'row', justifyContent: 'space-around' },
+  feeItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  notesInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  previewNote: { fontSize: 12, fontStyle: 'italic', marginTop: 8 },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  summaryLabel: { fontSize: 14 },
+  summaryValue: { fontSize: 14, fontWeight: '500' },
+  summaryDivider: { borderTopWidth: 1, paddingTop: 8, marginTop: 8 },
+  createButton: {
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  createButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalContent: { padding: 16, borderRadius: 12 },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
+  employeeItem: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  closeButton: { marginTop: 16, padding: 12, alignItems: 'center' },
+  modalButton: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
+});
+
+export default SalarySlipCreationScreen;
+
+
+--- END: src\screens\SalarySlipCreationScreen.js ---
+
+
 --- START: src\screens\StageDetailScreen.js ---
 import React, { useState, useLayoutEffect, useEffect } from 'react';
 import {
@@ -57919,6 +62707,320 @@ export default TaskReportScreen;
 
 
 --- END: src\screens\TaskReportScreen.js ---
+
+
+--- START: src\screens\TotalSalaryReportScreen.js ---
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  FlatList,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '../contexts/ThemeContext';
+import salaryService from '../api/salaryService';
+
+const TotalSalaryReportScreen = ({ navigation }) => {
+  const { theme } = useTheme();
+  const [loading, setLoading] = useState(false);
+  const [reportData, setReportData] = useState(null);
+  const [date, setDate] = useState({
+    month: new Date().getMonth() + 1,
+    year: new Date().getFullYear(),
+  });
+
+  useEffect(() => {
+    // Tự động tải (ưu tiên cache) khi mở màn hình
+    handleGenerateReport(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleGenerateReport = async (forceRefresh = false) => {
+    setLoading(true);
+    try {
+      const data = await salaryService.getTotalSalaryReport(
+        date.month,
+        date.year,
+        { forceRefresh }
+      );
+      setReportData(data);
+    } catch (error) {
+      console.error('Error generating salary report:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+    }).format(amount);
+  };
+
+  const renderSalarySlipItem = ({ item }) => (
+    <View style={[styles.slipItem, { backgroundColor: theme.card }]}>
+      <View style={styles.employeeInfo}>
+        <Text style={[styles.employeeName, { color: theme.text }]}>
+          {item.employeeName}
+        </Text>
+        <Text style={[styles.employeePosition, { color: theme.textSecondary }]}>
+          {item.position}
+        </Text>
+      </View>
+      <Text style={[styles.netSalary, { color: theme.primary }]}>
+        {formatCurrency(item.calculatedSalary.netSalary)}
+      </Text>
+    </View>
+  );
+
+  return (
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      <View style={[styles.header, { backgroundColor: theme.primary }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Báo cáo tổng lương</Text>
+        <View style={{ width: 20 }} />
+      </View>
+
+      <View style={styles.content}>
+        <View style={[styles.card, { backgroundColor: theme.card }]}>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>
+            Chọn tháng và năm
+          </Text>
+          {/* Simple month/year selectors for now */}
+          <View style={styles.dateSelector}>
+            <TouchableOpacity
+              onPress={() => setDate({ ...date, month: date.month - 1 })}
+            >
+              <Ionicons name="chevron-back" size={24} color={theme.primary} />
+            </TouchableOpacity>
+            <Text style={[styles.dateText, { color: theme.text }]}>
+              {date.month} / {date.year}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setDate({ ...date, month: date.month + 1 })}
+            >
+              <Ionicons
+                name="chevron-forward"
+                size={24}
+                color={theme.primary}
+              />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity
+              style={[styles.button, { backgroundColor: theme.primary }]}
+              onPress={() => handleGenerateReport(false)}
+            >
+              <Text style={styles.buttonText}>Xem báo cáo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.buttonOutline, { borderColor: theme.primary }]}
+              onPress={() => handleGenerateReport(true)}
+            >
+              <Text
+                style={[styles.buttonTextOutline, { color: theme.primary }]}
+              >
+                Làm mới
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {loading && (
+          <ActivityIndicator
+            size="large"
+            color={theme.primary}
+            style={{ marginTop: 20 }}
+          />
+        )}
+
+        {reportData && (
+          <View
+            style={[
+              styles.card,
+              { backgroundColor: theme.card, marginTop: 20 },
+            ]}
+          >
+            <Text style={[styles.cardTitle, { color: theme.text }]}>
+              Kết quả báo cáo tháng {reportData.month}/{reportData.year}
+            </Text>
+
+            {/* Thống kê tổng quan */}
+            <View style={styles.statsContainer}>
+              <View style={styles.statItem}>
+                <Text
+                  style={[styles.statLabel, { color: theme.textSecondary }]}
+                >
+                  Số nhân viên
+                </Text>
+                <Text style={[styles.statValue, { color: theme.text }]}>
+                  {reportData.totalSalarySlips}
+                </Text>
+              </View>
+
+              <View style={styles.statItem}>
+                <Text
+                  style={[styles.statLabel, { color: theme.textSecondary }]}
+                >
+                  Tổng lương gross
+                </Text>
+                <Text style={[styles.statValue, { color: theme.text }]}>
+                  {formatCurrency(reportData.totalGrossSalary)}
+                </Text>
+              </View>
+
+              <View style={styles.statItem}>
+                <Text
+                  style={[styles.statLabel, { color: theme.textSecondary }]}
+                >
+                  Tổng khấu trừ
+                </Text>
+                <Text style={[styles.statValue, { color: theme.text }]}>
+                  {formatCurrency(reportData.totalDeductions)}
+                </Text>
+              </View>
+            </View>
+
+            {/* Tổng lương phải trả */}
+            <View style={styles.summaryContainer}>
+              <Text
+                style={[styles.summaryText, { color: theme.textSecondary }]}
+              >
+                Tổng lương phải trả (thực lĩnh)
+              </Text>
+              <Text style={[styles.totalAmount, { color: theme.primary }]}>
+                {formatCurrency(reportData.totalNetSalary)}
+              </Text>
+            </View>
+
+            <Text style={[styles.listHeader, { color: theme.text }]}>
+              Chi tiết phiếu lương
+            </Text>
+            <FlatList
+              data={reportData.salarySlips}
+              renderItem={renderSalarySlipItem}
+              keyExtractor={(item, index) =>
+                item.employeeId || `employee-${index}`
+              }
+              style={{ maxHeight: 400 }}
+            />
+          </View>
+        )}
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    paddingTop: 20,
+  },
+  headerTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  content: { padding: 16 },
+  card: { padding: 16, borderRadius: 8, marginBottom: 16 },
+  cardTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 12 },
+  dateSelector: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  dateText: { fontSize: 18, fontWeight: 'bold' },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  button: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  buttonOutline: {
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    marginTop: 8,
+  },
+  buttonTextOutline: { fontSize: 16, fontWeight: 'bold' },
+  statsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginVertical: 12,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#eee',
+  },
+  statItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  summaryContainer: { alignItems: 'center', marginVertical: 16 },
+  summaryText: { fontSize: 16, marginBottom: 6 },
+  totalAmount: { fontSize: 24, fontWeight: 'bold' },
+  listHeader: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  slipItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  employeeInfo: {
+    flex: 1,
+  },
+  employeeName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  employeePosition: {
+    fontSize: 14,
+  },
+  netSalary: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'right',
+  },
+});
+
+export default TotalSalaryReportScreen;
+
+
+--- END: src\screens\TotalSalaryReportScreen.js ---
 
 
 --- START: src\screens\UserManagementScreen.js ---
@@ -65652,6 +70754,7 @@ export * from './deliveryNoteExcelGenerator';
 // Export trực tiếp từ quotationExcelGenerator
 export * from './quotationExcelGenerator';
 export * from './attendanceExcelGenerator';
+export * from './salaryExcelGenerator';
 export * from './processWorkAllocations';
 export * from './aggregateMonthlyReport';
 export * from './notificationTriggers';
@@ -66752,6 +71855,65 @@ export const importMaterialsFromDrive = functions
 
 
 --- END: functions\src\materialImporter.ts ---
+
+
+--- START: functions\src\migration.ts ---
+import * as admin from 'firebase-admin';
+
+// Initialize Firebase Admin SDK
+// Make sure to replace with your actual service account credentials
+// const serviceAccount = require('../service-account-credentials.json');
+// admin.initializeApp({
+//   credential: admin.credential.cert(serviceAccount)
+// });
+
+const db = admin.firestore();
+
+export async function updateUserSchema() {
+  const usersSnapshot = await db.collection('users').get();
+  const batch = db.batch();
+
+  usersSnapshot.forEach((doc) => {
+    const userRef = db.collection('users').doc(doc.id);
+    batch.update(userRef, {
+      annualLeaveBalance: 12, // Default value
+      insuranceContributionBase: 5500000, // Default value, adjust as needed
+    });
+  });
+
+  await batch.commit();
+  console.log('Users schema updated successfully.');
+}
+
+                            export async function createGlobalSettings() {
+  const settingsRef = db.collection('settings').doc('companyConfig');
+  await settingsRef.set({
+    standardWorkingDays: 26, // Example value, adjust as needed
+    overtimeMultipliers: {
+      normal: 1.5,
+      sunday: 2.0,
+      holiday: 3.0,
+    },
+  });
+  console.log('Global settings created successfully.');
+}
+
+export async function runMigrations() {
+  try {
+    await updateUserSchema();
+    await createGlobalSettings();
+    console.log('All migrations completed successfully.');
+  } catch (error) {
+    console.error('Error running migrations:', error);
+  }
+}
+
+// To run this script, you would typically call runMigrations()
+// For example, from a CLI or another function.
+// runMigrations();
+
+
+--- END: functions\src\migration.ts ---
 
 
 --- START: functions\src\notificationTriggers.ts ---
@@ -69598,6 +74760,394 @@ export const generateExcelQuotation = functions
 
 
 --- END: functions\src\quotationExcelGenerator.ts ---
+
+
+--- START: functions\src\salaryExcelGenerator.ts ---
+import * as functions from 'firebase-functions/v1';
+import * as admin from 'firebase-admin';
+import * as XLSX from 'xlsx';
+import { google } from 'googleapis';
+import { PassThrough } from 'stream';
+
+// Định nghĩa interface mới cho SalarySlip để khớp với cấu trúc dữ liệu đã nâng cấp
+interface SalarySlip {
+  id: string;
+  employeeName: string;
+  month: number;
+  year: number;
+  notes?: string;
+  employeeInfo: {
+    monthlySalary: number;
+    insuranceContributionBase: number;
+  };
+  attendanceSummary: {
+    actualWorkDays: number;
+    paidLeaveDays: number;
+    overtimeHours: { normal: number; sunday: number; holiday: number };
+  };
+  calculatedSalary: {
+    baseSalary: number;
+    totalOvertimePay: number;
+    totalAllowances: number;
+    totalBonuses: number;
+    grossSalary: number;
+    totalDeductions: number;
+    netSalary: number;
+    hourlyRate: number;
+    effectiveWorkingDays: number;
+    overtimePay: { normal: number; sunday: number; holiday: number };
+    autoDeductions: Array<{ name: string; amount: number }>;
+    manualDeductions: Array<{ name: string; amount: number }>;
+    advancePayments: Array<{ reason?: string; date?: any; amount: number }>;
+    totalAdvancePayments: number;
+  };
+  manualInputs: {
+    allowances: Array<{ name: string; amount: number }>;
+    bonuses: Array<{ name: string; amount: number }>;
+  };
+}
+
+// Excel number formats
+const CURRENCY_FMT = '#,##0 "VNĐ"';
+const CURRENCY_PER_HOUR_FMT = '#,##0 "VNĐ/giờ"';
+const HOURS_FMT = '#,##0.00 "giờ"';
+
+/**
+ * (VIẾT LẠI) Cloud Function để xuất phiếu lương Excel với cấu trúc mới (dùng định dạng số)
+ */
+export const exportSalarySlipToDrive = functions
+  .region('asia-southeast1')
+  .https.onCall(async (data: any, context: any) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        'unauthenticated',
+        'Yêu cầu đăng nhập.'
+      );
+    }
+
+    const { salarySlipId, accessToken } = data;
+    if (!salarySlipId || !accessToken) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        'Thiếu salarySlipId hoặc accessToken.'
+      );
+    }
+
+    try {
+      // 1. Lấy dữ liệu phiếu lương từ Firestore
+      const salarySlipDoc = await admin
+        .firestore()
+        .collection('salarySlips')
+        .doc(salarySlipId)
+        .get();
+      if (!salarySlipDoc.exists) {
+        throw new functions.https.HttpsError(
+          'not-found',
+          'Phiếu lương không tồn tại.'
+        );
+      }
+      const salarySlip = {
+        id: salarySlipDoc.id,
+        ...salarySlipDoc.data(),
+      } as SalarySlip;
+
+      // 2. Tạo file Excel theo template đơn giản (1 sheet duy nhất)
+      const workbook = XLSX.utils.book_new();
+
+      // Tạo dữ liệu theo template như trong hình
+      const ws_data: any[][] = [
+        // Header row
+        ['Họ tên:', salarySlip.employeeName, 'Chức Vụ:', 'Kỹ thuật'],
+        ['Số ngày công:', salarySlip.attendanceSummary.actualWorkDays],
+        [],
+        // Lương cứng
+        [
+          '1. Lương cứng:',
+          { v: salarySlip.employeeInfo.monthlySalary, t: 'n', z: CURRENCY_FMT },
+        ],
+        [
+          '2. Lương theo ngày công:',
+          {
+            v: salarySlip.calculatedSalary.baseSalary,
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [
+          '3. Phụ cấp:',
+          {
+            v: salarySlip.calculatedSalary.totalAllowances,
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [],
+        // Tăng ca
+        ['4. Số giờ tăng ca:'],
+        [
+          'Ngày thường (x1,5):',
+          {
+            v: salarySlip.attendanceSummary.overtimeHours.normal,
+            t: 'n',
+            z: HOURS_FMT,
+          },
+          'Tiền tăng ca trên 1 giờ:',
+          {
+            v: salarySlip.calculatedSalary.hourlyRate,
+            t: 'n',
+            z: CURRENCY_PER_HOUR_FMT,
+          },
+        ],
+        [
+          'Ngày CN (x1,5):',
+          {
+            v: salarySlip.attendanceSummary.overtimeHours.sunday,
+            t: 'n',
+            z: HOURS_FMT,
+          },
+        ],
+        [
+          'Ngày lễ (x1,5):',
+          {
+            v: salarySlip.attendanceSummary.overtimeHours.holiday,
+            t: 'n',
+            z: HOURS_FMT,
+          },
+        ],
+        [
+          '6. Tổng lương tăng ca:',
+          {
+            v: salarySlip.calculatedSalary.totalOvertimePay,
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        ['7. Phép năm chưa dùng:', ''],
+        ['8. Phép năm cộng vào lương:', ''],
+        [
+          '9. Tổng thu nhập trước BHXH',
+          {
+            v: salarySlip.calculatedSalary.grossSalary,
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [],
+        // Khấu trừ
+        ['Các khoản trích theo lương'],
+        [
+          'BHXH (8%):',
+          {
+            v:
+              salarySlip.calculatedSalary.autoDeductions.find(
+                (d) =>
+                  d.name.includes('Bảo hiểm xã hội') || d.name.includes('BHXH')
+              )?.amount || 0,
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [
+          'BHYT (1.5%):',
+          {
+            v:
+              salarySlip.calculatedSalary.autoDeductions.find(
+                (d) =>
+                  d.name.includes('Bảo hiểm y tế') || d.name.includes('BHYT')
+              )?.amount || 0,
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [
+          'BHTN (1%):',
+          {
+            v:
+              salarySlip.calculatedSalary.autoDeductions.find(
+                (d) =>
+                  d.name.includes('Bảo hiểm thất nghiệp') ||
+                  d.name.includes('BHTN')
+              )?.amount || 0,
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [
+          '10. Tổng trừ BH (10,5%):',
+          {
+            v: salarySlip.calculatedSalary.autoDeductions.reduce(
+              (sum, d) => sum + d.amount,
+              0
+            ),
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [],
+        [
+          '11. Tổng thu nhập sau BHXH (9-10):',
+          {
+            v:
+              salarySlip.calculatedSalary.grossSalary -
+              salarySlip.calculatedSalary.autoDeductions.reduce(
+                (sum, d) => sum + d.amount,
+                0
+              ),
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+        ],
+        [
+          '12. Trừ Tạm Ứng:',
+          {
+            v: salarySlip.calculatedSalary.advancePayments.reduce(
+              (sum, p) => sum + p.amount,
+              0
+            ),
+            t: 'n',
+            z: CURRENCY_FMT,
+          },
+          'Ghi chú:',
+          '',
+        ],
+        [],
+        [
+          '13. Thực lĩnh (11-12):',
+          { v: salarySlip.calculatedSalary.netSalary, t: 'n', z: CURRENCY_FMT },
+        ],
+        [],
+        // Footer
+        [
+          new Date().toLocaleDateString('vi-VN'),
+          'Người lập:',
+          '',
+          'Người nhận:',
+        ],
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+      // Thiết lập độ rộng cột D là 120 pixel
+      ws['!cols'] = [
+        { wch: 20 }, // Cột A
+        { wch: 20 }, // Cột B
+        { wch: 20 }, // Cột C
+        { wpx: 120 }, // Cột D - 120 pixel
+        { wch: 20 }, // Cột E
+        { wch: 20 }, // Cột F
+        { wch: 20 }, // Cột G
+      ];
+
+      // Đặt tên sheet
+      XLSX.utils.book_append_sheet(workbook, ws, 'Phiếu Lương');
+
+      // 3. Chuyển đổi workbook thành buffer
+      const excelBuffer = XLSX.write(workbook, {
+        type: 'buffer',
+        bookType: 'xlsx',
+      });
+
+      // 4. Upload file lên Google Drive
+      const auth = new google.auth.OAuth2();
+      auth.setCredentials({ access_token: accessToken });
+      const drive = google.drive({ version: 'v3', auth });
+
+      // Tìm hoặc tạo thư mục 'PHIEU LUONG'
+      const rootFolderId = '1Ci_BHZx0-Uhv2xg5IzwLPn05yPAUXOOU'; // Cần đảm bảo ID này đúng
+      const folderQuery = `'${rootFolderId}' in parents and mimeType='application/vnd.google-apps.folder' and name='PHIEU LUONG' and trashed=false`;
+      const folderResponse = await drive.files.list({
+        q: folderQuery,
+        fields: 'files(id)',
+      });
+
+      let targetFolderId: string | null | undefined = null;
+      if (folderResponse.data.files && folderResponse.data.files.length > 0) {
+        targetFolderId = folderResponse.data.files[0].id;
+      } else {
+        const newFolder = await drive.files.create({
+          requestBody: {
+            name: 'PHIEU LUONG',
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: [rootFolderId],
+          },
+          fields: 'id',
+        });
+        targetFolderId = newFolder.data.id;
+      }
+
+      if (!targetFolderId) {
+        throw new Error(
+          'Không thể tìm hoặc tạo thư mục đích trên Google Drive.'
+        );
+      }
+
+      const fileName = `Phiếu lương - ${salarySlip.employeeName} - ${salarySlip.month}-${salarySlip.year}.xlsx`;
+      const bufferStream = new PassThrough();
+      bufferStream.end(excelBuffer);
+
+      const uploadedFile = await drive.files.create({
+        requestBody: { name: fileName, parents: [targetFolderId] },
+        media: {
+          mimeType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          body: bufferStream,
+        },
+        fields: 'id,name,webViewLink',
+      });
+
+      // 5. Cập nhật lại phiếu lương với thông tin file Excel
+      await admin
+        .firestore()
+        .collection('salarySlips')
+        .doc(salarySlipId)
+        .update({
+          excelFileId: uploadedFile.data.id,
+          excelFileUrl: uploadedFile.data.webViewLink,
+          exportedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+      return {
+        success: true,
+        message: 'Xuất phiếu lương thành công!',
+        fileUrl: uploadedFile.data.webViewLink,
+      };
+    } catch (error) {
+      console.error('Lỗi khi xuất phiếu lương:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Lỗi không xác định.';
+      throw new functions.https.HttpsError(
+        'internal',
+        `Lỗi khi xuất phiếu lương: ${errorMessage}`
+      );
+    }
+  });
+
+
+--- END: functions\src\salaryExcelGenerator.ts ---
+
+
+--- START: functions\src\salaryService.ts ---
+// This service will house the new, comprehensive salary calculation logic.
+// We will build out the functions here as we progress through the tasks.
+
+export {};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--- END: functions\src\salaryService.ts ---
 
 
 --- START: functions\src\savePOReceiptConfirmation.ts ---

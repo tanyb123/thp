@@ -59,7 +59,7 @@ const AttendanceScreen = ({ navigation }) => {
   const functions = getFunctions(getApp(), 'asia-southeast1');
 
   // Add default overtime hours
-  const DEFAULT_OVERTIME_HOURS = 2.5; // Default 2.5 hours (20:30)
+  const DEFAULT_OVERTIME_HOURS = 3; // Default 3 hours (20:30)
 
   // Format date for display
   const formatDisplayDate = (date) => {

@@ -12,6 +12,7 @@ import {
   orderBy,
   serverTimestamp,
 } from 'firebase/firestore';
+import wallet from './walletService';
 
 // Lưu chi phí dự án
 export const saveProjectExpense = async (projectId, expenseData) => {
@@ -176,4 +177,60 @@ export const deleteExpensesByProjectId = async (projectId) => {
     console.error('❌ Lỗi khi xóa chi phí theo projectId:', error);
     throw error;
   }
+};
+// ================= Company expenses (tiền ra/chi phí công ty) =================
+const COMPANY_COL = 'company_expenses';
+
+export const addExpense = async (payload) => {
+  const ref = await addDoc(collection(db, COMPANY_COL), {
+    description: payload.description,
+    amount: Number(payload.amount) || 0,
+    date: payload.date || serverTimestamp(),
+    type: payload.type || 'other',
+    expenseCategory: payload.expenseCategory || 'other',
+    relatedDocId: payload.relatedDocId || null,
+    createdBy: payload.createdBy || null,
+    status: payload.status || 'pending', // pending | approved | rejected
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
+};
+
+export const listCompanyExpenses = async ({ status, createdBy } = {}) => {
+  let qy = query(collection(db, COMPANY_COL), orderBy('createdAt', 'desc'));
+  const snap = await getDocs(qy);
+  let items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  if (status) items = items.filter((e) => (e.status || 'pending') === status);
+  if (createdBy) items = items.filter((e) => e.createdBy === createdBy);
+  return items;
+};
+
+export const updateCompanyExpense = async (id, payload) => {
+  await updateDoc(doc(db, COMPANY_COL, id), {
+    ...payload,
+    updatedAt: serverTimestamp(),
+  });
+  // If status changed to approved and there is a configured default wallet, deduct from it
+  if (payload?.status === 'approved') {
+    // naive: use first wallet
+    try {
+      const ws = await wallet.listWallets();
+      if (ws[0]) {
+        const d = await getDoc(doc(db, COMPANY_COL, id));
+        const data = d.data();
+        await wallet.deductForExpense({
+          walletId: ws[0].id,
+          amount: data?.amount || 0,
+          expenseId: id,
+          note: data?.description,
+          actorId: data?.createdBy,
+        });
+      }
+    } catch (_) {}
+  }
+};
+
+export const deleteCompanyExpense = async (id) => {
+  await deleteDoc(doc(db, COMPANY_COL, id));
 };

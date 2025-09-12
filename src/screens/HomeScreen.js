@@ -24,7 +24,7 @@ import {
   getAttendanceStatus,
 } from '../api/attendanceService';
 import { useAuth } from '../contexts/AuthContext';
-import WorkerFeaturesMenu from '../components/WorkerFeaturesMenu';
+// Worker features will be shown as grid items instead of a fixed section
 
 const HomeScreen = ({ navigation }) => {
   const { theme, isDarkMode } = useTheme();
@@ -188,6 +188,176 @@ const HomeScreen = ({ navigation }) => {
     }
   };
 
+  // Bảng màu mới cho Home (đồng nhất xanh lam đậm, xanh lá, trắng + accent)
+  const palette = {
+    background: theme.background,
+    card: theme.card,
+    slateBlue: '#334155',
+    deepBlue: '#1E3A8A',
+    green: '#2E7D32',
+    accent: '#10B981',
+    border: theme.border,
+    text: theme.text,
+    textSecondary: theme.textSecondary || '#6b7280',
+  };
+
+  const showLegacySections = false;
+
+  // Tập hợp thẻ chức năng thành Grid theo yêu cầu (loại bỏ dự án/khách hàng gần đây, báo cáo nâng cao...)
+  const featureItems = [];
+  // Chấm công - Nghỉ phép - Ứng lương (đưa vào grid)
+  featureItems.push(
+    {
+      key: 'att-view',
+      label: 'Xem chấm công',
+      icon: 'time-outline',
+      to: () =>
+        navigation.navigate(
+          user?.role === 'ke_toan' ? 'Attendance' : 'WorkerAttendance'
+        ),
+    },
+    {
+      key: 'leave',
+      label: 'Xin nghỉ phép',
+      icon: 'calendar-outline',
+      to: () => navigation.navigate('LeaveRequest'),
+    },
+    {
+      key: 'advance',
+      label: 'Xin ứng lương',
+      icon: 'cash-outline',
+      to: () => navigation.navigate('AdvanceSalary'),
+    }
+  );
+  if (
+    ['ke_toan', 'giam_doc', 'thuong_mai'].includes(
+      (user?.role || '').toLowerCase()
+    )
+  ) {
+    featureItems.push(
+      {
+        key: 'expense-list',
+        label: 'Khoản tiền ra',
+        icon: 'cash-outline',
+        bg: palette.deepBlue,
+        to: () => navigation.navigate('CompanyExpenses'),
+      },
+      {
+        key: 'wallet',
+        label: 'Ví/Quỹ',
+        icon: 'wallet-outline',
+        bg: palette.slateBlue,
+        to: () => navigation.navigate('Wallet'),
+      },
+      {
+        key: 'expense-add',
+        label: 'Thêm chi phí',
+        icon: 'add-circle-outline',
+        bg: palette.green,
+        to: () => navigation.navigate('AddCompanyExpense'),
+      },
+      {
+        key: 'cashin',
+        label: 'Yêu cầu nạp',
+        icon: 'arrow-down-circle-outline',
+        bg: palette.accent,
+        to: () => navigation.navigate('CashInRequest'),
+      }
+    );
+  }
+  if (
+    ['thuong_mai', 'ky_su', 'ke_toan'].includes(
+      (user?.role || '').toLowerCase()
+    )
+  ) {
+    featureItems.push(
+      {
+        key: 'inv-stock',
+        label: 'Vật tư tồn kho',
+        icon: 'cube-outline',
+        bg: palette.green,
+        to: () => navigation.navigate('Inventory', { screen: 'InventoryMain' }),
+      },
+      {
+        key: 'inv-report',
+        label: 'Báo cáo kho',
+        icon: 'bar-chart-outline',
+        bg: palette.deepBlue,
+        to: () =>
+          navigation.navigate('Inventory', { screen: 'InventoryReport' }),
+      },
+      {
+        key: 'inv-tx',
+        label: 'Giao dịch kho',
+        icon: 'swap-horizontal',
+        bg: palette.slateBlue,
+        to: () =>
+          navigation.navigate('Inventory', { screen: 'InventoryTransaction' }),
+      },
+      {
+        key: 'inv-add',
+        label: 'Thêm vật tư',
+        icon: 'add-circle',
+        bg: '#6D28D9',
+        to: () =>
+          navigation.navigate('Inventory', { screen: 'AddInventoryItem' }),
+      },
+      {
+        key: 'supplier',
+        label: 'Nhà cung cấp',
+        icon: 'business-outline',
+        bg: '#0EA5E9',
+        to: () => navigation.navigate('SupplierManagement'),
+      },
+      {
+        key: 'material',
+        label: 'Quản lý vật liệu',
+        icon: 'cube-outline',
+        bg: '#F97316',
+        to: () => navigation.navigate('MaterialManagement'),
+      }
+    );
+  }
+  if ((user?.role || '').toLowerCase() === 'ke_toan') {
+    featureItems.push(
+      {
+        key: 'fixed-fee',
+        label: 'Phí cố định',
+        icon: 'settings-outline',
+        bg: '#9333EA',
+        to: () => navigation.navigate('FixedFeesManagement'),
+      },
+      {
+        key: 'salary-slip',
+        label: 'Tạo phiếu lương',
+        icon: 'document-text-outline',
+        bg: palette.green,
+        to: () => navigation.navigate('SalarySlipCreation'),
+      }
+    );
+  }
+  // Luôn hiển thị các mục sản xuất/công việc trong grid (theme xanh)
+  featureItems.push(
+    {
+      key: 'kiosk',
+      label: 'Kiosk xưởng sản xuất',
+      icon: 'desktop-outline',
+      to: () => navigation.navigate('Kiosk'),
+    },
+    {
+      key: 'starboard',
+      label: 'Bảng tiến độ dự án',
+      icon: 'grid-outline',
+      to: () => navigation.navigate('Starboard'),
+    },
+    {
+      key: 'workalloc',
+      label: 'Giao việc & Hướng dẫn',
+      icon: 'clipboard-outline',
+      to: () => navigation.navigate('WorkAllocation'),
+    }
+  );
+
   return (
     <SafeAreaView
       style={[styles.container, { backgroundColor: theme.background }]}
@@ -197,251 +367,9 @@ const HomeScreen = ({ navigation }) => {
         backgroundColor={theme.background}
       />
 
-      {canUseAttendance && (
-        <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-          <View
-            style={{
-              backgroundColor: theme.card,
-              borderRadius: 8,
-              padding: 16,
-              borderWidth: 1,
-              borderColor: theme.border,
-              marginBottom: 16,
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 18,
-                fontWeight: 'bold',
-                color: theme.text,
-                marginBottom: 8,
-              }}
-            >
-              Chấm Công -{' '}
-              {isWorker
-                ? 'Công nhân'
-                : isEngineer
-                ? 'Kỹ sư'
-                : isAccountant
-                ? 'Kế toán'
-                : 'Nhân viên'}
-            </Text>
-            {user?.role === 'ke_toan' ? (
-              <TouchableOpacity
-                style={getAttBtnStyle(theme)}
-                onPress={() => navigation.navigate('Attendance')}
-              >
-                <Ionicons
-                  name="eye-outline"
-                  size={20}
-                  color="#fff"
-                  style={{ marginRight: 6 }}
-                />
-                <Text style={{ color: '#fff', fontWeight: '600' }}>
-                  Xem Bảng Chấm Công
-                </Text>
-              </TouchableOpacity>
-            ) : user?.role === 'ky_su' ? (
-              <>
-                {attLoading ? (
-                  <ActivityIndicator color={theme.primary} />
-                ) : (
-                  <>
-                    {(() => {
-                      const status = getAttendanceStatus(attendance);
-                      if (status === 'none') {
-                        return (
-                          <TouchableOpacity
-                            style={getAttBtnStyle(theme)}
-                            onPress={handleClockIn}
-                          >
-                            <Ionicons
-                              name="log-in-outline"
-                              size={20}
-                              color="#fff"
-                              style={{ marginRight: 6 }}
-                            />
-                            <Text style={{ color: '#fff', fontWeight: '600' }}>
-                              Chấm Công Vào
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      }
-                      if (status === 'clocked_in') {
-                        return (
-                          <>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 8 }}
-                            >
-                              Vào lúc:{' '}
-                              {attendance.clockIn.toDate().toLocaleTimeString()}
-                            </Text>
-                            <TouchableOpacity
-                              style={getAttBtnStyle(theme)}
-                              onPress={handleClockOut}
-                            >
-                              <Ionicons
-                                name="log-out-outline"
-                                size={20}
-                                color="#fff"
-                                style={{ marginRight: 6 }}
-                              />
-                              <Text
-                                style={{ color: '#fff', fontWeight: '600' }}
-                              >
-                                Chấm Công Ra
-                              </Text>
-                            </TouchableOpacity>
-                          </>
-                        );
-                      }
-                      if (status === 'clocked_out') {
-                        return (
-                          <>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 4 }}
-                            >
-                              Vào lúc:{' '}
-                              {attendance.clockIn.toDate().toLocaleTimeString()}
-                            </Text>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 8 }}
-                            >
-                              Ra lúc:{' '}
-                              {attendance.clockOut
-                                .toDate()
-                                .toLocaleTimeString()}
-                            </Text>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 8 }}
-                            >
-                              Tăng ca: {attendance.overtime || 0} giờ
-                            </Text>
-                            <View style={{ flexDirection: 'row' }}>
-                              {[1, 2, 3].map((h) => (
-                                <TouchableOpacity
-                                  key={h}
-                                  style={getOvertimeBtnStyle(theme)}
-                                  onPress={() => handleAddOvertime(h)}
-                                >
-                                  <Text style={{ color: '#fff' }}>+{h}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </>
-                        );
-                      }
-                      return null;
-                    })()}
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                {attLoading ? (
-                  <ActivityIndicator color={theme.primary} />
-                ) : (
-                  <>
-                    {(() => {
-                      const status = getAttendanceStatus(attendance);
-                      if (status === 'none') {
-                        return (
-                          <TouchableOpacity
-                            style={getAttBtnStyle(theme)}
-                            onPress={handleClockIn}
-                          >
-                            <Ionicons
-                              name="log-in-outline"
-                              size={20}
-                              color="#fff"
-                              style={{ marginRight: 6 }}
-                            />
-                            <Text style={{ color: '#fff', fontWeight: '600' }}>
-                              Chấm Công Vào
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      }
-                      if (status === 'clocked_in') {
-                        return (
-                          <>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 8 }}
-                            >
-                              Vào lúc:{' '}
-                              {attendance.clockIn.toDate().toLocaleTimeString()}
-                            </Text>
-                            <TouchableOpacity
-                              style={getAttBtnStyle(theme)}
-                              onPress={handleClockOut}
-                            >
-                              <Ionicons
-                                name="log-out-outline"
-                                size={20}
-                                color="#fff"
-                                style={{ marginRight: 6 }}
-                              />
-                              <Text
-                                style={{ color: '#fff', fontWeight: '600' }}
-                              >
-                                Chấm Công Ra
-                              </Text>
-                            </TouchableOpacity>
-                          </>
-                        );
-                      }
-                      if (status === 'clocked_out') {
-                        return (
-                          <>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 4 }}
-                            >
-                              Vào lúc:{' '}
-                              {attendance.clockIn.toDate().toLocaleTimeString()}
-                            </Text>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 8 }}
-                            >
-                              Ra lúc:{' '}
-                              {attendance.clockOut
-                                .toDate()
-                                .toLocaleTimeString()}
-                            </Text>
-                            <Text
-                              style={{ color: theme.text, marginBottom: 8 }}
-                            >
-                              Tăng ca: {attendance.overtime || 0} giờ
-                            </Text>
-                            <View style={{ flexDirection: 'row' }}>
-                              {[1, 2, 3].map((h) => (
-                                <TouchableOpacity
-                                  key={h}
-                                  style={getOvertimeBtnStyle(theme)}
-                                  onPress={() => handleAddOvertime(h)}
-                                >
-                                  <Text style={{ color: '#fff' }}>+{h}</Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          </>
-                        );
-                      }
-                    })()}
-                  </>
-                )}
-              </>
-            )}
-          </View>
-        </View>
-      )}
+      {/* Đã bỏ khối cố định chấm công; đưa vào grid bên dưới */}
 
-      {/* Menu chức năng cho công nhân, kỹ sư, kế toán */}
-      {canUseWorkerFeatures && (
-        <WorkerFeaturesMenu
-          userRole={user?.role}
-          onNavigate={(screen) => navigation.navigate(screen)}
-        />
-      )}
+      {/* Đã bỏ WorkerFeaturesMenu - các mục đã được đưa vào Grid */}
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -455,7 +383,7 @@ const HomeScreen = ({ navigation }) => {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* Phần dự án gần đây */}
+          {showLegacySections && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>
@@ -474,7 +402,10 @@ const HomeScreen = ({ navigation }) => {
                   key={project.id}
                   style={[
                     styles.card,
-                    { backgroundColor: theme.card, borderColor: theme.border },
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                      },
                   ]}
                   onPress={() => handleProjectPress(project)}
                 >
@@ -532,50 +463,157 @@ const HomeScreen = ({ navigation }) => {
               </View>
             )}
           </View>
+          )}
 
-          {/* Expense Tracking Section for Accountants & Managers */}
-          {(user?.role === 'ke_toan' ||
-            user?.role === 'giam_doc' ||
-            user?.role === 'pho_giam_doc') && (
+          {/* Grid chức năng chính (đồng nhất icon + màu) */}
+          {featureItems.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: palette.text }]}>
+                  Chức năng chính
+                </Text>
+              </View>
+              <View style={styles.menuGrid}>
+                {featureItems.map((f) => (
+                  <TouchableOpacity
+                    key={f.key}
+                    style={[
+                      styles.menuCard,
+                      {
+                        backgroundColor: palette.card,
+                        borderColor: '#E2E8F0',
+                        shadowColor: palette.slateBlue,
+                      },
+                    ]}
+                    onPress={f.to}
+                  >
             <View
               style={[
-                styles.section,
-                { backgroundColor: theme.cardBackground },
-              ]}
-            >
+                        styles.menuIcon,
+                        { backgroundColor: '#E8F5E9', borderRadius: 14 },
+                      ]}
+                    >
+                      <Ionicons name={f.icon} size={24} color="#1B5E20" />
+                    </View>
+                    <Text
+                      style={[
+                        styles.menuText,
+                        { color: palette.text, fontWeight: '700' },
+                      ]}
+                    >
+                      {f.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {showLegacySections && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                Quản lý chi phí
+                  Báo cáo nâng cao
               </Text>
-              <View style={styles.expenseActionsContainer}>
+              </View>
+              <View style={styles.menuGrid}>
                 <TouchableOpacity
                   style={[
-                    styles.expenseActionButton,
-                    { backgroundColor: '#FF9800' },
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
                   ]}
-                  onPress={() => navigation.navigate('ExpenseList')}
+                  onPress={() => navigation.navigate('ProjectProfitReport')}
                 >
-                  <Ionicons name="list-outline" size={24} color="#fff" />
-                  <Text style={styles.expenseActionText}>Chi phí dự án</Text>
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#2E7D32' }]}
+                  >
+                    <Ionicons name="cash-outline" size={24} color="#fff" />
+                  </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    LN dự án
+                  </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[
-                    styles.expenseActionButton,
-                    { backgroundColor: '#673AB7' },
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
                   ]}
-                  onPress={() => navigation.navigate('AddCompanyExpense')}
+                  onPress={() => navigation.navigate('WorkerPerformanceReport')}
                 >
-                  <Ionicons name="add-circle-outline" size={24} color="#fff" />
-                  <Text style={styles.expenseActionText}>
-                    Thêm chi phí công ty
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#1565C0' }]}
+                  >
+                    <Ionicons name="people-outline" size={24} color="#fff" />
+                  </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Hiệu suất NV
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => navigation.navigate('SupplierAnalysisReport')}
+                >
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#6A1B9A' }]}
+                  >
+                    <Ionicons name="business-outline" size={24} color="#fff" />
+                  </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Nhà cung cấp
                   </Text>
                 </TouchableOpacity>
               </View>
             </View>
           )}
 
+          {/* Đã gom nhóm mục Tài chính vào Grid ở trên */}
+
+          {showLegacySections &&
+            (user?.role === 'giam_doc' ||
+              user?.role === 'pho_giam_doc' ||
+              user?.role === 'ky_su' ||
+              user?.role === 'cong_nhan') && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                    Ghi chú & Tiến độ
+                  </Text>
+                </View>
+                <View style={styles.menuGrid}>
+                  <TouchableOpacity
+                    style={[
+                      styles.menuCard,
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                      },
+                    ]}
+                    onPress={() => navigation.navigate('EmployeeTaskBoard')}
+                  >
+                    <View
+                      style={[styles.menuIcon, { backgroundColor: '#263238' }]}
+                    >
+                      <Ionicons
+                        name="clipboard-outline"
+                        size={24}
+                        color="#fff"
+                      />
+                    </View>
+                    <Text style={[styles.menuText, { color: theme.text }]}>
+                      Bảng việc
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           {/* 库存管理菜单 - 只对特定角色显示 */}
-          {['thuong_mai', 'ky_su', 'ke_toan'].includes(
+          {showLegacySections &&
+            ['thuong_mai', 'ky_su', 'ke_toan'].includes(
             (user?.role || '').toLowerCase()
           ) && (
             <View style={styles.section}>
@@ -588,7 +626,10 @@ const HomeScreen = ({ navigation }) => {
                 <TouchableOpacity
                   style={[
                     styles.menuCard,
-                    { backgroundColor: theme.card, borderColor: theme.border },
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                      },
                   ]}
                   onPress={() =>
                     navigation.navigate('Inventory', {
@@ -609,7 +650,10 @@ const HomeScreen = ({ navigation }) => {
                 <TouchableOpacity
                   style={[
                     styles.menuCard,
-                    { backgroundColor: theme.card, borderColor: theme.border },
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                      },
                   ]}
                   onPress={() =>
                     navigation.navigate('Inventory', {
@@ -630,7 +674,10 @@ const HomeScreen = ({ navigation }) => {
                 <TouchableOpacity
                   style={[
                     styles.menuCard,
-                    { backgroundColor: theme.card, borderColor: theme.border },
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                      },
                   ]}
                   onPress={() =>
                     navigation.navigate('Inventory', {
@@ -651,7 +698,10 @@ const HomeScreen = ({ navigation }) => {
                 <TouchableOpacity
                   style={[
                     styles.menuCard,
-                    { backgroundColor: theme.card, borderColor: theme.border },
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                      },
                   ]}
                   onPress={() =>
                     navigation.navigate('Inventory', {
@@ -672,7 +722,7 @@ const HomeScreen = ({ navigation }) => {
             </View>
           )}
 
-          {/* Phần khách hàng gần đây */}
+          {showLegacySections && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: theme.text }]}>
@@ -691,7 +741,10 @@ const HomeScreen = ({ navigation }) => {
                   key={customer.id}
                   style={[
                     styles.card,
-                    { backgroundColor: theme.card, borderColor: theme.border },
+                      {
+                        backgroundColor: theme.card,
+                        borderColor: theme.border,
+                      },
                   ]}
                   onPress={() => handleCustomerPress(customer)}
                 >
@@ -761,8 +814,9 @@ const HomeScreen = ({ navigation }) => {
               </View>
             )}
           </View>
+          )}
 
-          {/* Thông tin ứng dụng */}
+          {showLegacySections && (
           <View
             style={[styles.infoCard, { backgroundColor: theme.primaryLight }]}
           >
@@ -775,8 +829,9 @@ const HomeScreen = ({ navigation }) => {
               THP App - Phiên bản 1.0.0
             </Text>
           </View>
+          )}
 
-          {/* Nút quản lý nhà cung cấp */}
+          {showLegacySections && (
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => navigation.navigate('SupplierManagement')}
@@ -787,16 +842,13 @@ const HomeScreen = ({ navigation }) => {
             <Text style={styles.menuText}>Quản lý nhà cung cấp</Text>
             <Ionicons name="chevron-forward" size={20} color="#999" />
           </TouchableOpacity>
+          )}
 
           {/* Quản lý vật liệu */}
-          {console.log(
-            'Rendering Material Management button, user role:',
-            user?.role
-          )}
+          {showLegacySections && (
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => {
-              console.log('Material Management button pressed');
               navigation.navigate('MaterialManagement');
             }}
           >
@@ -813,9 +865,10 @@ const HomeScreen = ({ navigation }) => {
             </View>
             <Ionicons name="chevron-forward" size={20} color="#999" />
           </TouchableOpacity>
+          )}
 
           {/* Quản lý lương - Chỉ hiển thị cho kế toán */}
-          {isAccountant && (
+          {showLegacySections && isAccountant && (
             <>
               <TouchableOpacity
                 style={styles.menuItem}
@@ -859,154 +912,198 @@ const HomeScreen = ({ navigation }) => {
             </>
           )}
 
-          {/* Test Role - Hiển thị role hiện tại */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() =>
-              Alert.alert(
-                'Role hiện tại',
-                `Role: ${user?.role || 'Không có role'}`
-              )
-            }
-          >
-            <View style={[styles.menuIcon, { backgroundColor: '#9E9E9E' }]}>
-              <Ionicons
-                name="information-circle-outline"
-                size={24}
-                color="#fff"
-              />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.menuText}>Test Role</Text>
-              <Text
-                style={[styles.menuDescription, { color: theme.textMuted }]}
-              >
-                Role hiện tại: {user?.role || 'Không có role'}
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
+          {/* Đã xoá các mục Test */}
 
-          {/* Test Navigation - Kiểm tra navigation có hoạt động không */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              console.log('Test navigation button pressed');
-              Alert.alert('Test', 'Navigation test button works!');
-            }}
-          >
-            <View style={[styles.menuIcon, { backgroundColor: '#FF9800' }]}>
-              <Ionicons name="bug-outline" size={24} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.menuText}>Test Navigation</Text>
-              <Text
-                style={[styles.menuDescription, { color: theme.textMuted }]}
-              >
-                Kiểm tra navigation có hoạt động không
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
-
-          {/* Kiosk Xưởng Sản Xuất */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('Kiosk')}
-          >
-            <View style={[styles.menuIcon, { backgroundColor: '#FF9800' }]}>
-              <Ionicons name="desktop-outline" size={24} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.menuText}>Kiosk Xưởng Sản Xuất</Text>
-              <Text
-                style={[styles.menuDescription, { color: theme.textMuted }]}
-              >
-                Theo dõi công việc và bấm giờ thời gian thực
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
-
-          {/* Starboard - Bảng Tiến Độ Dự Án */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('Starboard')}
-          >
-            <View style={[styles.menuIcon, { backgroundColor: '#4CAF50' }]}>
-              <Ionicons name="grid-outline" size={24} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.menuText}>Bảng Tiến Độ Dự Án</Text>
-              <Text
-                style={[styles.menuDescription, { color: theme.textMuted }]}
-              >
-                Giám sát tiến độ các dự án đang thực hiện
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
-
-          {/* Giao việc & Hướng dẫn */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('WorkAllocation')}
-          >
-            <View style={[styles.menuIcon, { backgroundColor: '#9C27B0' }]}>
-              <Ionicons name="clipboard-outline" size={24} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.menuText}>Giao việc & Hướng dẫn</Text>
-              <Text
-                style={[styles.menuDescription, { color: theme.textMuted }]}
-              >
-                Phân công công việc và tạo hướng dẫn chi tiết
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color="#999" />
-          </TouchableOpacity>
+          {/* Đã chuyển Kiosk/Bảng tiến độ/Giao việc vào Grid phía trên */}
 
           {/* Production Dashboard for Management */}
           {(user?.role === 'giam_doc' ||
             user?.role === 'pho_giam_doc' ||
             user?.role === 'ky_su') && (
-            <TouchableOpacity
-              style={styles.menuItem}
+          <TouchableOpacity
+            style={styles.menuItem}
               onPress={() => navigation.navigate('ProductionDashboard')}
             >
               <View style={[styles.menuIcon, { backgroundColor: '#2196F3' }]}>
                 <Ionicons name="analytics-outline" size={24} color="#fff" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.menuText}>Dashboard Sản Xuất</Text>
-                <Text
-                  style={[styles.menuDescription, { color: theme.textMuted }]}
-                >
-                  Giám sát và quản lý sản xuất thời gian thực
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#999" />
-            </TouchableOpacity>
-          )}
-
-          {/* Trong phần menu items, thêm mục quản lý kho */}
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('Inventory')}
-          >
-            <View style={[styles.menuIcon, { backgroundColor: '#4CAF50' }]}>
-              <Ionicons name="package-variant" size={24} color="#fff" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.menuText}>Quản lý kho</Text>
+                <Text style={styles.menuText}>Dashboard Sản Xuất</Text>
               <Text
                 style={[styles.menuDescription, { color: theme.textMuted }]}
               >
-                Quản lý vật tư, nhập xuất kho
+                  Giám sát và quản lý sản xuất thời gian thực
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#999" />
           </TouchableOpacity>
+          )}
+
+          {/* Quản lý máy móc - hiển thị cho Giám đốc, Kỹ sư, Phó giám đốc */}
+          {(user?.role === 'giam_doc' ||
+            user?.role === 'pho_giam_doc' ||
+            user?.role === 'ky_su') && (
+          <TouchableOpacity
+            style={styles.menuItem}
+              onPress={() => navigation.navigate('MachinesManagement')}
+          >
+              <View style={[styles.menuIcon, { backgroundColor: '#00695C' }]}>
+                <Ionicons name="construct-outline" size={24} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+                <Text style={styles.menuText}>Quản lý máy móc</Text>
+              <Text
+                style={[styles.menuDescription, { color: theme.textMuted }]}
+              >
+                  Danh sách máy, trạng thái, bảo trì
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#999" />
+          </TouchableOpacity>
+          )}
+
+          {/* QA/QC - hiển thị cho Giám đốc, Kỹ sư, Phó giám đốc */}
+          {(user?.role === 'giam_doc' ||
+            user?.role === 'pho_giam_doc' ||
+            user?.role === 'ky_su') && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                  QA/QC
+                </Text>
+              </View>
+              <View style={styles.menuGrid}>
+          <TouchableOpacity
+                  style={[
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => navigation.navigate('QCChecklists')}
+                >
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#00796B' }]}
+                  >
+                    <Ionicons
+                      name="checkmark-done-outline"
+                      size={24}
+                      color="#fff"
+                    />
+            </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Checklist
+                  </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+                  style={[
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => navigation.navigate('QCInspections')}
+                >
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#3949AB' }]}
+                  >
+                    <Ionicons
+                      name="document-text-outline"
+                      size={24}
+                      color="#fff"
+                    />
+            </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Kiểm tra
+                  </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+                  style={[
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => navigation.navigate('QCNonconformance')}
+                >
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#D32F2F' }]}
+                  >
+                    <Ionicons name="warning-outline" size={24} color="#fff" />
+                  </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Không phù hợp
+              </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => navigation.navigate('QCReports')}
+                >
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#00897B' }]}
+                  >
+                    <Ionicons name="analytics-outline" size={24} color="#fff" />
+            </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Báo cáo
+                  </Text>
+          </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {(user?.role === 'giam_doc' ||
+            user?.role === 'pho_giam_doc' ||
+            user?.role === 'ky_su') && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                  Lập kế hoạch sản xuất
+                </Text>
+              </View>
+              <View style={styles.menuGrid}>
+            <TouchableOpacity
+                  style={[
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => navigation.navigate('ProductionPlanGantt')}
+                >
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#1976D2' }]}
+                  >
+                    <Ionicons name="calendar-outline" size={24} color="#fff" />
+              </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Gantt
+                  </Text>
+            </TouchableOpacity>
+
+          <TouchableOpacity
+                  style={[
+                    styles.menuCard,
+                    { backgroundColor: theme.card, borderColor: theme.border },
+                  ]}
+                  onPress={() => navigation.navigate('CapacityPlanning')}
+                >
+                  <View
+                    style={[styles.menuIcon, { backgroundColor: '#455A64' }]}
+                  >
+                    <Ionicons
+                      name="speedometer-outline"
+                      size={24}
+                      color="#fff"
+                    />
+            </View>
+                  <Text style={[styles.menuText, { color: theme.text }]}>
+                    Capacity
+                  </Text>
+          </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Đã gom nhóm mục Quản lý kho vào Grid ở trên */}
         </ScrollView>
       )}
     </SafeAreaView>
@@ -1042,8 +1139,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   viewAllText: {
     fontSize: 14,
@@ -1054,11 +1152,11 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
+    elevation: 2,
+    shadowColor: '#334155',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
   },
   cardContent: {
     flexDirection: 'row',
@@ -1159,6 +1257,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 12,
     alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#334155',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 3,
   },
   expenseActionsContainer: {
     flexDirection: 'row',

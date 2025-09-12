@@ -307,6 +307,29 @@ const DirectorDashboardScreen = ({ navigation }) => {
           </View>
           <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.dashboardCard, { backgroundColor: theme.card }]}
+          onPress={() => navigation.navigate('TotalSalaryReport')}
+        >
+          <Ionicons
+            name="wallet-outline"
+            size={24}
+            color="#FF9500"
+            style={styles.cardIcon}
+          />
+          <View style={styles.cardContent}>
+            <Text style={[styles.cardTitle, { color: theme.text }]}>
+              Báo cáo tổng lương
+            </Text>
+            <Text
+              style={[styles.cardDescription, { color: theme.textSecondary }]}
+            >
+              Xem tổng lương phải trả cho nhân viên
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.section}>

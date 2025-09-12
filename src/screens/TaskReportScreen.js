@@ -31,6 +31,7 @@ import {
 } from '../api/requestService';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import wallet from '../api/walletService';
 
 const TaskCard = ({ item, onPress, theme }) => {
   const getStatusColor = (status) => {
@@ -130,6 +131,7 @@ const TaskReportScreen = ({ navigation }) => {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [pendingLeave, setPendingLeave] = useState([]);
   const [pendingAdvance, setPendingAdvance] = useState([]);
+  const [pendingCashIn, setPendingCashIn] = useState([]);
 
   // State for manager tabs
   const [activeManagerView, setActiveManagerView] = useState('my_tasks'); // 'my_tasks', 'staff_pending', 'staff_completed', 'requests'
@@ -192,14 +194,24 @@ const TaskReportScreen = ({ navigation }) => {
         }))
       );
 
-      // 4. Initial pending requests (leave + advance)
-      const [leaveReqs, advanceReqs] = await Promise.all([
+      // 4. Initial pending requests (leave + advance + cashin)
+      const [leaveReqs, advanceReqs, cashInReqs] = await Promise.all([
         fetchPendingLeaveRequests(),
         fetchPendingAdvanceRequests(),
+        wallet.listCashInRequests({ status: 'pending' }),
       ]);
       setPendingLeave(leaveReqs);
       setPendingAdvance(advanceReqs);
-      setPendingRequests([...leaveReqs, ...advanceReqs]);
+      const cashin = (cashInReqs || []).map((r) => ({
+        ...r,
+        requestType: 'cashin',
+      }));
+      setPendingCashIn(cashin);
+      setPendingRequests([
+        ...(leaveReqs || []),
+        ...(advanceReqs || []),
+        ...cashin,
+      ]);
     } catch (err) {
       console.error('Error fetching manager tasks:', err);
       setError('Không thể tải báo cáo công việc.');
@@ -208,7 +220,7 @@ const TaskReportScreen = ({ navigation }) => {
     }
   };
 
-  // Realtime badges for pending requests
+  // Realtime badges for pending requests (leave, advance, cash-in)
   useEffect(() => {
     if (!isManager) return;
     const leaveQ = query(
@@ -217,6 +229,10 @@ const TaskReportScreen = ({ navigation }) => {
     );
     const advQ = query(
       collection(db, 'advance_requests'),
+      where('status', '==', 'pending')
+    );
+    const cashInQ = query(
+      collection(db, 'wallet_requests'),
       where('status', '==', 'pending')
     );
 
@@ -236,17 +252,30 @@ const TaskReportScreen = ({ navigation }) => {
       }));
       setPendingAdvance(items);
     });
+    const un3 = onSnapshot(cashInQ, (snap) => {
+      const items = snap.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        requestType: 'cashin',
+      }));
+      setPendingCashIn(items);
+    });
     return () => {
       un1();
       un2();
+      un3();
     };
   }, [isManager]);
 
   useEffect(() => {
     if (isManager) {
-      setPendingRequests([...(pendingLeave || []), ...(pendingAdvance || [])]);
+      setPendingRequests([
+        ...(pendingLeave || []),
+        ...(pendingAdvance || []),
+        ...(pendingCashIn || []),
+      ]);
     }
-  }, [pendingLeave, pendingAdvance, isManager]);
+  }, [pendingLeave, pendingAdvance, pendingCashIn, isManager]);
 
   const fetchStaffTasks = async () => {
     setLoading(true);
@@ -415,7 +444,9 @@ const TaskReportScreen = ({ navigation }) => {
                       <Text style={[styles.taskLabel, { color: theme.text }]}>
                         {req.requestType === 'leave'
                           ? 'Xin nghỉ phép'
-                          : 'Xin ứng lương'}
+                          : req.requestType === 'advance'
+                          ? 'Xin ứng lương'
+                          : 'Yêu cầu nạp quỹ'}
                       </Text>
                       <View
                         style={[
@@ -439,9 +470,18 @@ const TaskReportScreen = ({ navigation }) => {
                           Từ ngày {formatDateSafe(req.startDate)} đến{' '}
                           {formatDateSafe(req.endDate)} - Lý do: {req.reason}
                         </Text>
-                      ) : (
+                      ) : req.requestType === 'advance' ? (
                         <Text style={{ color: theme.textSecondary }}>
                           Số tiền:{' '}
+                          {Intl.NumberFormat('vi-VN', {
+                            style: 'currency',
+                            currency: 'VND',
+                          }).format(req.amount)}{' '}
+                          - Lý do: {req.reason}
+                        </Text>
+                      ) : (
+                        <Text style={{ color: theme.textSecondary }}>
+                          Nạp quỹ:{' '}
                           {Intl.NumberFormat('vi-VN', {
                             style: 'currency',
                             currency: 'VND',
@@ -467,11 +507,16 @@ const TaskReportScreen = ({ navigation }) => {
                                 req.id,
                                 'approved'
                               );
-                            } else {
+                            } else if (req.requestType === 'advance') {
                               await updateAdvanceRequestStatus(
                                 req.id,
                                 'approved'
                               );
+                            } else {
+                              await wallet.approveCashInRequest({
+                                requestId: req.id,
+                                approverId: currentUser?.uid,
+                              });
                             }
                           } catch (e) {
                             console.warn('Approve failed', e);
@@ -497,11 +542,16 @@ const TaskReportScreen = ({ navigation }) => {
                                 req.id,
                                 'rejected'
                               );
-                            } else {
+                            } else if (req.requestType === 'advance') {
                               await updateAdvanceRequestStatus(
                                 req.id,
                                 'rejected'
                               );
+                            } else {
+                              await wallet.rejectCashInRequest({
+                                requestId: req.id,
+                                approverId: currentUser?.uid,
+                              });
                             }
                           } catch (e) {
                             console.warn('Reject failed', e);

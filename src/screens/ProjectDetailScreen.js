@@ -47,6 +47,7 @@ import { serverTimestamp } from 'firebase/firestore';
 import { useTheme } from '../contexts/ThemeContext';
 import StageAssignmentModal from '../components/StageAssignmentModal';
 import { getDiscussionCount } from '../api/projectDiscussionService';
+import ProjectDocumentsTab from '../components/ProjectDocumentsTab';
 
 // Định nghĩa danh sách công việc cố định
 const TASK_DEFINITIONS = [
@@ -84,6 +85,7 @@ const ProjectDetailScreen = ({ route, navigation }) => {
     useState(null);
   const [isAssigning, setIsAssigning] = useState(false);
   const [discussionCount, setDiscussionCount] = useState(0);
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
     if (project?.tasks?.other?.name) {
@@ -538,6 +540,56 @@ const ProjectDetailScreen = ({ route, navigation }) => {
       </View>
 
       <ScrollView contentContainerStyle={styles.contentContainer}>
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: 8,
+            paddingHorizontal: 12,
+            paddingTop: 8,
+          }}
+        >
+          <TouchableOpacity
+            onPress={() => setActiveTab('overview')}
+            style={{
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 16,
+              backgroundColor: activeTab === 'overview' ? '#2E7D32' : '#fff',
+              borderWidth: 1,
+              borderColor: '#eef1f5',
+            }}
+          >
+            <Text style={{ color: activeTab === 'overview' ? '#fff' : '#111' }}>
+              Tổng quan
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab('documents')}
+            style={{
+              paddingVertical: 8,
+              paddingHorizontal: 12,
+              borderRadius: 16,
+              backgroundColor: activeTab === 'documents' ? '#2E7D32' : '#fff',
+              borderWidth: 1,
+              borderColor: '#eef1f5',
+            }}
+          >
+            <Text
+              style={{ color: activeTab === 'documents' ? '#fff' : '#111' }}
+            >
+              Tài liệu
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {activeTab === 'documents' && (
+          <View style={{ padding: 12 }}>
+            <ProjectDocumentsTab
+              projectId={projectId}
+              onOpenDrive={(item) => {}}
+            />
+          </View>
+        )}
         {/* Project Header */}
         <View style={styles.projectHeader}>
           <View style={styles.projectHeaderTop}>

@@ -79,12 +79,32 @@ import AssignSalaryScreen from '../screens/AssignSalaryScreen';
 // Import màn hình quản lý lương
 import FixedFeesManagementScreen from '../screens/FixedFeesManagementScreen';
 import SalarySlipCreationScreen from '../screens/SalarySlipCreationScreen';
+import TotalSalaryReportScreen from '../screens/TotalSalaryReportScreen';
+import MachinesManagementScreen from '../screens/MachinesManagementScreen';
+import MaintenanceScheduleScreen from '../screens/MaintenanceScheduleScreen';
+import MaintenanceLogsScreen from '../screens/MaintenanceLogsScreen';
+import MachineIncidentsScreen from '../screens/MachineIncidentsScreen';
+import QCChecklistsScreen from '../screens/QCChecklistsScreen';
+import QCChecklistDetailScreen from '../screens/QCChecklistDetailScreen';
+import QCInspectionsScreen from '../screens/QCInspectionsScreen';
+import QCNonconformanceScreen from '../screens/QCNonconformanceScreen';
+import QCReportsScreen from '../screens/QCReportsScreen';
+import ProductionPlanGanttScreen from '../screens/ProductionPlanGanttScreen';
+import CapacityPlanningScreen from '../screens/CapacityPlanningScreen';
+import ProjectProfitReportScreen from '../screens/ProjectProfitReportScreen';
+import WorkerPerformanceReportScreen from '../screens/WorkerPerformanceReportScreen';
+import SupplierAnalysisReportScreen from '../screens/SupplierAnalysisReportScreen';
+import EmployeeTaskBoardScreen from '../screens/EmployeeTaskBoardScreen';
 
 // Import expense tracking screens
 import ExpenseListScreen from '../screens/ExpenseListScreen';
 
 // Import the AddCompanyExpenseScreen
 import AddCompanyExpenseScreen from '../screens/AddCompanyExpenseScreen';
+import CompanyExpensesScreen from '../screens/CompanyExpensesScreen';
+import WalletScreen from '../screens/WalletScreen';
+import CashInRequestScreen from '../screens/CashInRequestScreen';
+import PendingCashInApprovalsScreen from '../screens/PendingCashInApprovalsScreen';
 
 // Import material management screen
 import MaterialManagementScreen from '../screens/MaterialManagementScreen';
@@ -112,6 +132,9 @@ import AdvanceSalaryScreen from '../screens/AdvanceSalaryScreen';
 
 // Import Project Discussion screen
 import ProjectDiscussionScreen from '../screens/ProjectDiscussionScreen';
+
+// Import MachinesManagementScreen
+// (đã import ở trên)
 
 // Tạo Stack Navigator cho quản lý dự án
 const ProjectStack = createNativeStackNavigator();
@@ -774,6 +797,26 @@ const AppNavigator = () => {
               options={{ headerShown: false }}
             />
             <Stack.Screen
+              name="CompanyExpenses"
+              component={CompanyExpensesScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="Wallet"
+              component={WalletScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="CashInRequest"
+              component={CashInRequestScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="PendingCashInApprovals"
+              component={PendingCashInApprovalsScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
               name="AddCompanyExpense"
               component={AddCompanyExpenseScreen}
               options={{ headerShown: false }}
@@ -871,6 +914,89 @@ const AppNavigator = () => {
               name="SalarySlipCreation"
               component={SalarySlipCreationScreen}
               options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="TotalSalaryReport"
+              component={TotalSalaryReportScreen}
+              options={{ headerShown: false }}
+            />
+            {/* Machines & Maintenance */}
+            <Stack.Screen
+              name="MachinesManagement"
+              component={MachinesManagementScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="MaintenanceSchedule"
+              component={MaintenanceScheduleScreen}
+              options={{ title: 'Lịch bảo trì', headerShown: true }}
+            />
+            <Stack.Screen
+              name="MaintenanceLogs"
+              component={MaintenanceLogsScreen}
+              options={{ title: 'Nhật ký bảo trì', headerShown: true }}
+            />
+            <Stack.Screen
+              name="MachineIncidents"
+              component={MachineIncidentsScreen}
+              options={{ title: 'Sự cố máy móc', headerShown: true }}
+            />
+
+            {/* QC module */}
+            <Stack.Screen
+              name="QCChecklists"
+              component={QCChecklistsScreen}
+              options={{ title: 'QC Checklists', headerShown: true }}
+            />
+            <Stack.Screen
+              name="QCChecklistDetail"
+              component={QCChecklistDetailScreen}
+              options={{ title: 'Chi tiết Checklist', headerShown: true }}
+            />
+            <Stack.Screen
+              name="QCInspections"
+              component={QCInspectionsScreen}
+              options={{ title: 'Kiểm tra chất lượng', headerShown: true }}
+            />
+            <Stack.Screen
+              name="QCNonconformance"
+              component={QCNonconformanceScreen}
+              options={{ title: 'Không phù hợp', headerShown: true }}
+            />
+            <Stack.Screen
+              name="QCReports"
+              component={QCReportsScreen}
+              options={{ title: 'Báo cáo chất lượng', headerShown: true }}
+            />
+            <Stack.Screen
+              name="ProductionPlanGantt"
+              component={ProductionPlanGanttScreen}
+              options={{ title: 'Biểu đồ Gantt', headerShown: true }}
+            />
+            <Stack.Screen
+              name="CapacityPlanning"
+              component={CapacityPlanningScreen}
+              options={{ title: 'Năng lực sản xuất', headerShown: true }}
+            />
+            <Stack.Screen
+              name="ProjectProfitReport"
+              component={ProjectProfitReportScreen}
+              options={{ title: 'Lợi nhuận dự án', headerShown: true }}
+            />
+            <Stack.Screen
+              name="WorkerPerformanceReport"
+              component={WorkerPerformanceReportScreen}
+              options={{ title: 'Hiệu suất nhân công', headerShown: true }}
+            />
+            <Stack.Screen
+              name="SupplierAnalysisReport"
+              component={SupplierAnalysisReportScreen}
+              options={{ title: 'Phân tích nhà cung cấp', headerShown: true }}
+            />
+            <Stack.Screen
+              name="EmployeeTaskBoard"
+              component={EmployeeTaskBoardScreen}
+              options={{ title: 'Bảng công việc', headerShown: true }}
             />
           </>
         ) : (
