@@ -239,7 +239,7 @@ const HomeScreen = ({ navigation }) => {
               onPress={() => handleModulePress(module)}
             >
               <View style={[styles.moduleIconContainer, { backgroundColor: module.color + '20' }]}>
-                <Ionicons name={module.icon} size={32} color={module.color} />
+                <Ionicons name={module.icon} size={28} color={module.color} />
               </View>
               <Text style={[styles.moduleTitle, { color: theme.text }]}>
                 {module.title}
@@ -436,27 +436,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    gap: 16,
+    gap: 12,
   },
   moduleCard: {
     width: '48%',
-    padding: 20,
-    borderRadius: 16,
+    padding: 16,
+    borderRadius: 12,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
-    marginBottom: 16,
+    shadowRadius: 4,
+    elevation: 3,
+    marginBottom: 12,
   },
   moduleIconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   moduleTitle: {
     fontSize: 16,
